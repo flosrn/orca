@@ -1,0 +1,559 @@
+name: fork nightly
+
+# Le canal fork d'Orca, entretenu tout seul. Lis README.md sur cette branche
+# d'abord : il explique pourquoi la branche par défaut ne contient pas de code,
+# quelle branche la CI possède, et par où on sort de ce dispositif.
+#
+# Ce fichier ne vit QUE sur `fork-pipeline`. `schedule` ne se déclenche que
+# depuis la branche par défaut du dépôt, et la branche patch est gelée.
+
+on:
+  schedule:
+    # 04:30 UTC = 06:30 Paris l'été, 05:30 l'hiver. Un seul cron, pas de jumeau
+    # DST : ce qui compte est « avant que Flo ouvre la machine », pas l'heure
+    # exacte. Minute 30 pour ne pas se coller à la vague de crons de minute 0.
+    - cron: '30 4 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Builder même si ni upstream ni le patch n'ont bougé
+        type: boolean
+        default: false
+
+# Lecture par défaut ; les deux jobs qui écrivent (push de `fork-channel`,
+# création de la release) demandent `contents: write` pour eux seuls.
+permissions:
+  contents: read
+
+# Pas de cancel-in-progress : un run annulé au milieu laisse un tag sans
+# artefacts, et deux runs concurrents se disputeraient le force-push.
+concurrency:
+  group: fork-nightly
+  cancel-in-progress: false
+
+env:
+  PATCH_BRANCH: feat/argv-worker-start
+  CHANNEL_BRANCH: fork-channel
+  UPSTREAM_URL: https://github.com/stablyai/orca.git
+  # Le Mac a mesuré que Node 22 casse le packaging de node-pty et que 24.11.1
+  # passe. `engines.node` du dépôt dit « 24 », ce qui flotterait sur la dernière
+  # 24.x : on épingle la version exacte que ce canal a exercée.
+  NODE_VERSION: 24.11.1
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Rejouer le patch sur upstream du jour. Le seul job qui écrit une branche.
+  # ---------------------------------------------------------------------------
+  rebase:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    outputs:
+      should_build: ${{ steps.plan.outputs.should_build }}
+      sha: ${{ steps.rebase.outputs.sha }}
+      tag: ${{ steps.rebase.outputs.tag }}
+      version: ${{ steps.rebase.outputs.version }}
+      upstream_sha: ${{ steps.plan.outputs.upstream_sha }}
+      patch_sha: ${{ steps.plan.outputs.patch_sha }}
+      identity: ${{ steps.plan.outputs.identity }}
+    steps:
+      - name: Checkout la branche de pilotage (cache rerere)
+        uses: actions/checkout@v6
+        with:
+          path: pipeline
+          # Ce checkout ne pousse rien ; ne pas laisser traîner son credential.
+          persist-credentials: false
+
+      - name: Checkout la branche patch
+        uses: actions/checkout@v6
+        with:
+          path: src
+          ref: ${{ env.PATCH_BRANCH }}
+          # Le rebase a besoin de l'historique complet pour trouver la
+          # merge-base avec upstream : une profondeur tronquée la rate.
+          fetch-depth: 0
+
+      # Décider AVANT de builder : upstream est souvent immobile la nuit, et
+      # rebuilder un couple (upstream, patch) déjà publié coûte deux runners et
+      # ajoute un tag qui ne dit rien de neuf.
+      - name: Y a-t-il quelque chose de neuf
+        id: plan
+        working-directory: src
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCED: ${{ github.event_name == 'workflow_dispatch' && inputs.force }}
+        run: |
+          set -euo pipefail
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch --no-tags --quiet upstream main
+          upstream_sha="$(git rev-parse upstream/main)"
+          patch_sha="$(git rev-parse HEAD)"
+          identity="${upstream_sha:0:12}+${patch_sha:0:12}"
+          {
+            echo "upstream_sha=$upstream_sha"
+            echo "patch_sha=$patch_sha"
+            echo "identity=$identity"
+          } >>"$GITHUB_OUTPUT"
+
+          if [ "$FORCED" = "true" ]; then
+            echo "should_build=true" >>"$GITHUB_OUTPUT"
+            echo "Dispatch forcé : on build $identity."
+            exit 0
+          fi
+
+          # L'identité du couple est inscrite dans le corps de la release
+          # précédente. Les drafts sont exclus : un draft n'a jamais été
+          # consommé, donc le traiter comme « déjà publié » sauterait un build
+          # qui n'a en réalité jamais abouti.
+          last="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 20 --exclude-drafts \
+            --json tagName --jq '[.[] | select(.tagName | startswith("fork-"))][0].tagName // empty')"
+          if [ -z "$last" ]; then
+            echo "should_build=true" >>"$GITHUB_OUTPUT"
+            echo "Aucune release fork antérieure : on build $identity."
+            exit 0
+          fi
+          previous="$(gh release view "$last" --repo "$GITHUB_REPOSITORY" --json body \
+            --jq '.body | capture("source-identity: `(?<id>[0-9a-f+]+)`") | .id' 2>/dev/null || true)"
+          if [ "$previous" = "$identity" ]; then
+            echo "should_build=false" >>"$GITHUB_OUTPUT"
+            echo "$last porte déjà $identity — rien n'a bougé, on s'arrête."
+          else
+            echo "should_build=true" >>"$GITHUB_OUTPUT"
+            echo "$last portait ${previous:-<illisible>}, maintenant $identity — on build."
+          fi
+
+      - name: Rejouer le patch sur upstream/main
+        id: rebase
+        if: steps.plan.outputs.should_build == 'true'
+        working-directory: src
+        env:
+          UPSTREAM_SHA: ${{ steps.plan.outputs.upstream_sha }}
+        run: |
+          set -euo pipefail
+          git config user.name 'orca fork pipeline'
+          git config user.email 'fork-pipeline@users.noreply.github.com'
+
+          # rerere rejoue une résolution qu'un HUMAIN a déjà faite sur les mêmes
+          # hunks — il n'invente rien. Sans le cache, tout conflit arrête le run,
+          # ce qui est le comportement voulu par défaut.
+          git config rerere.enabled true
+          git config rerere.autoUpdate true
+          mkdir -p .git/rr-cache
+          if [ -d ../pipeline/rerere-cache ] && [ -n "$(ls -A ../pipeline/rerere-cache)" ]; then
+            cp -R ../pipeline/rerere-cache/. .git/rr-cache/
+            echo "rerere: $(find .git/rr-cache -name postimage\* | wc -l) résolution(s) chargée(s)."
+          else
+            echo "rerere: aucun cache publié."
+          fi
+
+          # La plage transportée, et RIEN de plus : les commits que la branche
+          # patch ajoute à sa base upstream. Pas de merge, pas de squash, pas
+          # d'ajout — la surface du patch est gelée et cette ligne est ce qui
+          # le garantit.
+          base="$(git merge-base "$UPSTREAM_SHA" HEAD)"
+          mapfile -t commits < <(git rev-list --reverse "$base..HEAD")
+          echo "Base commune : $base"
+          echo "Commits transportés : ${#commits[@]}"
+          git log --oneline --no-decorate "$base..HEAD"
+          if [ "${#commits[@]}" -eq 0 ]; then
+            echo "::error::la branche patch n'ajoute aucun commit à sa base — rien à rejouer"
+            exit 1
+          fi
+
+          git checkout -B "$CHANNEL_BRANCH" "$UPSTREAM_SHA"
+
+          # `cherry-pick` s'arrête au premier conflit. rerere.autoUpdate stage
+          # ce qu'il sait rejouer, donc « plus aucun fichier en conflit » ==
+          # « rerere a tout résolu » et on peut continuer. S'il en reste un, la
+          # décision est humaine : on échoue en le nommant.
+          set +e
+          git cherry-pick -x "${commits[@]}"
+          status=$?
+          while [ $status -ne 0 ]; do
+            unresolved="$(git diff --name-only --diff-filter=U)"
+            if [ -n "$unresolved" ]; then
+              set -e
+              {
+                echo "### Conflit de rebase — résolution humaine requise"
+                echo
+                echo "Le patch ne se rejoue plus tel quel sur \`upstream/main\` (\`$UPSTREAM_SHA\`)."
+                echo
+                echo "Fichiers en conflit :"
+                echo '```'
+                echo "$unresolved"
+                echo '```'
+                echo "Résous-le une fois en local et publie la résolution dans \`rerere-cache/\` :"
+                echo "les runs suivants la rejoueront seuls (mode opératoire dans le README de \`fork-pipeline\`)."
+              } >>"$GITHUB_STEP_SUMMARY"
+              echo "::error::conflit de rebase sur : $(echo "$unresolved" | tr '\n' ' ')"
+              exit 1
+            fi
+            # Rien en conflit mais rien à committer non plus : la résolution a
+            # rendu ce commit vide (upstream a déjà pris ce morceau). On le saute.
+            if git diff --cached --quiet; then
+              git cherry-pick --skip
+            else
+              git -c core.editor=true cherry-pick --continue
+            fi
+            status=$?
+          done
+          set -e
+
+          sha="$(git rev-parse HEAD)"
+          version="$(node -p "require('./package.json').version")"
+          tag="fork-$(date -u +%Y%m%d-%H%M)-${sha:0:12}"
+          {
+            echo "sha=$sha"
+            echo "tag=$tag"
+            echo "version=$version"
+          } >>"$GITHUB_OUTPUT"
+          echo "Rejoué en $sha (version $version), tag prévu $tag."
+
+          # Force-push assumé : cette branche est reconstruite depuis upstream à
+          # chaque run et la CI en est le seul auteur. `--force-with-lease` n'y
+          # protégerait rien (l'ancien head n'est jamais un ancêtre du nouveau).
+          git push --force origin "HEAD:refs/heads/$CHANNEL_BRANCH"
+
+  # ---------------------------------------------------------------------------
+  # 2. Les deux répertoires que le patch touche, et le typecheck complet.
+  # ---------------------------------------------------------------------------
+  test:
+    needs: rebase
+    if: needs.rebase.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.rebase.outputs.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      # Le postinstall des modules natifs échoue avec la copie de node-gyp
+      # embarquée par pnpm sur les runners Linux (cf. release-cut.yml amont).
+      - name: node-gyp externe
+        run: |
+          npm install -g node-gyp@11.5.0
+          echo "npm_config_node_gyp=$(npm root -g)/node-gyp/bin/node-gyp.js" >>"$GITHUB_ENV"
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm run typecheck
+      # Ciblé, pas la suite entière : le patch ne touche que ces deux arbres
+      # (12 fichiers), et une suite complète de ~2000 tests transformerait une
+      # boucle nocturne en source de faux rouges venus d'ailleurs.
+      - name: Tests orchestration + rpc
+        run: |
+          node config/scripts/ensure-native-runtime.mjs --runtime=node
+          pnpm exec vitest run --config config/vitest.config.ts \
+            src/main/runtime/orchestration src/main/runtime/rpc
+
+  # ---------------------------------------------------------------------------
+  # 3a. macOS arm64, NON signé. La signature est refaite sur le Mac de Flo par
+  #     update.sh, avec un certificat local dont la clé privée ne bouge pas :
+  #     c'est lui qui porte les grants TCC, aucune CI ne peut le remplacer.
+  # ---------------------------------------------------------------------------
+  build-mac:
+    needs: [rebase, test]
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.rebase.outputs.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Cache electron-builder
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: electron-builder-mac-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: electron-builder-mac-
+      - name: Install
+        uses: nick-fields/retry@v4
+        with:
+          timeout_minutes: 15
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: pnpm install --frozen-lockfile
+      # `build:release` construit aussi les trois helpers Swift (computer-use,
+      # keyboard-layout, notification-status) que `mac.extraResources` /
+      # `extraFiles` exigent : sans eux electron-builder échoue au packaging.
+      # Aucun secret de télémétrie n'est fourni, donc ORCA_BUILD_IDENTITY reste
+      # nul et le build est muet — ce qu'on veut d'un artefact non officiel.
+      - name: Build
+        run: pnpm build:release
+      - name: Config electron-builder du canal fork
+        run: |
+          cat >config/electron-builder.fork.config.cjs <<'EOF'
+          // Généré par fork-nightly.yml, jamais commité sur la branche patch.
+          // Voir le README de `fork-pipeline`.
+          const base = require('./electron-builder.config.cjs')
+          module.exports = {
+            ...base,
+            // publish: null => aucun app-update.yml dans le bundle. Un build fork
+            // qui interroge les releases d'upstream proposerait de s'écraser
+            // lui-même avec l'officiel.
+            publish: null,
+            // Un seul artefact, nommé sans la version : update.sh et
+            // versions.yml n'ont alors qu'un `kind` à connaître, pas un nom
+            // qui change à chaque bump de package.json.
+            mac: {
+              ...base.mac,
+              artifactName: 'orca-macos-${arch}.${ext}',
+              target: [{ target: 'zip', arch: ['arm64'] }]
+            }
+          }
+          EOF
+          cat config/electron-builder.fork.config.cjs
+      - name: Package (zip arm64, non signé)
+        env:
+          # Sans ça electron-builder irait chercher une identité Developer ID
+          # dans le keychain du runner et échouerait sur son absence.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: pnpm exec electron-builder --config config/electron-builder.fork.config.cjs --mac zip --arm64 --publish never
+      - name: Aucun app-update.yml dans l'artefact
+        run: |
+          set -euo pipefail
+          zip="dist/orca-macos-arm64.zip"
+          test -f "$zip" || { echo "::error::$zip absent"; ls -la dist; exit 1; }
+          if unzip -l "$zip" | grep -q 'app-update\.yml'; then
+            echo "::error::app-update.yml présent dans $zip — le build s'auto-updaterait vers l'officiel"
+            exit 1
+          fi
+          echo "OK: pas d'app-update.yml. $(du -h "$zip")"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mac-arm64
+          path: dist/orca-macos-arm64.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # 3b. Linux amd64 .deb — ce que le VPS consomme (curl + dpkg).
+  #
+  # `ubuntu-latest` et non un conteneur `ubuntu:20.04` : c'est la recette de
+  # release d'upstream (release-cut.yml, matrice `build`, `os: ubuntu-latest`).
+  # Le plancher glibc 2.31 n'est pas tenu par l'image du runner mais par le hook
+  # `afterPack` du packager — `verifyLinuxGlibcFloor`, dans
+  # config/electron-builder.config.cjs — que la config dérivée hérite via
+  # `...base` : un natif compilé contre un symbole plus récent fait échouer le
+  # packaging, sur n'importe quel runner. Le conteneur 20.04 d'upstream sert à
+  # un job de TESTS (`skill-sharing-linux-floor-release-gate`), pas au build.
+  # ---------------------------------------------------------------------------
+  build-linux:
+    needs: [rebase, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.rebase.outputs.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: node-gyp externe
+        run: |
+          npm install -g node-gyp@11.5.0
+          echo "npm_config_node_gyp=$(npm root -g)/node-gyp/bin/node-gyp.js" >>"$GITHUB_ENV"
+      - name: Cache electron-builder
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: electron-builder-linux-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: electron-builder-linux-
+      - name: Install
+        uses: nick-fields/retry@v4
+        with:
+          timeout_minutes: 15
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: pnpm install --frozen-lockfile
+      # `build:release` vérifie le provider computer-use Linux en important les
+      # bindings AT-SPI, absents des runners Ubuntu par défaut.
+      - name: Dépendances du provider computer-use Linux
+        run: sudo apt-get update && sudo apt-get install -y python3-gi gir1.2-atspi-2.0 at-spi2-core xclip xdotool
+      - name: Build
+        run: pnpm build:release
+      - name: Config electron-builder du canal fork
+        run: |
+          cat >config/electron-builder.fork.config.cjs <<'EOF'
+          // Généré par fork-nightly.yml, jamais commité. Voir README de fork-pipeline.
+          const base = require('./electron-builder.config.cjs')
+          module.exports = {
+            ...base,
+            // publish: null => aucun app-update.yml dans le paquet.
+            publish: null
+          }
+          EOF
+      - name: Package (.deb amd64)
+        run: |
+          node config/scripts/ensure-native-runtime.mjs --runtime=electron
+          pnpm exec electron-builder --config config/electron-builder.fork.config.cjs --linux deb --x64 --publish never
+      - name: Aucun app-update.yml dans l'artefact
+        run: |
+          set -euo pipefail
+          deb="$(ls dist/*.deb)"
+          if dpkg-deb -c "$deb" | grep -q 'app-update\.yml'; then
+            echo "::error::app-update.yml présent dans $deb"
+            exit 1
+          fi
+          echo "OK: pas d'app-update.yml. $(du -h "$deb")"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-amd64
+          path: dist/*.deb
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # 4. Une release taggée, avec un sha256 par artefact. update.sh et
+  #    sync-toolchain.ts vérifient ces sommes avant d'installer quoi que ce soit.
+  # ---------------------------------------------------------------------------
+  release:
+    needs: [rebase, test, build-mac, build-linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Publier la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.rebase.outputs.tag }}
+          SHA: ${{ needs.rebase.outputs.sha }}
+          VERSION: ${{ needs.rebase.outputs.version }}
+          IDENTITY: ${{ needs.rebase.outputs.identity }}
+          UPSTREAM_SHA: ${{ needs.rebase.outputs.upstream_sha }}
+          PATCH_SHA: ${{ needs.rebase.outputs.patch_sha }}
+        run: |
+          set -euo pipefail
+          cd assets
+          ls -la
+          # Un fichier de sommes, une somme par plateforme. Jamais une somme
+          # unique pour deux artefacts : ce sont deux binaires différents.
+          sha256sum ./* | sed 's| \./| |' >SHA256SUMS
+          cat SHA256SUMS
+          mac_sha="$(awk '/orca-macos-arm64\.zip$/{print $1}' SHA256SUMS)"
+          deb_name="$(awk '/\.deb$/{print $2}' SHA256SUMS)"
+          deb_sha="$(awk '/\.deb$/{print $1}' SHA256SUMS)"
+          test -n "$mac_sha" && test -n "$deb_sha"
+
+          # Hors du répertoire d'assets : tout ce qui traîne dedans finirait
+          # attaché à la release.
+          cat >"$RUNNER_TEMP/notes.md" <<EOF
+          Build automatique du canal fork — le patch \`worker-start\` (PR upstream
+          stablyai/orca#16425) rejoué sur \`upstream/main\` du jour.
+
+          - upstream : \`$UPSTREAM_SHA\`
+          - patch : \`$PATCH_SHA\`
+          - résultat : \`$SHA\` (branche \`fork-channel\`)
+          - version electron-builder : \`$VERSION\`
+          - source-identity: \`$IDENTITY\`
+
+          | artefact | sha256 |
+          | --- | --- |
+          | \`orca-macos-arm64.zip\` | \`$mac_sha\` |
+          | \`$deb_name\` | \`$deb_sha\` |
+
+          **Le zip macOS n'est pas signé.** Ne l'installe pas à la main :
+          \`~/orca-fork/update.sh\` purge la quarantine et le re-signe avec le
+          certificat local \`Orca Dev\` auquel les grants TCC sont épinglés.
+          Un bundle installé sans cette étape perd tous ses accès fichiers.
+
+          Le VPS consomme le \`.deb\` via \`sync-toolchain.ts --apply\`, qui
+          vérifie le sha256 épinglé dans \`agent/versions.yml\`.
+          EOF
+
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" --target "$SHA" \
+            "orca-macos-arm64.zip" "$deb_name" SHA256SUMS
+          echo "Release $TAG publiée." >>"$GITHUB_STEP_SUMMARY"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url --jq .url >>"$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # 5. L'alerte. Elle ne rattrape rien : elle dit qu'une main humaine est
+  #    nécessaire, le jour où le rebase ou le build cède.
+  # ---------------------------------------------------------------------------
+  alert:
+    needs: [rebase, test, build-mac, build-linux, release]
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REBASE: ${{ needs.rebase.result }}
+          TESTS: ${{ needs.test.result }}
+          MAC: ${{ needs.build-mac.result }}
+          LINUX: ${{ needs.build-linux.result }}
+          RELEASE: ${{ needs.release.result }}
+        run: |
+          set -euo pipefail
+          text="Orca fork nightly ÉCHEC
+          rebase=$REBASE tests=$TESTS mac=$MAC linux=$LINUX release=$RELEASE
+          $RUN_URL"
+          if [ "$REBASE" = "failure" ]; then
+            text="$text
+          Probable conflit de rebase : le résumé du run liste les fichiers."
+          fi
+          # Un canal d'alerte non branché ne vaut pas mieux que pas d'alerte : il
+          # vaut moins, parce qu'il donne l'illusion d'une surveillance. On le dit
+          # fort et on n'invente pas de destinataire par défaut. Le run reste
+          # rouge de toute façon — c'est le job échoué qui porte le verdict.
+          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
+            {
+              echo "### Alerte Telegram NON envoyée — secret manquant"
+              echo
+              echo '```bash'
+              echo "gh secret set TELEGRAM_BOT_TOKEN --repo $GITHUB_REPOSITORY"
+              echo "gh secret set TELEGRAM_CHAT_ID  --repo $GITHUB_REPOSITORY"
+              echo '```'
+              echo
+              echo "Message qui aurait été envoyé :"
+              echo '```'
+              echo "$text"
+              echo '```'
+            } >>"$GITHUB_STEP_SUMMARY"
+            echo "::warning::TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID absents — alerte non envoyée"
+            exit 0
+          fi
+          curl -fsS -o /dev/null \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${text}"
+          echo "Alerte Telegram envoyée." >>"$GITHUB_STEP_SUMMARY"
