@@ -84,17 +84,21 @@ describe('recovery of rehydrated client-hosted pages', () => {
 
   it('leaves a rehydrated row held while its workspace has no route yet', async () => {
     const { authority, pages, notifyWorkspace } = harness()
+    const releaseUnrecoverablePage = vi.fn()
 
     await recoverUnavailableRuntimeBrowserClientPages({
       lease: lease(),
       authority,
       pages,
       notifyWorkspace,
+      releaseUnrecoverablePage,
       resolveExecutionHostKey: async () => ({ status: 'unavailable' })
     })
 
-    // "The route is not up yet" is a not-now, never permission to retire the page.
+    // "The route is not up yet" is a not-now, never permission to retire the page — the
+    // distinction the workspace-gone discriminant exists to make.
     expect(authority.createClientPage).not.toHaveBeenCalled()
+    expect(releaseUnrecoverablePage).not.toHaveBeenCalled()
     expect(pages.getPage('page-a')?.placement).toEqual(RESTORED_CLIENT_HOSTED_BROWSER_PLACEMENT)
     expect(notifyWorkspace).not.toHaveBeenCalled()
   })
@@ -120,13 +124,17 @@ describe('recovery of rehydrated client-hosted pages', () => {
 
   it('never recovers a rehydrated row without a way to resolve the current route key', async () => {
     const { authority, pages } = harness()
+    const releaseUnrecoverablePage = vi.fn()
 
     await recoverUnavailableRuntimeBrowserClientPages({
       lease: lease(),
       authority,
       pages,
-      notifyWorkspace: vi.fn()
+      notifyWorkspace: vi.fn(),
+      releaseUnrecoverablePage
     })
+
+    expect(releaseUnrecoverablePage).not.toHaveBeenCalled()
 
     // Replaying the persisted key is not a fallback: the client answers a predecessor's key with
     // browser_client_network_route_authority_mismatch.
