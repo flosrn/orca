@@ -102,14 +102,21 @@ deux artefacts. Sans ça, la propriété tiendrait par croyance.
 
 ## Secrets attendus
 
-Un seul canal d'alerte, deux secrets. Sans eux le workflow **reste rouge** quand
-il échoue, il perd seulement la notification — un canal d'alerte muet qui donne
-l'illusion d'une surveillance serait pire que pas d'alerte.
+Sans `FORK_PUSH_TOKEN`, le job de rebase s'arrête **avant** de publier : un
+tag GitHub dont l'arbre contient les workflows d'upstream est rejeté avec
+`GITHUB_TOKEN` (pas de scope `workflow`). On ne tague pas autre chose que
+ce SHA — donc pas de release tant que le secret n'est pas là.
 
 ```bash
+gh secret set FORK_PUSH_TOKEN --repo flosrn/orca
+# PAT classic, scopes repo + workflow
 gh secret set TELEGRAM_BOT_TOKEN --repo flosrn/orca
 gh secret set TELEGRAM_CHAT_ID  --repo flosrn/orca
 ```
+
+Sans les deux secrets Telegram le workflow **reste rouge** quand il échoue, il
+perd seulement la notification — un canal d'alerte muet qui donne l'illusion
+d'une surveillance serait pire que pas d'alerte.
 
 ## Chemin de sortie
 

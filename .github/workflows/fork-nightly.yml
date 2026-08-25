@@ -48,7 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
-      contents: write
+      contents: read
     outputs:
       should_build: ${{ steps.plan.outputs.should_build }}
       sha: ${{ steps.rebase.outputs.sha }}
@@ -129,6 +129,7 @@ jobs:
         working-directory: src
         env:
           UPSTREAM_SHA: ${{ steps.plan.outputs.upstream_sha }}
+          FORK_PUSH_TOKEN: ${{ secrets.FORK_PUSH_TOKEN }}
         run: |
           set -euo pipefail
           git config user.name 'orca fork pipeline'
@@ -200,10 +201,11 @@ jobs:
           done
           set -e
 
-          # GITHUB_TOKEN n'a pas le scope `workflow`. Une branche nouvelle
-          # portant les ~30 workflows d'upstream (absents de `fork-pipeline`)
-          # est rejetée. Un tag, lui, n'installe aucun workflow : on pousse
-          # le SHA exact (upstream + patch, rien de plus) sous refs/tags/.
+          # GITHUB_TOKEN n'a pas le scope `workflow` : pousser un tag (ou une
+          # branche) dont l'arbre contient les workflows d'upstream est rejeté.
+          # Le SHA poussé est exact — upstream + patch, rien de plus. Sans le
+          # PAT, on échoue ici : on ne publie pas une release taggée sur autre
+          # chose que cet arbre.
           sha="$(git rev-parse HEAD)"
           version="$(node -p "require('./package.json').version")"
           tag="fork-$(date -u +%Y%m%d-%H%M)-${sha:0:12}"
@@ -214,7 +216,20 @@ jobs:
           } >>"$GITHUB_OUTPUT"
           echo "Rejoué en $sha (version $version), tag prévu $tag."
 
-          git push origin "$sha:refs/tags/$tag"
+          if [ -z "${FORK_PUSH_TOKEN:-}" ]; then
+            {
+              echo "### Secret manquant — impossible de pousser le SHA rejoué"
+              echo
+              echo '```bash'
+              echo "gh secret set FORK_PUSH_TOKEN --repo $GITHUB_REPOSITORY"
+              echo '```'
+              echo
+              echo "PAT classic, scopes \`repo\` + \`workflow\`. GITHUB_TOKEN ne suffit pas."
+            } >>"$GITHUB_STEP_SUMMARY"
+            echo "::error::FORK_PUSH_TOKEN absent — gh secret set FORK_PUSH_TOKEN --repo $GITHUB_REPOSITORY"
+            exit 1
+          fi
+          git push "https://x-access-token:${FORK_PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$sha:refs/tags/$tag"
 
   # ---------------------------------------------------------------------------
   # 2. Les deux répertoires que le patch touche, et le typecheck complet.
