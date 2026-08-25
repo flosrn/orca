@@ -1,6 +1,10 @@
 /**
- * Drives the real persistence seam: a real OrcaRuntimeService, the real page registry, and the
- * real session-tabs announcement every client-page mutation already goes through.
+ * Drives the runtime's own wiring: a real OrcaRuntimeService, the real page registry, and the real
+ * session-tabs announcement every client-page mutation already goes through.
+ *
+ * The store here is a fake holding one session object -- enough to prove the runtime writes and
+ * reads back through its own seam, and nothing about the Store's write paths. Those are covered by
+ * store-runtime-authored-session-writes.test.ts, which drives the real Store.
  *
  * The unit tests around the persistence module can only prove it behaves once called. Whether it
  * is called at all -- and whether the session it writes is the one a restarted runtime reads back
