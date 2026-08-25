@@ -8,6 +8,10 @@ export function resolveTerminalOrchestrationCliCommand(args: {
   connectionId: string | null
   isWsl: boolean | null | undefined
   worktreeId: string
+  // Why: pre-spawn callers know the resolved workspace path but may not have
+  // a repo-shaped worktree id (folder workspaces use opaque ids). Prefer this
+  // explicit fact over decoding the id.
+  worktreePath?: string
   projectRuntime?: ProjectExecutionRuntimeResolution
   runtimeCliCommand?: OrchestrationCliCommand
 }): OrchestrationCliCommand {
@@ -24,6 +28,7 @@ export function resolveTerminalOrchestrationCliCommand(args: {
     return 'orca-ide'
   }
 
-  const worktreePath = splitWorktreeIdForFilesystem(args.worktreeId)?.worktreePath
+  const worktreePath =
+    args.worktreePath ?? splitWorktreeIdForFilesystem(args.worktreeId)?.worktreePath
   return worktreePath && isWslUncPath(worktreePath) ? 'orca-ide' : 'orca'
 }
