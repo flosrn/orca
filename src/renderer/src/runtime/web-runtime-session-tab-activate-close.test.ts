@@ -299,19 +299,6 @@ describe('web runtime session tab actions', () => {
     ).resolves.toBe(outcome)
   })
 
-  it('never reports an activate as a forgotten tab, which has nothing to fall back to', async () => {
-    const runtimeCall = vi.fn().mockResolvedValueOnce({
-      id: 'activate',
-      ok: false,
-      error: { code: 'tab_not_found', message: 'tab_not_found' }
-    })
-    vi.stubGlobal('window', { api: { runtimeEnvironments: { call: runtimeCall } } })
-
-    await expect(
-      activateWebRuntimeSessionTab({ worktreeId: WORKTREE_ID, tabId: 'local-browser-unified' })
-    ).resolves.toBe(false)
-  })
-
   it('fails closed when reconnect routes a lifecycle close to an older host', async () => {
     const runtimeCall = vi
       .fn()

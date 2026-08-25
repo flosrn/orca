@@ -143,18 +143,21 @@ describe('client-hosted browser page persistence', () => {
     // outcome alone cannot tell a skipped attempt from a rejected one — and only the skip is
     // silent. A rejected one would log on every start for every page the registry already had.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    let warnings = -1
     try {
       rehydrateClientHostedBrowserPages(live, {
         listWorkspaceSessions: () => [store.session],
         isKnownWorktree: () => true,
         now: () => NOW
       })
+      // Read before restoring: mockRestore also resets the recorded calls.
+      warnings = warn.mock.calls.length
     } finally {
       warn.mockRestore()
     }
 
     expect(live.getPage('page-a')?.placement).toEqual(livePlacement)
-    expect(warn).not.toHaveBeenCalled()
+    expect(warnings).toBe(0)
   })
 
   it('ignores a row whose worktree key disagrees with its own workspace', () => {

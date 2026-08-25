@@ -1456,9 +1456,7 @@ async function callWebRuntimeSessionTabMethod(
       `[web-runtime-session] failed to ${isClose ? 'close' : 'activate'} tab:`,
       error instanceof Error ? error.message : String(error)
     )
-    // Why only for a close: an activate has nothing to fall back to, and its callers read the
-    // boolean, so classifying its failures more finely would only invite a wrong reading.
-    return isClose && hasRuntimeRpcErrorCode(error, 'tab_not_found') ? 'unknown-tab' : 'failed'
+    return hasRuntimeRpcErrorCode(error, 'tab_not_found') ? 'unknown-tab' : 'failed'
   }
 }
 
