@@ -97,6 +97,12 @@ function forgetPersistedClientHostedPagesIn(dataFile: string): number {
  * on its own; and the close plan hands a connected owner the teardown on the grounds that the owner
  * removes its own mirror through tab sync. An owner that has forgotten the page does neither, which
  * left the row standing with an inert X and no way to dismiss it.
+ *
+ * What this pins is the CLIENT-side fallback: the X exits through session.tabs.close, which throws
+ * tab_not_found before browserTabClose is ever reached, so the runtime's own ghost retirement never
+ * runs here. Do not simplify the client fallback on the strength of this spec -- the server-side
+ * retirement is covered by orca-runtime-browser-ghost-session-row-close.test.ts, and neither
+ * covers the other.
  */
 test('closes a restored client-hosted row whose runtime has no record of it', async ({
   testRepoPath

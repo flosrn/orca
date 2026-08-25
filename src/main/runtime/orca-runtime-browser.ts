@@ -1993,7 +1993,8 @@ export class RuntimeBrowserCommands {
       }
       return { closed: true }
     }
-    const namedPageId = typeof params.page === 'string' && params.page.length > 0 ? params.page : null
+    const namedPageId =
+      typeof params.page === 'string' && params.page.length > 0 ? params.page : null
     const explicitPage = namedPageId !== null
     const bridge = this.host.getAgentBrowserBridge()
     if (!bridge) {
