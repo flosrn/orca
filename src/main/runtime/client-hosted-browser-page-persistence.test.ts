@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   CLIENT_HOSTED_BROWSER_PAGE_MAX_AGE_MS,
+  CLIENT_HOSTED_BROWSER_PAGE_REFRESH_MS,
   persistedClientHostedBrowserPageSchema
 } from '../../shared/client-hosted-browser-page-record'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
@@ -84,6 +85,23 @@ describe('client-hosted browser page persistence', () => {
     expect(persistClientHostedBrowserPages(store, pages, 'repo-1::wt-a')).toBe(true)
     expect(persistClientHostedBrowserPages(store, pages, 'repo-1::wt-a')).toBe(false)
     expect(store.setWorkspaceSession).toHaveBeenCalledOnce()
+  })
+
+  it('refreshes a parked tab so the expiry measures held-ness, not last change', () => {
+    let now = NOW
+    const store = sessionStore()
+    store.now = () => now
+    const pages = registryWith(livePlacement)
+    persistClientHostedBrowserPages(store, pages, 'repo-1::wt-a')
+
+    now = NOW + CLIENT_HOSTED_BROWSER_PAGE_REFRESH_MS + 1
+    expect(persistClientHostedBrowserPages(store, pages, 'repo-1::wt-a')).toBe(true)
+
+    expect(store.session.clientHostedBrowserPagesByWorktree?.['repo-1::wt-a']?.[0]?.savedAt).toBe(
+      now
+    )
+    // Still cheap in between: a tab whose page did not change does not rewrite on every call.
+    expect(persistClientHostedBrowserPages(store, pages, 'repo-1::wt-a')).toBe(false)
   })
 
   it('drops the worktree entry once its last page retires', () => {
@@ -255,7 +273,7 @@ function sessionStore() {
       state.session = next
     }),
     getWorkspaceSession: (_worktreeId: string) => state.session,
-    now: () => NOW
+    now: () => NOW as number
   }
   return state
 }

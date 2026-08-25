@@ -1,5 +1,6 @@
 import {
   CLIENT_HOSTED_BROWSER_PAGE_MAX_AGE_MS,
+  CLIENT_HOSTED_BROWSER_PAGE_REFRESH_MS,
   CLIENT_HOSTED_BROWSER_PAGE_RECORD_VERSION,
   type PersistedClientHostedBrowserPage
 } from '../../shared/client-hosted-browser-page-record'
@@ -81,7 +82,10 @@ export function persistClientHostedBrowserPages(
     return false
   }
   const existing = session.clientHostedBrowserPagesByWorktree ?? {}
-  if (samePersistedClientHostedBrowserPages(existing[worktreeId], rows)) {
+  if (
+    samePersistedClientHostedBrowserPages(existing[worktreeId], rows) &&
+    !needsAgeRefresh(existing[worktreeId], rows[0]?.savedAt ?? 0)
+  ) {
     return false
   }
   const next = { ...existing }
@@ -190,6 +194,21 @@ export function rehydrateClientHostedBrowserPages(
     }
   }
   return restored
+}
+
+/**
+ * Whether an otherwise-unchanged projection is old enough to rewrite.
+ *
+ * The equality check deliberately ignores `savedAt`, so a tab the user leaves open on one URL
+ * would keep its first timestamp forever and age out of the expiry bound while its host was
+ * holding it the whole time. Refreshing on a coarse interval keeps the bound meaning "nobody has
+ * held this page in a month" without making the announcement write on every call.
+ */
+function needsAgeRefresh(
+  existing: readonly PersistedClientHostedBrowserPage[] | undefined,
+  now: number
+): boolean {
+  return (existing ?? []).some((row) => now - row.savedAt > CLIENT_HOSTED_BROWSER_PAGE_REFRESH_MS)
 }
 
 function samePersistedClientHostedBrowserPages(

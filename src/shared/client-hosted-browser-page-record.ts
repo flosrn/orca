@@ -64,6 +64,14 @@ export const CLIENT_HOSTED_BROWSER_PAGE_RECORD_VERSION = 1
 /** How long a rehydrated row may sit unclaimed before a later start drops it instead of restoring it. */
 export const CLIENT_HOSTED_BROWSER_PAGE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
 
+/**
+ * How stale a row's timestamp may get before an unchanged projection is rewritten anyway.
+ *
+ * Without it the expiry would measure "when this page last changed" rather than "when a host last
+ * held it", and a tab parked on one URL would age out while its host was there the whole time.
+ */
+export const CLIENT_HOSTED_BROWSER_PAGE_REFRESH_MS = 24 * 60 * 60 * 1000
+
 const identity = z.string().min(1).max(256)
 
 export const persistedClientHostedBrowserPageSchema: z.ZodType<PersistedClientHostedBrowserPage> =
