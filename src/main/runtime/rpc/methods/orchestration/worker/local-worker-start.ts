@@ -1,4 +1,5 @@
 import type { TuiAgent } from '../../../../../../shared/tui-agent'
+import { TUI_AGENT_CONFIG } from '../../../../../../shared/tui-agent-config'
 import type { OrcaRuntimeService } from '../../../../orca-runtime'
 import type { OrchestrationDb } from '../../../../orchestration/db'
 import type { RunRow, TaskRow } from '../../../../orchestration/types'
@@ -19,6 +20,7 @@ import { failWorkerStartWithReceipt } from './worker-start-receipt'
 import { parseTaskDeps } from './task-deps-argument'
 import { assertExplicitWorkerTerminalUsable } from './explicit-worker-terminal-validation'
 import { deliverWorkerDispatchPreamble } from './deliver-worker-dispatch-preamble'
+import { startArgvWorkerDispatch } from './worker-argv-start'
 import { tearDownFailedWorkerStart } from './failed-worker-start-teardown'
 import {
   createExistingWorktreeWorkerTerminal,
@@ -179,6 +181,28 @@ export async function startLocalWorker(args: {
         worktreeId: resolvedWorktree!.id,
         effects
       })
+      if (agent && TUI_AGENT_CONFIG[agent].promptInjectionMode === 'argv') {
+        const argvResult = await startArgvWorkerDispatch({
+          runtime,
+          db,
+          runId: run.id,
+          task,
+          dispatchId: started.dispatch.id,
+          coordinatorHandle: params.from,
+          devMode: params.devMode,
+          timeoutMs: params.timeoutMs ?? 60_000,
+          agent,
+          launchPreferences: launch.preferences,
+          launchReceipt: launch.receipt,
+          worktreeId: resolvedWorktree!.id,
+          effects,
+          setupReceipt,
+          onStage: (stage) => {
+            failedStage = stage
+          }
+        })
+        return { ...argvResult, mode }
+      }
       const terminal = await createExistingWorktreeWorkerTerminal({
         runtime,
         worktreeId: resolvedWorktree!.id,
