@@ -200,6 +200,10 @@ jobs:
           done
           set -e
 
+          # GITHUB_TOKEN n'a pas le scope `workflow`. Une branche nouvelle
+          # portant les ~30 workflows d'upstream (absents de `fork-pipeline`)
+          # est rejetée. Un tag, lui, n'installe aucun workflow : on pousse
+          # le SHA exact (upstream + patch, rien de plus) sous refs/tags/.
           sha="$(git rev-parse HEAD)"
           version="$(node -p "require('./package.json').version")"
           tag="fork-$(date -u +%Y%m%d-%H%M)-${sha:0:12}"
@@ -210,10 +214,7 @@ jobs:
           } >>"$GITHUB_OUTPUT"
           echo "Rejoué en $sha (version $version), tag prévu $tag."
 
-          # Force-push assumé : cette branche est reconstruite depuis upstream à
-          # chaque run et la CI en est le seul auteur. `--force-with-lease` n'y
-          # protégerait rien (l'ancien head n'est jamais un ancêtre du nouveau).
-          git push --force origin "HEAD:refs/heads/$CHANNEL_BRANCH"
+          git push origin "$sha:refs/tags/$tag"
 
   # ---------------------------------------------------------------------------
   # 2. Les deux répertoires que le patch touche, et le typecheck complet.
@@ -228,7 +229,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.rebase.outputs.sha }}
+          ref: ${{ needs.rebase.outputs.tag }}
           persist-credentials: false
       - uses: pnpm/action-setup@v6
         with:
@@ -270,7 +271,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.rebase.outputs.sha }}
+          ref: ${{ needs.rebase.outputs.tag }}
           persist-credentials: false
       - uses: pnpm/action-setup@v6
         with:
@@ -368,7 +369,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.rebase.outputs.sha }}
+          ref: ${{ needs.rebase.outputs.tag }}
           persist-credentials: false
       - uses: pnpm/action-setup@v6
         with:
@@ -497,7 +498,7 @@ jobs:
           EOF
 
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" --target "$SHA" \
+            --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" \
             "orca-macos-arm64.zip" "$deb_name" SHA256SUMS
           echo "Release $TAG publiée." >>"$GITHUB_STEP_SUMMARY"
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url --jq .url >>"$GITHUB_STEP_SUMMARY"

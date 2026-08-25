@@ -22,26 +22,31 @@ Trois dispositions étaient possible ; celle-ci est retenue :
 Effet de bord voulu : la page d'accueil du fork montre ce fichier, donc ce que
 ce dépôt est. Un visiteur ne prend pas ce fork pour une copie d'Orca.
 
-## Les quatre branches
+## Les refs
 
-| branche | rôle | qui écrit |
+| branche / ref | rôle | qui écrit |
 | --- | --- | --- |
 | `fork-pipeline` (défaut) | ce README, le workflow, le cache `rerere` | un humain |
 | `main` | miroir d'`upstream/main`, jamais modifié | `gh repo sync` |
 | `feat/argv-worker-start` | **head de la PR upstream #16425. GELÉE.** | un humain, jamais la CI |
-| `fork-channel` | le patch rejoué sur `upstream/main` du jour | **la CI seule**, en force-push |
+| tags `fork-*` | le patch rejoué sur `upstream/main` du jour | **la CI seule** |
 
 La CI ne touche jamais `feat/argv-worker-start`. C'est délibéré : force-pusher le
 head d'une PR ouverte chaque nuit relancerait la CI d'upstream sur leur machine
 tous les jours pour un rebase que personne n'a demandé. Le rebase quotidien
-atterrit donc sur `fork-channel`, que la CI possède seule.
+atterrit donc sur un tag `fork-*`, SHA exact = upstream + patch, rien de plus.
+
+Un tag plutôt qu'une branche `fork-channel` : `GITHUB_TOKEN` n'a pas le scope
+`workflow`, et une branche nouvelle portant les ~30 workflows d'upstream
+(absents de cette branche par défaut) est rejetée. Un tag n'installe aucun
+workflow et conserve le SHA intact.
 
 ## Ce que le workflow fait (`.github/workflows/fork-nightly.yml`)
 
 1. **rebase** — `git cherry-pick` des commits de `feat/argv-worker-start` (la
    plage `merge-base(upstream/main, patch)..patch`, rien de plus) sur
    `upstream/main`, avec `git rerere` amorcé depuis `rerere-cache/`. Résultat
-   force-pushé sur `fork-channel`.
+   poussé comme tag `fork-*`.
 2. **test** — `pnpm typecheck` + vitest sur `src/main/runtime/orchestration` et
    `src/main/runtime/rpc`, les deux seuls répertoires que le patch touche.
 3. **build-mac** / **build-linux** — zip macOS arm64 **non signé** et `.deb`
