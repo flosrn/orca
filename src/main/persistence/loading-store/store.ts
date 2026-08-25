@@ -358,6 +358,7 @@ import {
 import { hydrateRepo as hydrateRepoOperation } from '../tracking-repos/repo-hydration'
 import { RepoUpdatePersistenceOperations } from '../tracking-repos/repo-update-operations'
 import { ProjectHostSetupPersistenceOperations } from '../tracking-repos/project-host-setup-update'
+import { preserveRuntimeAuthoredWorkspaceSessionFields } from '../runtime-authored-workspace-session-fields'
 
 // Why (issue #1158): keep 5 rolling backups at >=1h spacing so a corrupt/empty write leaves an earlier copy recoverable.
 const BACKUP_COUNT = 5
@@ -2810,11 +2811,15 @@ export class Store {
 
   setWorkspaceSession(session: PersistedState['workspaceSession'], hostId?: string | null): void {
     const resolved = this.resolveHostId(hostId)
+    const preserved = preserveRuntimeAuthoredWorkspaceSessionFields(
+      session,
+      this.getWorkspaceSession(resolved)
+    )
     if (resolved === LOCAL_EXECUTION_HOST_ID) {
-      this.setLocalWorkspaceSession(session)
+      this.setLocalWorkspaceSession(preserved)
       return
     }
-    this.setHostWorkspaceSession(resolved, session)
+    this.setHostWorkspaceSession(resolved, preserved)
   }
 
   removeWorkspaceSessionStateForWorktree(

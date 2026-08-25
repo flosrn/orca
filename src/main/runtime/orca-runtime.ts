@@ -669,6 +669,10 @@ import { createRuntimeBrowserCommands } from './runtime-browser-commands-factory
 import { getBrowserHostLeaseRegistry } from './browser-host-lease-registry-instance'
 import { getRuntimeBrowserPageRegistry } from './runtime-browser-page-registry'
 import { ClientHostedBrowserRowPublisher } from './client-hosted-browser-row-publication'
+import {
+  persistClientHostedBrowserPages,
+  rehydrateClientHostedBrowserPages
+} from './client-hosted-browser-page-persistence'
 import type { ClientHostedBrowserRowsEvent } from '../../shared/client-hosted-browser-rows'
 import { closeClientHostedBrowserPagesForWorktree } from './worktree-browser-client-page-close'
 import {
@@ -3832,6 +3836,80 @@ export class OrcaRuntimeService {
       for (const state of this.headlessTerminals.values()) {
         state.emulator.applyPushedViewAttributes(attributes)
       }
+    })
+  }
+
+  /**
+   * Republishes persisted client-hosted pages as held rows, before any host can attach.
+   *
+   * Without this a runtime restart takes the only record of a client-hosted page with it. When the
+   * client restarted too -- a fleet update restarts both -- its guests died with it, so its
+   * inventory has nothing to adopt from and no participant can name the page any more.
+   *
+   * Called from each host's startup rather than the constructor so the ordering against attach is
+   * explicit, and so constructing a runtime stays free of persistence reads.
+   */
+  rehydrateClientHostedBrowserPages(): void {
+    if (!this.store?.getWorkspaceSession) {
+      return
+    }
+    try {
+      const registry = getRuntimeBrowserPageRegistry(this)
+      const liveRepoIds = new Set((this.store.getRepos?.() ?? []).map((repo) => repo.id))
+      rehydrateClientHostedBrowserPages(registry, {
+        listWorkspaceSessions: () => this.listWorkspaceSessionPartitions(),
+        // Why the same discriminant hydration uses: session keys are `${repoId}::${path}` and are
+        // not pruned when a repo leaves this client's view, so a row whose repo is gone would
+        // surface a tab with no live workspace behind it. Unparseable keys are left alone.
+        isKnownWorktree: (worktreeId) => {
+          const ownerRepoId = splitWorktreeIdForFilesystem(worktreeId)?.repoId
+          return !ownerRepoId || liveRepoIds.has(ownerRepoId)
+        }
+      })
+      for (const page of registry.listPages()) {
+        this.persistedClientHostedBrowserWorktreeIds.add(page.workspaceId)
+      }
+    } catch (error) {
+      console.warn('[browser-host-lease] client page rehydration failed:', error)
+    }
+  }
+
+  /**
+   * Rewrites one worktree's persisted client-hosted rows.
+   *
+   * Guarded because it hangs off the runtime's tab-change announcement, which also fires on
+   * terminal and editor churn: a workspace that has never had a client page must not pay a session
+   * read for every one of those.
+   */
+  private persistClientHostedBrowserPagesForWorktree(worktreeId: string): void {
+    const registry = getRuntimeBrowserPageRegistry(this)
+    const hasPages = registry.listPages(worktreeId).length > 0
+    if (!hasPages && !this.persistedClientHostedBrowserWorktreeIds.has(worktreeId)) {
+      return
+    }
+    if (hasPages) {
+      this.persistedClientHostedBrowserWorktreeIds.add(worktreeId)
+    } else {
+      this.persistedClientHostedBrowserWorktreeIds.delete(worktreeId)
+    }
+    persistClientHostedBrowserPages(
+      {
+        getWorkspaceSession: (id) => this.getWorkspaceSessionForWorktree(id),
+        setWorkspaceSession: (id, session) => this.setWorkspaceSessionForWorktree(id, session)
+      },
+      registry,
+      worktreeId
+    )
+  }
+
+  private listWorkspaceSessionPartitions(): WorkspaceSessionState[] {
+    const hostIds = new Set<ExecutionHostId>([LOCAL_EXECUTION_HOST_ID])
+    for (const repo of this.store?.getRepos?.() ?? []) {
+      hostIds.add(getRepoExecutionHostId(repo))
+    }
+    return [...hostIds].flatMap((hostId) => {
+      const session = this.store?.getWorkspaceSession?.(hostId)
+      return session ? [session] : []
     })
   }
 
@@ -9558,20 +9636,21 @@ export class OrcaRuntimeService {
   }
 
   // Public so runtime-side page release (lease fencing) can prune a tab whose page is gone.
-  retireRuntimeOwnedBrowserSessionTab(worktreeId: string, browserPageId: string): void {
+  retireRuntimeOwnedBrowserSessionTab(worktreeId: string, browserPageId: string): boolean {
     // Why: before the snapshot guard — worktree removal drops the snapshot first, and the host
     // rows for its client pages would otherwise be stranded on screen with nothing to retract them.
     this.clientHostedBrowserRows.publish(worktreeId)
+    this.persistClientHostedBrowserPagesForWorktree(worktreeId)
     const snapshot = this.mobileSessionTabsByWorktree.get(worktreeId)
     if (!snapshot) {
-      return
+      return false
     }
     const retiredTab = snapshot.tabs.find(
       (candidate): candidate is RuntimeMobileSessionBrowserTab =>
         candidate.type === 'browser' && candidate.browserPageId === browserPageId
     )
     if (!retiredTab) {
-      return
+      return false
     }
     const nextTabs = snapshot.tabs.filter((candidate) => candidate.id !== retiredTab.id)
     const active = nextTabs.find((candidate) => candidate.isActive) ?? nextTabs[0] ?? null
@@ -9590,6 +9669,7 @@ export class OrcaRuntimeService {
     }
     this.mobileSessionTabsByWorktree.set(worktreeId, nextSnapshot)
     this.emitMobileSessionTabsSnapshot(nextSnapshot)
+    return true
   }
 
   private markHeadlessBrowserSessionTabActive(
@@ -33663,6 +33743,9 @@ export class OrcaRuntimeService {
     }
   })
 
+  /** Worktrees whose persisted client-hosted rows this runtime is responsible for rewriting. */
+  private readonly persistedClientHostedBrowserWorktreeIds = new Set<string>()
+
   /** Serves a hydrating host renderer; the publisher counts this as a delivery, not a read. */
   listClientHostedBrowserRows(): ClientHostedBrowserRowsEvent[] {
     return this.clientHostedBrowserRows.deliverHydrationSnapshot()
@@ -33690,12 +33773,21 @@ export class OrcaRuntimeService {
   notifyMobileSessionTabsChanged(worktreeId?: string): void {
     if (!worktreeId) {
       this.clientHostedBrowserRows.publishAll()
+      for (const id of new Set([
+        ...this.persistedClientHostedBrowserWorktreeIds,
+        ...getRuntimeBrowserPageRegistry(this)
+          .listPages()
+          .map((page) => page.workspaceId)
+      ])) {
+        this.persistClientHostedBrowserPagesForWorktree(id)
+      }
       this.notifyMobileSessionTabSnapshots()
       return
     }
     // Why: every client-page mutation — create, navigate, metadata, host quit, recovery — reaches
     // this announcement, so the host's own rows derive from it rather than from a second seam.
     this.clientHostedBrowserRows.publish(worktreeId)
+    this.persistClientHostedBrowserPagesForWorktree(worktreeId)
     const hasClientBrowserPages =
       getRuntimeBrowserPageRegistry(this).listPages(worktreeId).length > 0
     if (this.offscreenBrowserBackend || hasClientBrowserPages) {

@@ -1,0 +1,77 @@
+import { z } from 'zod'
+
+/**
+ * Durable form of a client-hosted logical page.
+ *
+ * The runtime owns the page identity; the paired desktop owns the engine that renders it. Losing
+ * the runtime's record therefore loses the page for everyone, because no other participant can
+ * name it: a restarted client's guests are gone too, so its inventory has nothing to adopt from.
+ *
+ * What is stored here is deliberately only what outlives an authority: identity, last committed
+ * metadata, browser profile, execution host, and the durable device that hosted it. Live authority
+ * -- connection ids, lease and page generations, WebContents ids -- is unrepresentable in this
+ * type on purpose. Every runtime start mints a new authority epoch, so a persisted generation
+ * could only ever be a forgery of one.
+ */
+export type PersistedClientHostedBrowserPage = {
+  /** Row-level schema version. A row naming a version this build does not know is dropped. */
+  v: typeof CLIENT_HOSTED_BROWSER_PAGE_RECORD_VERSION
+  browserPageId: string
+  workspaceId: string
+  browserProfileId: string
+  executionHostKey: string
+  url: string
+  title: string
+  /**
+   * Preferred placement: the durable paired device that hosted the page. Deliberately not
+   * `browserHostClientId`, which a desktop re-mints per process and which therefore names nothing
+   * a relaunched client would answer to.
+   */
+  pairedDeviceId: string
+  /** When the row was last written; the only input to never-returning-host expiry. */
+  savedAt: number
+}
+
+/**
+ * Compile-time proof that no live-authority field can be persisted.
+ *
+ * A reviewer's first question about restoring rows is whether a stored generation could ever be
+ * replayed as authority. It cannot, because the durable type has nowhere to put one: adding any of
+ * these names to `PersistedClientHostedBrowserPage` fails the build rather than the review.
+ */
+type ForbiddenAuthorityField = Extract<
+  keyof PersistedClientHostedBrowserPage,
+  | 'browserHostClientId'
+  | 'browserHostGeneration'
+  | 'pageHostGeneration'
+  | 'placement'
+  | 'connectionId'
+  | 'authorityEpoch'
+  | 'authorityRuntimeId'
+  | 'webContentsId'
+>
+const noPersistedAuthority: [ForbiddenAuthorityField] extends [never] ? true : never = true
+void noPersistedAuthority
+
+export const CLIENT_HOSTED_BROWSER_PAGE_RECORD_VERSION = 1
+
+/** How long a rehydrated row may sit unclaimed before a later start drops it instead of restoring it. */
+export const CLIENT_HOSTED_BROWSER_PAGE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
+
+const identity = z.string().min(1).max(256)
+
+export const persistedClientHostedBrowserPageSchema: z.ZodType<PersistedClientHostedBrowserPage> =
+  z.object({
+    // Why a literal rather than a range: an unknown version is a row written by a build that knew
+    // something this one does not, and partially trusting it is worse than dropping it. The
+    // enclosing salvagingArray drops exactly the failing rows and keeps their siblings.
+    v: z.literal(CLIENT_HOSTED_BROWSER_PAGE_RECORD_VERSION),
+    browserPageId: identity,
+    workspaceId: identity,
+    browserProfileId: identity,
+    executionHostKey: z.string().min(1).max(2048),
+    url: z.string().max(8192),
+    title: z.string().max(4096),
+    pairedDeviceId: identity,
+    savedAt: z.number().int().nonnegative()
+  })

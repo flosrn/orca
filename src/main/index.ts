@@ -2757,6 +2757,9 @@ void app.whenReady().then(async () => {
   })
   runtime = runtimeService
   runtimeService.prepareLegacyWorkerTerminalRecovery()
+  // Why before anything can attach: a client host that reattaches to a restarted runtime is only
+  // handed its pages back if the runtime found them first.
+  runtimeService.rehydrateClientHostedBrowserPages()
   publishProviderSessionChanges(agentHookServer.getProviderSessionIdentities())
   browserManager.setBrowserGuestStateChangedListener((worktreeId) => {
     runtimeService.notifyMobileSessionTabsChanged(worktreeId)
