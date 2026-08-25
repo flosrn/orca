@@ -6,6 +6,7 @@ import {
   selectAdoptableClientHostedPages,
   type AdoptableClientHostedPage
 } from './browser-host-client-page-adoption'
+import { isRestoredClientHostedBrowserPlacement } from './client-hosted-browser-page-persistence'
 import type { RuntimeBrowserPageRegistry } from './runtime-browser-page-registry'
 
 type AdoptionAuthority = Pick<
@@ -74,7 +75,14 @@ export async function adoptRuntimeBrowserClientPagesFromInventory(
     inventory,
     browserHostClientId: options.lease.browserHostClientId,
     authorityRuntimeId: options.authority.authorityRuntimeId,
-    hasRuntimePage: (browserPageId) => options.pages.getPage(browserPageId) !== undefined
+    // Why a rehydrated row does not count as a page we already track: it is a record without a
+    // guest, and this client is reporting the guest. Adoption is the branch that rekeys a live
+    // guest onto this authority, so letting the persisted row shadow it would push a page whose
+    // DOM is still alive down the recovery path, which recreates it from scratch instead.
+    hasRuntimePage: (browserPageId) => {
+      const page = options.pages.getPage(browserPageId)
+      return page !== undefined && !isRestoredClientHostedBrowserPlacement(page.placement)
+    }
   })
   if (adoptable.length === 0) {
     return NOTHING_TO_ADOPT
@@ -134,6 +142,12 @@ export async function adoptRuntimeBrowserClientPagesFromInventory(
       continue
     }
     try {
+      const restored = options.pages.getPage(browserPageId)
+      if (restored && isRestoredClientHostedBrowserPlacement(restored.placement)) {
+        // Why retire rather than update in place: the record is being replaced wholesale by the
+        // host's own report, and publishing over a live id is refused by design.
+        options.pages.retirePage(browserPageId, restored.placement)
+      }
       options.pages.publishClientPage({
         browserPageId,
         workspaceId: page.workspaceId,

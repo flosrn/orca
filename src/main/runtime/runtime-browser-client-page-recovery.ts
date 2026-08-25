@@ -6,6 +6,7 @@ import type {
   BrowserClientHostLeaseAuthority
 } from '../../shared/browser-client-host-protocol'
 import { sameRuntimeBrowserPlacement } from '../../shared/runtime-browser-placement'
+import { isRestoredClientHostedBrowserPlacement } from './client-hosted-browser-page-persistence'
 import type { BrowserHostLeaseRegistry } from './browser-host-lease-registry'
 import type {
   RuntimeBrowserClientPage,
@@ -63,15 +64,14 @@ export async function recoverUnavailableRuntimeBrowserClientPages(options: {
     return
   }
   const inventoryByPageId = new Map(inventory.map((page) => [page.browserPageId, page]))
-  const pages = options.pages.listPages().filter(
-    (page) =>
-      !options.adoptedPageIds?.has(page.browserPageId) &&
-      page.placement.browserHostClientId === options.lease.browserHostClientId &&
-      // Why: a page retained across a host quit still names the generation that placed it, so
-      // recovery has to reach back past this lease's own generation to pick it up again.
-      page.placement.browserHostGeneration <= options.lease.browserHostGeneration &&
-      !isActiveExactPage(page, inventoryByPageId.get(page.browserPageId), options.lease)
-  )
+  const pages = options.pages
+    .listPages()
+    .filter(
+      (page) =>
+        !options.adoptedPageIds?.has(page.browserPageId) &&
+        isRecoverableByLease(page, options.lease) &&
+        !isActiveExactPage(page, inventoryByPageId.get(page.browserPageId), options.lease)
+    )
   await mapWithConcurrency(
     pages,
     MAX_RECOVERY_CONCURRENCY,
@@ -89,6 +89,32 @@ export async function recoverUnavailableRuntimeBrowserClientPages(options: {
       }
     },
     options.signal
+  )
+}
+
+/**
+ * Whether this lease is the one allowed to take a page back.
+ *
+ * A page placed by this desktop's current process names its `browserHostClientId`, and a page
+ * retained across a host quit still names the generation that placed it, so recovery has to reach
+ * back past this lease's own generation to pick it up again.
+ *
+ * A rehydrated page names neither: a desktop re-mints `browserHostClientId` per process, so the
+ * persisted record deliberately carries only the paired device, and the device is what
+ * re-authenticates the host. Matching on it is what keeps a second paired device -- or a device
+ * whose pairing was revoked and later re-made -- from inheriting someone else's tab; such a row
+ * stays host-absent and closable rather than being recovered to the wrong desktop.
+ */
+function isRecoverableByLease(
+  page: RuntimeBrowserClientPage,
+  lease: BrowserClientHostLeaseAuthority & { pairedDeviceId: string }
+): boolean {
+  if (isRestoredClientHostedBrowserPlacement(page.placement)) {
+    return page.pairedDeviceId === lease.pairedDeviceId
+  }
+  return (
+    page.placement.browserHostClientId === lease.browserHostClientId &&
+    page.placement.browserHostGeneration <= lease.browserHostGeneration
   )
 }
 
