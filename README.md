@@ -28,25 +28,29 @@ ce dépôt est. Un visiteur ne prend pas ce fork pour une copie d'Orca.
 | --- | --- | --- |
 | `fork-pipeline` (défaut) | ce README, le workflow, le cache `rerere` | un humain |
 | `main` | miroir d'`upstream/main`, jamais modifié | `gh repo sync` |
-| `feat/argv-worker-start` | **head de la PR upstream #16425. GELÉE.** | un humain, jamais la CI |
-| tags `fork-*` | le patch rejoué sur `upstream/main` du jour | **la CI seule** |
+| `feat/argv-worker-start` | **la source de vérité** — head de la PR upstream #16425, rebasée sur `upstream/main` chaque nuit | un humain pour le contenu, **la CI pour la base** |
+| tags `fork-*` | le SHA exact buildé et publié, immuable | **la CI seule** |
 
-La CI ne touche jamais `feat/argv-worker-start`. C'est délibéré : force-pusher le
-head d'une PR ouverte chaque nuit relancerait la CI d'upstream sur leur machine
-tous les jours pour un rebase que personne n'a demandé. Le rebase quotidien
-atterrit donc sur un tag `fork-*`, SHA exact = upstream + patch, rien de plus.
+**La surface du patch est gelée, pas sa base.** La CI ne change jamais ce que le
+patch fait : elle rejoue exactement la plage
+`merge-base(upstream/main, patch)..patch` — les commits existants, rien de plus —
+et force-push le résultat. C'est la topologie qu'ADR 0026 §Decision nomme
+(« patch commits only, rebased onto upstream tags »), et c'est la seule qui
+garde la base de la PR #16425 à jour. Une branche parallèle laisserait la
+branche que les relecteurs upstream lisent rassir sur une base morte.
 
-Un tag plutôt qu'une branche `fork-channel` : `GITHUB_TOKEN` n'a pas le scope
-`workflow`, et une branche nouvelle portant les ~30 workflows d'upstream
-(absents de cette branche par défaut) est rejetée. Un tag n'installe aucun
-workflow et conserve le SHA intact.
+Conséquence assumée : la PR upstream enregistre un force-push par nuit. C'est le
+prix d'une PR dont la base est vivante ; ça n'ajoute aucun commit au diff.
+
+Le tag existe en plus de la branche parce qu'une branche bouge : la release doit
+pointer un SHA immuable, celui qui a été testé et buildé.
 
 ## Ce que le workflow fait (`.github/workflows/fork-nightly.yml`)
 
 1. **rebase** — `git cherry-pick` des commits de `feat/argv-worker-start` (la
    plage `merge-base(upstream/main, patch)..patch`, rien de plus) sur
    `upstream/main`, avec `git rerere` amorcé depuis `rerere-cache/`. Résultat
-   poussé comme tag `fork-*`.
+   force-pushé sur `feat/argv-worker-start`, puis taggé `fork-*`.
 2. **test** — `pnpm typecheck` + vitest sur `src/main/runtime/orchestration` et
    `src/main/runtime/rpc`, les deux seuls répertoires que le patch touche.
 3. **build-mac** / **build-linux** — zip macOS arm64 **non signé** et `.deb`

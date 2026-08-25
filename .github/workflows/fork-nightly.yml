@@ -89,7 +89,14 @@ jobs:
           git fetch --no-tags --quiet upstream main
           upstream_sha="$(git rev-parse upstream/main)"
           patch_sha="$(git rev-parse HEAD)"
-          identity="${upstream_sha:0:12}+${patch_sha:0:12}"
+          # L'identité NE PEUT PAS être le sha de la branche patch : ce job la
+          # rebase et la force-push, donc son sha bouge chaque nuit même quand
+          # rien n'a changé, et la détection de fraîcheur rebuilderait tous les
+          # jours pour rien. `patch-id --stable` digère le CONTENU du patch : il
+          # ne bouge que si le patch ou son contexte bouge vraiment.
+          base="$(git merge-base upstream/main HEAD)"
+          patch_id="$(git diff "$base"..HEAD | git patch-id --stable | cut -d' ' -f1)"
+          identity="${upstream_sha:0:12}+${patch_id:0:12}"
           {
             echo "upstream_sha=$upstream_sha"
             echo "patch_sha=$patch_sha"
@@ -201,11 +208,6 @@ jobs:
           done
           set -e
 
-          # GITHUB_TOKEN n'a pas le scope `workflow` : pousser un tag (ou une
-          # branche) dont l'arbre contient les workflows d'upstream est rejeté.
-          # Le SHA poussé est exact — upstream + patch, rien de plus. Sans le
-          # PAT, on échoue ici : on ne publie pas une release taggée sur autre
-          # chose que cet arbre.
           sha="$(git rev-parse HEAD)"
           version="$(node -p "require('./package.json').version")"
           tag="fork-$(date -u +%Y%m%d-%H%M)-${sha:0:12}"
@@ -216,6 +218,10 @@ jobs:
           } >>"$GITHUB_OUTPUT"
           echo "Rejoué en $sha (version $version), tag prévu $tag."
 
+          # GITHUB_TOKEN n'a pas le scope `workflow`, et l'arbre rejoué contient
+          # les ~30 workflows d'upstream : ni la branche ni le tag ne passent
+          # sans PAT. On échoue fermé — on ne tague jamais autre chose que cet
+          # arbre (upstream + patch, rien de plus).
           if [ -z "${FORK_PUSH_TOKEN:-}" ]; then
             {
               echo "### Secret manquant — impossible de pousser le SHA rejoué"
@@ -229,7 +235,17 @@ jobs:
             echo "::error::FORK_PUSH_TOKEN absent — gh secret set FORK_PUSH_TOKEN --repo $GITHUB_REPOSITORY"
             exit 1
           fi
-          git push "https://x-access-token:${FORK_PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$sha:refs/tags/$tag"
+          remote="https://x-access-token:${FORK_PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          # ADR 0026 §Decision : `feat/argv-worker-start` EST la source de
+          # vérité, « patch commits only, rebased onto upstream tags ». Donc
+          # c'est elle qu'on avance — pas une branche parallèle qui la
+          # laisserait rassir et ferait diverger la base de la PR #16425.
+          # Conséquence assumée : la PR upstream voit un force-push par nuit.
+          git push --force "$remote" "$sha:refs/heads/$PATCH_BRANCH"
+          # Le même SHA, immuable, pour que la release soit taggée sur l'arbre
+          # exact qui a été testé et buildé.
+          git push "$remote" "$sha:refs/tags/$tag"
 
   # ---------------------------------------------------------------------------
   # 2. Les deux répertoires que le patch touche, et le typecheck complet.
