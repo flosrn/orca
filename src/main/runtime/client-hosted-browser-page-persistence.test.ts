@@ -9,7 +9,8 @@ import {
   isRestoredClientHostedBrowserPlacement,
   persistClientHostedBrowserPages,
   rehydrateClientHostedBrowserPages,
-  RESTORED_CLIENT_HOSTED_BROWSER_PLACEMENT
+  RESTORED_CLIENT_HOSTED_BROWSER_PLACEMENT,
+  RESTORED_CLIENT_HOSTED_EXECUTION_HOST_KEY
 } from './client-hosted-browser-page-persistence'
 import { RuntimeBrowserPageRegistry } from './runtime-browser-page-registry'
 
@@ -40,7 +41,8 @@ describe('client-hosted browser page persistence', () => {
       browserPageId: 'page-a',
       workspaceId: 'repo-1::wt-a',
       browserProfileId: 'profile-a',
-      executionHostKey: 'native:runtime-a:1',
+      // Never the key it was created under: that one names the runtime process that minted it.
+      executionHostKey: RESTORED_CLIENT_HOSTED_EXECUTION_HOST_KEY,
       pairedDeviceId: 'device-a',
       url: 'https://kept.internal/',
       title: 'Kept',
@@ -66,7 +68,6 @@ describe('client-hosted browser page persistence', () => {
     expect(Object.keys(row).sort()).toEqual([
       'browserPageId',
       'browserProfileId',
-      'executionHostKey',
       'pairedDeviceId',
       'savedAt',
       'title',
@@ -187,7 +188,6 @@ describe('persisted client-hosted browser page schema', () => {
     browserPageId: 'page-a',
     workspaceId: 'repo-1::wt-a',
     browserProfileId: 'profile-a',
-    executionHostKey: 'native:runtime-a:1',
     url: 'https://kept.internal/',
     title: 'Kept',
     pairedDeviceId: 'device-a',
@@ -234,7 +234,8 @@ describe('persisted client-hosted browser page schema', () => {
       ...valid,
       browserHostGeneration: 4,
       pageHostGeneration: 7,
-      connectionId: 'conn-a'
+      connectionId: 'conn-a',
+      executionHostKey: 'native:runtime-a:1'
     })
 
     expect(smuggled).toEqual(valid)

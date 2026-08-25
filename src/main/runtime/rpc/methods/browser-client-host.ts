@@ -130,6 +130,8 @@ export const BROWSER_CLIENT_HOST_METHODS: RpcAnyMethod[] = [
           notifyWorkspace: (workspaceId) => runtime.notifyMobileSessionTabsChanged(workspaceId),
           releaseUnrecoverablePage: (page) =>
             releaseRuntimeBrowserClientPageRecord(runtime, page.browserPageId, page.placement),
+          resolveExecutionHostKey: (workspaceId) =>
+            runtime.resolveBrowserExecutionHostKeyForWorkspace(workspaceId),
           adoptedPageIds: new Set(adoption.adoptedPageIds),
           ...(signal ? { signal } : {})
         })

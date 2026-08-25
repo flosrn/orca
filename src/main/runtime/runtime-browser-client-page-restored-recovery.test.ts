@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { RuntimeBrowserClientPlacement } from '../../shared/runtime-browser-placement'
-import { RESTORED_CLIENT_HOSTED_BROWSER_PLACEMENT } from './client-hosted-browser-page-persistence'
+import {
+  RESTORED_CLIENT_HOSTED_BROWSER_PLACEMENT,
+  RESTORED_CLIENT_HOSTED_EXECUTION_HOST_KEY
+} from './client-hosted-browser-page-persistence'
 import { adoptRuntimeBrowserClientPagesFromInventory } from './runtime-browser-client-page-adoption'
 import { recoverUnavailableRuntimeBrowserClientPages } from './runtime-browser-client-page-recovery'
 import { RuntimeBrowserPageRegistry } from './runtime-browser-page-registry'
@@ -20,7 +23,8 @@ describe('recovery of rehydrated client-hosted pages', () => {
       lease: lease(),
       authority,
       pages,
-      notifyWorkspace
+      notifyWorkspace,
+      resolveExecutionHostKey: resolvesTo('native:runtime-new:2')
     })
 
     // Nothing to close: the desktop that owned the previous epoch is gone with its runtime.
@@ -32,11 +36,14 @@ describe('recovery of rehydrated client-hosted pages', () => {
         browserHostClientId: 'host-relaunched',
         pairedDeviceId: 'device-a',
         browserProfileId: 'profile-a',
-        executionHostKey: 'native:runtime-a:1'
+        // Re-resolved, never replayed: the persisted record carries no route key because a key
+        // names the runtime process that minted it.
+        executionHostKey: 'native:runtime-new:2'
       })
     )
     expect(pages.getPage('page-a')).toMatchObject({
       placement: freshPlacement,
+      executionHostKey: 'native:runtime-new:2',
       url: 'https://restored.internal/',
       loading: false
     })
@@ -50,7 +57,8 @@ describe('recovery of rehydrated client-hosted pages', () => {
       lease: { ...lease(), pairedDeviceId: 'device-b' },
       authority,
       pages,
-      notifyWorkspace
+      notifyWorkspace,
+      resolveExecutionHostKey: resolvesTo('native:runtime-new:2')
     })
 
     expect(commands).toEqual([])
@@ -67,9 +75,61 @@ describe('recovery of rehydrated client-hosted pages', () => {
       lease: lease(),
       authority,
       pages,
+      notifyWorkspace: vi.fn(),
+      resolveExecutionHostKey: resolvesTo('native:runtime-new:2')
+    })
+
+    expect(authority.createClientPage).not.toHaveBeenCalled()
+  })
+
+  it('leaves a rehydrated row held while its workspace has no route yet', async () => {
+    const { authority, pages, notifyWorkspace } = harness()
+
+    await recoverUnavailableRuntimeBrowserClientPages({
+      lease: lease(),
+      authority,
+      pages,
+      notifyWorkspace,
+      resolveExecutionHostKey: async () => ({ status: 'unavailable' })
+    })
+
+    // "The route is not up yet" is a not-now, never permission to retire the page.
+    expect(authority.createClientPage).not.toHaveBeenCalled()
+    expect(pages.getPage('page-a')?.placement).toEqual(RESTORED_CLIENT_HOSTED_BROWSER_PLACEMENT)
+    expect(notifyWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('drops a rehydrated row whose workspace is gone', async () => {
+    const { authority, pages } = harness()
+    const releaseUnrecoverablePage = vi.fn()
+
+    await recoverUnavailableRuntimeBrowserClientPages({
+      lease: lease(),
+      authority,
+      pages,
+      notifyWorkspace: vi.fn(),
+      releaseUnrecoverablePage,
+      resolveExecutionHostKey: async () => ({ status: 'workspace-gone' })
+    })
+
+    expect(authority.createClientPage).not.toHaveBeenCalled()
+    expect(releaseUnrecoverablePage).toHaveBeenCalledWith(
+      expect.objectContaining({ browserPageId: 'page-a' })
+    )
+  })
+
+  it('never recovers a rehydrated row without a way to resolve the current route key', async () => {
+    const { authority, pages } = harness()
+
+    await recoverUnavailableRuntimeBrowserClientPages({
+      lease: lease(),
+      authority,
+      pages,
       notifyWorkspace: vi.fn()
     })
 
+    // Replaying the persisted key is not a fallback: the client answers a predecessor's key with
+    // browser_client_network_route_authority_mismatch.
     expect(authority.createClientPage).not.toHaveBeenCalled()
   })
 
@@ -109,7 +169,7 @@ function harness(options: { pairedDeviceId?: string } = {}) {
     browserPageId: 'page-a',
     workspaceId: 'workspace-a',
     browserProfileId: 'profile-a',
-    executionHostKey: 'native:runtime-a:1',
+    executionHostKey: RESTORED_CLIENT_HOSTED_EXECUTION_HOST_KEY,
     placement: RESTORED_CLIENT_HOSTED_BROWSER_PLACEMENT,
     ...('pairedDeviceId' in options
       ? options.pairedDeviceId === undefined
@@ -144,6 +204,10 @@ function harness(options: { pairedDeviceId?: string } = {}) {
     })
   }
   return { authority, commands, notifyWorkspace: vi.fn(), pages, placements }
+}
+
+function resolvesTo(executionHostKey: string) {
+  return async () => ({ status: 'resolved' as const, executionHostKey })
 }
 
 function lease() {

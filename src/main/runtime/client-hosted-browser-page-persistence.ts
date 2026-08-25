@@ -27,6 +27,16 @@ export const RESTORED_CLIENT_HOSTED_BROWSER_PLACEMENT: RuntimeBrowserClientPlace
     pageHostGeneration: 0
   })
 
+/**
+ * The execution-host key a rehydrated row carries until recovery resolves the real one.
+ *
+ * A route key names the runtime process that minted it, so the persisted record deliberately has
+ * none. The registry still requires a key, and a sentinel is honest about that: it matches no
+ * inventory entry, so a returning host's page can never be mistaken for one already placed under
+ * the right host.
+ */
+export const RESTORED_CLIENT_HOSTED_EXECUTION_HOST_KEY = 'restored-client-host-execution'
+
 export function isRestoredClientHostedBrowserPlacement(
   placement: RuntimeBrowserClientPlacement
 ): boolean {
@@ -106,7 +116,6 @@ export function buildPersistedClientHostedBrowserPages(
             browserPageId: page.browserPageId,
             workspaceId: page.workspaceId,
             browserProfileId: page.browserProfileId,
-            executionHostKey: page.executionHostKey,
             url: page.url,
             title: page.title,
             pairedDeviceId: page.pairedDeviceId,
@@ -158,7 +167,7 @@ export function rehydrateClientHostedBrowserPages(
             browserPageId: row.browserPageId,
             workspaceId: row.workspaceId,
             browserProfileId: row.browserProfileId,
-            executionHostKey: row.executionHostKey,
+            executionHostKey: RESTORED_CLIENT_HOSTED_EXECUTION_HOST_KEY,
             placement: RESTORED_CLIENT_HOSTED_BROWSER_PLACEMENT,
             pairedDeviceId: row.pairedDeviceId,
             url: row.url,
@@ -197,7 +206,6 @@ function samePersistedClientHostedBrowserPages(
       row.browserPageId === next.browserPageId &&
       row.workspaceId === next.workspaceId &&
       row.browserProfileId === next.browserProfileId &&
-      row.executionHostKey === next.executionHostKey &&
       row.url === next.url &&
       row.title === next.title &&
       row.pairedDeviceId === next.pairedDeviceId

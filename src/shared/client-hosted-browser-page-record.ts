@@ -8,10 +8,16 @@ import { z } from 'zod'
  * name it: a restarted client's guests are gone too, so its inventory has nothing to adopt from.
  *
  * What is stored here is deliberately only what outlives an authority: identity, last committed
- * metadata, browser profile, execution host, and the durable device that hosted it. Live authority
- * -- connection ids, lease and page generations, WebContents ids -- is unrepresentable in this
- * type on purpose. Every runtime start mints a new authority epoch, so a persisted generation
- * could only ever be a forgery of one.
+ * metadata, browser profile, and the durable device that hosted it. Live authority -- connection
+ * ids, lease and page generations, WebContents ids -- is unrepresentable in this type on purpose.
+ * Every runtime start mints a new authority epoch, so a persisted generation could only ever be a
+ * forgery of one.
+ *
+ * `executionHostKey` is absent for the same reason even though it reads like a durable address:
+ * it is the route FENCING key, and its native and WSL forms name the runtime's per-process id and
+ * boot time. A client asked to place a page under a predecessor's key answers
+ * `browser_client_network_route_authority_mismatch`, so recovery re-resolves the workspace's
+ * current key rather than replaying this one.
  */
 export type PersistedClientHostedBrowserPage = {
   /** Row-level schema version. A row naming a version this build does not know is dropped. */
@@ -19,7 +25,6 @@ export type PersistedClientHostedBrowserPage = {
   browserPageId: string
   workspaceId: string
   browserProfileId: string
-  executionHostKey: string
   url: string
   title: string
   /**
@@ -43,6 +48,7 @@ type ForbiddenAuthorityField = Extract<
   keyof PersistedClientHostedBrowserPage,
   | 'browserHostClientId'
   | 'browserHostGeneration'
+  | 'executionHostKey'
   | 'pageHostGeneration'
   | 'placement'
   | 'connectionId'
@@ -69,7 +75,6 @@ export const persistedClientHostedBrowserPageSchema: z.ZodType<PersistedClientHo
     browserPageId: identity,
     workspaceId: identity,
     browserProfileId: identity,
-    executionHostKey: z.string().min(1).max(2048),
     url: z.string().max(8192),
     title: z.string().max(4096),
     pairedDeviceId: identity,

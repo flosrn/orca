@@ -26,7 +26,14 @@ export type HeadlessPairedRuntimeHost = {
    * pairing keys, and WebSocket port, so an already-paired client reconnects to the
    * same environment record without a fresh offer. Requires `pinnedServePort: true`.
    */
-  restartServeProcess: () => Promise<void>
+  restartServeProcess: (options?: {
+    /**
+     * Runs with no serve process alive, before the replacement launches. The only safe window to
+     * edit the profile: the quitting process flushes its own state on the way out, and the
+     * replacement reads the file at startup.
+     */
+    betweenProcesses?: () => void | Promise<void>
+  }) => Promise<void>
   userDataDir: string
 }
 
@@ -135,13 +142,14 @@ export async function launchHeadlessPairedRuntimeHost(
       client: new RuntimeClient(userDataDir, 5_000),
       offer,
       userDataDir,
-      restartServeProcess: async () => {
+      restartServeProcess: async (restartOptions = {}) => {
         if (options.pinnedServePort !== true) {
           throw new Error(
             'restartServeProcess requires launchHeadlessPairedRuntimeHost({ pinnedServePort: true })'
           )
         }
         await closeElectronAppForE2E(serveProcess)
+        await restartOptions.betweenProcesses?.()
         const relaunched = await launchServeProcess()
         serveProcess = relaunched
         await readServeReadiness(relaunched, { requirePairingOffer: false })

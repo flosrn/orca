@@ -7,6 +7,7 @@ import type {
 } from '../../shared/browser-client-host-protocol'
 import { sameRuntimeBrowserPlacement } from '../../shared/runtime-browser-placement'
 import { isRestoredClientHostedBrowserPlacement } from './client-hosted-browser-page-persistence'
+import type { BrowserExecutionHostKeyResolution } from './runtime-browser-client-page-adoption'
 import type { BrowserHostLeaseRegistry } from './browser-host-lease-registry'
 import type {
   RuntimeBrowserClientPage,
@@ -53,6 +54,14 @@ export async function recoverUnavailableRuntimeBrowserClientPages(options: {
    * them unhealthy and re-tear-down what adoption just settled.
    */
   adoptedPageIds?: ReadonlySet<string>
+  /**
+   * The execution-host key a page in that workspace would be created under NOW.
+   *
+   * Required only for rehydrated pages, whose persisted record deliberately carries no key: the
+   * route key names the runtime process that minted it, so replaying one places the page under a
+   * predecessor the client refuses. Adoption re-resolves for the same reason.
+   */
+  resolveExecutionHostKey?: (workspaceId: string) => Promise<BrowserExecutionHostKeyResolution>
   signal?: AbortSignal
 }): Promise<void> {
   const inventory = options.lease.pageInventory
@@ -118,6 +127,31 @@ function isRecoverableByLease(
   )
 }
 
+/**
+ * The key this recovery must place the page under, or null to leave the row held.
+ *
+ * A page this runtime still holds a key for keeps it: it was minted by this process and is still
+ * current. A rehydrated one has none, so the workspace is asked where its pages route now. A
+ * workspace that is gone drops its page; one whose route is merely not up yet is a "not now", and
+ * the row waits host-absent for a later attach rather than being torn down on the strength of it.
+ */
+async function resolveRecoveryExecutionHostKey(
+  page: RuntimeBrowserClientPage,
+  options: Parameters<typeof recoverUnavailableRuntimeBrowserClientPages>[0]
+): Promise<string | null> {
+  if (!isRestoredClientHostedBrowserPlacement(page.placement)) {
+    return page.executionHostKey
+  }
+  const resolved = await options.resolveExecutionHostKey?.(page.workspaceId)
+  if (resolved?.status === 'resolved') {
+    return resolved.executionHostKey
+  }
+  if (resolved?.status === 'workspace-gone') {
+    options.releaseUnrecoverablePage?.(page)
+  }
+  return null
+}
+
 /** Retires a page left with no placement at all; anything still placed can retry on a later attach. */
 function releaseUnhostablePage(
   page: RuntimeBrowserClientPage,
@@ -134,6 +168,10 @@ async function recoverPage(
   inventory: BrowserClientHostedPageInventory | undefined,
   options: Parameters<typeof recoverUnavailableRuntimeBrowserClientPages>[0]
 ): Promise<void> {
+  const executionHostKey = await resolveRecoveryExecutionHostKey(page, options)
+  if (executionHostKey === null) {
+    return
+  }
   const currentPlacement = options.authority.getPlacement(page.browserPageId)
   if (currentPlacement && !sameRuntimeBrowserPlacement(currentPlacement, page.placement)) {
     if (
@@ -163,14 +201,15 @@ async function recoverPage(
     browserHostClientId: options.lease.browserHostClientId,
     pairedDeviceId: options.lease.pairedDeviceId,
     browserProfileId: page.browserProfileId,
-    executionHostKey: page.executionHostKey,
+    executionHostKey,
     requiredCapabilities: [BROWSER_CLIENT_AUTOMATION_HOST_CAPABILITY],
     workspaceId: page.workspaceId
   })
   const recovered = options.pages.replaceClientPagePlacement(
     page.browserPageId,
     page.placement,
-    placement
+    placement,
+    executionHostKey
   )
   const url = inventory?.currentUrl ?? page.url
   if (url && url !== 'about:blank') {

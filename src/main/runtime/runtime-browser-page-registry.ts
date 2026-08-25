@@ -157,14 +157,20 @@ export class RuntimeBrowserPageRegistry {
   replaceClientPagePlacement(
     browserPageId: string,
     expected: RuntimeBrowserClientPlacement,
-    placement: RuntimeBrowserClientPlacement
+    placement: RuntimeBrowserClientPlacement,
+    /** The route key the replacing host was actually placed under; keys do not survive a restart. */
+    executionHostKey?: string
   ): RuntimeBrowserClientPage {
     const current = this.requireExactPage(browserPageId, expected)
+    if (executionHostKey !== undefined) {
+      assertIdentity(executionHostKey)
+    }
     // Why the revision restarts: it is the replacing host's own counter, and a host that just took
     // this placement over counts from zero. Keeping the old high-water mark deafens the page to
     // that host until it catches up.
     const next = freezePage({
       ...current,
+      ...(executionHostKey === undefined ? {} : { executionHostKey }),
       metadataRevision: 0,
       placement: Object.freeze({ ...placement })
     })

@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { expect, test } from './helpers/orca-app'
 import { launchHeadlessPairedRuntimeHost } from './helpers/headless-paired-runtime-host'
@@ -33,7 +33,40 @@ const RECONNECT_GRACE_OVERSHOOT_MS = 20_000
  * nothing on the host answers for.
  */
 function forgetPersistedClientHostedPages(userDataDir: string): number {
-  const dataFile = path.join(userDataDir, 'orca-data.json')
+  return listOrcaDataFiles(userDataDir).reduce(
+    (total, dataFile) => total + forgetPersistedClientHostedPagesIn(dataFile),
+    0
+  )
+}
+
+/**
+ * Every orca-data.json under a user-data dir.
+ *
+ * The live one is `profiles/<id>/orca-data.json`; the root file is only the harness's onboarding
+ * seed, which the first boot migrates from. Reading the seed alone made the strip a no-op that
+ * looked exactly like a runtime that had persisted nothing.
+ */
+function listOrcaDataFiles(userDataDir: string): string[] {
+  const profilesDir = path.join(userDataDir, 'profiles')
+  let profileFiles: string[] = []
+  try {
+    profileFiles = readdirSync(profilesDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(profilesDir, entry.name, 'orca-data.json'))
+  } catch {
+    // No profile directory yet; only the harness seed exists.
+  }
+  return [path.join(userDataDir, 'orca-data.json'), ...profileFiles].filter((file) => {
+    try {
+      readFileSync(file, 'utf8')
+      return true
+    } catch {
+      return false
+    }
+  })
+}
+
+function forgetPersistedClientHostedPagesIn(dataFile: string): number {
   const state = JSON.parse(readFileSync(dataFile, 'utf8')) as {
     workspaceSession?: { clientHostedBrowserPagesByWorktree?: Record<string, unknown[]> }
     workspaceSessionsByHostId?: Record<
@@ -102,13 +135,20 @@ test('closes a restored client-hosted row whose runtime has no record of it', as
     await closeElectronAppForE2E(quitting)
     await new Promise((resolve) => setTimeout(resolve, RECONNECT_GRACE_OVERSHOOT_MS))
 
+    // Between processes, not before the restart: the quitting serve flushes its own state on the
+    // way out, so an earlier edit would be written straight back over.
+    let forgotten = 0
+    await host.restartServeProcess({
+      betweenProcesses: () => {
+        forgotten = forgetPersistedClientHostedPages(host.userDataDir)
+      }
+    })
     // Presence precondition for the strip: an empty edit would leave a passing test that never set
     // up the case at all.
     expect(
-      forgetPersistedClientHostedPages(host.userDataDir),
+      forgotten,
       'the runtime must have persisted the page before this test can take it away'
     ).toBeGreaterThan(0)
-    await host.restartServeProcess()
     await host.client.call('repo.add', { path: testRepoPath, kind: 'git' }).catch(() => undefined)
     expect(
       await readHostBrowserPageIds(host.client, testRepoPath),
