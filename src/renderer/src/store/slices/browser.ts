@@ -15,6 +15,12 @@ import type {
 } from '../../../../shared/browser-workspace-types'
 import type { WorkspaceSessionState } from '../../../../shared/workspace-session-state-types'
 import { GRAB_BUDGET, type BrowserPageAnnotation } from '../../../../shared/browser-grab-types'
+import {
+  clearClientHostedBrowserCloseIntents,
+  recordClientHostedBrowserCloseIntents,
+  type ClientHostedBrowserCloseIntentsByEnvironment,
+  type PendingClientHostedBrowserClose
+} from '@/runtime/client-hosted-browser-close-intents'
 import { FLOATING_TERMINAL_WORKTREE_ID, ORCA_BROWSER_BLANK_URL } from '../../../../shared/constants'
 import { folderWorkspaceKey } from '../../../../shared/workspace-scope'
 import { redactKagiSessionToken } from '../../../../shared/browser-url'
@@ -194,6 +200,20 @@ export type BrowserSlice = {
   browserCertificateFailuresByPageId: Record<string, BrowserCertificateFailure>
   browserAnnotationsByPageId: Record<string, BrowserPageAnnotation[]>
   remoteBrowserPageHandlesByPageId: Record<string, RemoteBrowserPageHandle>
+  /**
+   * Closes of client-hosted pages their owning runtime never heard, keyed by environment.
+   *
+   * Durable because the runtime persists the pages themselves: a close swallowed while the host
+   * was down would otherwise be undone by that host's next start.
+   */
+  clientHostedBrowserCloseIntentsByEnvironment: ClientHostedBrowserCloseIntentsByEnvironment
+  recordClientHostedBrowserCloseIntents: (
+    closes: readonly PendingClientHostedBrowserClose[]
+  ) => void
+  clearClientHostedBrowserCloseIntents: (
+    environmentId: string,
+    browserPageIds: readonly string[]
+  ) => void
   activeBrowserTabId: string | null
   activeBrowserTabIdByWorktree: Record<string, string | null>
   recentlyClosedBrowserTabsByWorktree: Record<string, ClosedBrowserWorkspaceSnapshot[]>
@@ -608,6 +628,7 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
   browserCertificateFailuresByPageId: {},
   browserAnnotationsByPageId: {},
   remoteBrowserPageHandlesByPageId: {},
+  clientHostedBrowserCloseIntentsByEnvironment: {},
   activeBrowserTabId: null,
   activeBrowserTabIdByWorktree: {},
   recentlyClosedBrowserTabsByWorktree: {},
@@ -621,6 +642,27 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
   browserUrlHistory: [],
   defaultBrowserSessionProfileId: null,
   defaultBrowserSessionProfileIdByHostId: {},
+
+  recordClientHostedBrowserCloseIntents: (closes) => {
+    set((s) => {
+      const next = recordClientHostedBrowserCloseIntents(
+        s.clientHostedBrowserCloseIntentsByEnvironment,
+        closes,
+        Date.now()
+      )
+      return next ? { clientHostedBrowserCloseIntentsByEnvironment: next } : {}
+    })
+  },
+
+  clearClientHostedBrowserCloseIntents: (environmentId, browserPageIds) => {
+    set((s) => {
+      const next = clearClientHostedBrowserCloseIntents(
+        s.clientHostedBrowserCloseIntentsByEnvironment,
+        { environmentId, browserPageIds, now: Date.now() }
+      )
+      return next ? { clientHostedBrowserCloseIntentsByEnvironment: next } : {}
+    })
+  },
 
   setBrowserSessionHostId: async (hostId) => {
     const parsed = parseExecutionHostId(hostId)
@@ -1938,7 +1980,11 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
           buildRestoredRemoteBrowserPageHandles(browserPagesByWorkspace),
         browserCertificateFailuresByPageId: {},
         browserAnnotationsByPageId: {},
-        browserUrlHistory: normalizeBrowserHistoryEntries(session.browserUrlHistory ?? [])
+        browserUrlHistory: normalizeBrowserHistoryEntries(session.browserUrlHistory ?? []),
+        // Why restored before the rows are: a close the host never heard must outlive the relaunch
+        // that also restores the row it closed, or the restore silently wins.
+        clientHostedBrowserCloseIntentsByEnvironment:
+          session.clientHostedBrowserCloseIntentsByEnvironment ?? {}
       }
     })
 

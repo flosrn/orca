@@ -56,6 +56,7 @@ export type WorkspaceSessionSnapshot = Pick<
 > & {
   activeWorkspaceExecutionHostId?: AppState['activeWorkspaceExecutionHostId']
   sleepingAgentSessionsByPaneKey?: AppState['sleepingAgentSessionsByPaneKey']
+  clientHostedBrowserCloseIntentsByEnvironment?: AppState['clientHostedBrowserCloseIntentsByEnvironment']
 }
 
 // Why: shallow-equality gate for the debounced session writer; _exhaustive below keeps it in sync with the snapshot type.
@@ -89,7 +90,8 @@ export const SESSION_RELEVANT_FIELDS = [
   'lastKnownRelayPtyIdByTabId',
   'lastVisitedAtByWorktreeId',
   'defaultTerminalTabsAppliedByWorktreeId',
-  'sleepingAgentSessionsByPaneKey'
+  'sleepingAgentSessionsByPaneKey',
+  'clientHostedBrowserCloseIntentsByEnvironment'
 ] as const satisfies readonly (keyof WorkspaceSessionSnapshot)[]
 
 type _MissingSessionField = Exclude<
@@ -301,7 +303,11 @@ export function buildWorkspaceSessionPayload(
       Object.keys(snapshot.defaultTerminalTabsAppliedByWorktreeId).length > 0
         ? snapshot.defaultTerminalTabsAppliedByWorktreeId
         : undefined,
-    ...buildSleepingAgentSessionData(snapshot)
+    ...buildSleepingAgentSessionData(snapshot),
+    // Why unconditional rather than omit-when-empty: a full write replaces the persisted object,
+    // so an emptied map has to be written as empty or the last replay never sticks.
+    clientHostedBrowserCloseIntentsByEnvironment:
+      snapshot.clientHostedBrowserCloseIntentsByEnvironment
   }
 
   return pruneLocalTerminalScrollbackBuffers(payload, snapshot.repos)

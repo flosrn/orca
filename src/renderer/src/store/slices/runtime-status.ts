@@ -16,6 +16,7 @@ import {
 import { reconcileCatalogRows } from './repo-identity-reconcile'
 import { createRuntimeStatusHydration } from './runtime-status-hydration'
 import { refreshRuntimeEnvironmentStatus } from './runtime-status-refresh'
+import { replayClientHostedBrowserCloseIntents } from '@/runtime/client-hosted-browser-close-intent-replay'
 import {
   ensureBrowserClientHostForRestartedRuntime,
   ensureBrowserClientHostsForRestoredPages
@@ -208,8 +209,8 @@ export const createRuntimeStatusSlice: StateCreator<AppState, [], [], RuntimeSta
     // still ours to host, but only a fresh attach hands them back to the replacement runtime.
     const runtimeRestarted = Boolean(
       status.status !== null &&
-        previous?.status != null &&
-        previous.status.runtimeId !== status.status.runtimeId
+      previous?.status != null &&
+      previous.status.runtimeId !== status.status.runtimeId
     )
     // Why: a non-null status proves the runtime just answered, so drop any stale
     // "offline" compat failure before this online transition fires the
@@ -313,6 +314,10 @@ export const createRuntimeStatusSlice: StateCreator<AppState, [], [], RuntimeSta
         // Why here: hydration can ask before the environment is reachable, and a restored
         // client-hosted page only comes back once this desktop attaches as its host.
         void ensureBrowserClientHostsForRestoredPages(get())
+        // Why alongside: the same restart that hands those rows back also restores rows the user
+        // already closed while this environment was down, so the closes it never heard have to be
+        // replayed before its persisted records can put them on screen again.
+        void replayClientHostedBrowserCloseIntents(environmentId, get())
       }
     }),
 

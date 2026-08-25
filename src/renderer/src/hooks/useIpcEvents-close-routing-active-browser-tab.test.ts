@@ -20,6 +20,7 @@ vi.mock('@/store/slices/browser-webview-cleanup', () => ({ destroyWorkspaceWebvi
 
 const closeBrowserTab = vi.fn()
 const closeUnifiedTab = vi.fn()
+const recordClientHostedBrowserCloseIntents = vi.fn()
 
 /** One active browser workspace, optionally held under a handle the host has not published yet. */
 function activeBrowserWorkspace(handle: {
@@ -45,7 +46,8 @@ function activeBrowserWorkspace(handle: {
       'wt-1': [{ id: 'unified-1', contentType: 'browser', entityId: 'workspace-1' }]
     },
     closeBrowserTab,
-    closeUnifiedTab
+    closeUnifiedTab,
+    recordClientHostedBrowserCloseIntents
   }
 }
 

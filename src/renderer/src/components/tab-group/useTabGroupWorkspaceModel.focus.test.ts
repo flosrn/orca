@@ -143,6 +143,7 @@ function resetStore(): void {
     closeFile: mocks.closeFile,
     closeTab: mocks.closeTab,
     closeUnifiedTab: mocks.closeUnifiedTab,
+    recordClientHostedBrowserCloseIntents: vi.fn(),
     createBrowserTab: mocks.createBrowserTab,
     createEmptySplitGroup: mocks.createEmptySplitGroup,
     createTab: mocks.createTab,

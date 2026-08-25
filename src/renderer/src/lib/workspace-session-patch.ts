@@ -135,6 +135,10 @@ export function buildWorkspaceSessionPatch(
   if (changed.has('browserUrlHistory')) {
     patch.browserUrlHistory = normalizeBrowserHistoryEntries(snapshot.browserUrlHistory)
   }
+  if (changed.has('clientHostedBrowserCloseIntentsByEnvironment')) {
+    patch.clientHostedBrowserCloseIntentsByEnvironment =
+      snapshot.clientHostedBrowserCloseIntentsByEnvironment
+  }
   if (
     stagedVisibilityChanged ||
     hasAnyChangedField(changed, [
