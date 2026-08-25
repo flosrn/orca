@@ -6,7 +6,11 @@ export type SessionFieldRepoRemovalDisposition =
   | 'prunedByOwnerKey'
   /** Pruned too, but by a rule of its own -- derived ids, pane keys, or a scalar. */
   | 'prunedByBespokeRule'
-  /** Holds nothing repo-scoped, so removal leaves it alone. */
+  /**
+   * This path leaves it alone. That is not the same as holding nothing repo-scoped: some of these
+   * are pruned by the owner-scanning pass instead, and some are known residue. The entries below
+   * say which, because the label alone would read as a clean bill of health.
+   */
   | 'notRepoScoped'
 
 /** What `extractSessionForTransfer` does with a field when its repo moves to another profile. */
@@ -30,12 +34,20 @@ type SessionFieldDisposition = {
  * missed by three separate prune paths, because nothing made handling it mandatory. Classification
  * is now a compile error to skip, and the two owner-keyed lists below are what those paths
  * actually iterate -- so a field marked `prunedByOwnerKey` is pruned by construction.
+ *
+ * Not covered: `mergeWorkspaceSessions`, the apply side of a transfer, is still a hand-written
+ * field list. It is safe for this field only because `extractSessionForTransfer` never emits it --
+ * classify a new field as transferable and that merge has to be edited by hand.
  */
 export const WORKSPACE_SESSION_FIELD_DISPOSITION = {
+  // Residue: it can name the repo being removed, and no main-side path clears it. Harmless only
+  // because every renderer read resolves it against the live repo list, so a dead id reads as none.
   activeRepoId: { onRepoRemoval: 'notRepoScoped', onTransfer: 'notTransferred' },
   activeWorkspaceKey: { onRepoRemoval: 'prunedByBespokeRule', onTransfer: 'copiedByBespokeRule' },
   activeWorkspaceExecutionHostId: { onRepoRemoval: 'notRepoScoped', onTransfer: 'notTransferred' },
   activeWorktreeId: { onRepoRemoval: 'prunedByBespokeRule', onTransfer: 'copiedByBespokeRule' },
+  // Residue here specifically: the owner-removal path nulls this when it deletes the tab it names,
+  // but repo removal does not, so it can outlive the tab.
   activeTabId: { onRepoRemoval: 'notRepoScoped', onTransfer: 'notTransferred' },
   tabsByWorktree: { onRepoRemoval: 'prunedByBespokeRule', onTransfer: 'copiedByBespokeRule' },
   // Keyed by tab id, so both paths follow the tab ids the terminal maps gave up or carried over.
@@ -85,12 +97,16 @@ export const WORKSPACE_SESSION_FIELD_DISPOSITION = {
   tabGroupLayouts: { onRepoRemoval: 'prunedByOwnerKey', onTransfer: 'copiedByOwnerKey' },
   activeGroupIdByWorktree: { onRepoRemoval: 'prunedByOwnerKey', onTransfer: 'copiedByOwnerKey' },
   activeConnectionIdsAtShutdown: { onRepoRemoval: 'notRepoScoped', onTransfer: 'notTransferred' },
+  // Residue: keyed by tab id and pruned by neither path, so entries for a removed repo's tabs stay.
   remoteSessionIdsByTabId: { onRepoRemoval: 'notRepoScoped', onTransfer: 'notTransferred' },
   lastVisitedAtByWorktreeId: { onRepoRemoval: 'prunedByOwnerKey', onTransfer: 'copiedByOwnerKey' },
   defaultTerminalTabsAppliedByWorktreeId: {
     onRepoRemoval: 'prunedByOwnerKey',
     onTransfer: 'copiedByOwnerKey'
   },
+  // Owner-scoped after all, just not by this path: deleteScannedSessionFieldsForOwners prunes it by
+  // the record's worktreeId on worktree and project removal. Moving a project between profiles runs
+  // removeSourceRepo, which has no owner scan, so these records leak there.
   sleepingAgentSessionsByPaneKey: { onRepoRemoval: 'notRepoScoped', onTransfer: 'notTransferred' },
   terminalPtyIncarnationsByPaneKey: {
     onRepoRemoval: 'prunedByBespokeRule',

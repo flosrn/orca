@@ -130,6 +130,41 @@ describe('workspace session field disposition census', () => {
     expect(result[field]).toEqual((getDefaultWorkspaceSession() as Record<string, unknown>)[field])
   })
 
+  // Why spelled out rather than derived: every other test here iterates these lists, so a field
+  // quietly reclassified loses its pruning and its test case together and the suite stays green.
+  // Reclassifying now means editing this array, which is a reviewed change.
+  it('prunes exactly these fields by owner key on repo removal', () => {
+    expect(SESSION_FIELDS_PRUNED_BY_OWNER_KEY).toEqual([
+      'openFilesByWorktree',
+      'activeFileIdByWorktree',
+      'activeBrowserTabIdByWorktree',
+      'clientHostedBrowserPagesByWorktree',
+      'activeTabTypeByWorktree',
+      'activeTabIdByWorktree',
+      'unifiedTabs',
+      'tabGroups',
+      'tabGroupLayouts',
+      'activeGroupIdByWorktree',
+      'lastVisitedAtByWorktreeId',
+      'defaultTerminalTabsAppliedByWorktreeId',
+      'terminalTopologyRevisionByRepoId'
+    ])
+  })
+
+  it('copies exactly these fields by owner key on transfer', () => {
+    expect(SESSION_FIELDS_COPIED_BY_OWNER_KEY).toEqual([
+      'activeFileIdByWorktree',
+      'activeBrowserTabIdByWorktree',
+      'activeTabTypeByWorktree',
+      'activeTabIdByWorktree',
+      'tabGroupLayouts',
+      'activeGroupIdByWorktree',
+      'lastVisitedAtByWorktreeId',
+      'defaultTerminalTabsAppliedByWorktreeId',
+      'terminalTopologyRevisionByRepoId'
+    ])
+  })
+
   it('classifies every field a default session already carries', () => {
     const unclassified = Object.keys(getDefaultWorkspaceSession()).filter(
       (field) => !(field in WORKSPACE_SESSION_FIELD_DISPOSITION)

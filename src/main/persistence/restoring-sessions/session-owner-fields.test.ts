@@ -45,9 +45,22 @@ describe('deleting a workspace owner session fields', () => {
     expect(session.terminalTopologyRevisionByRepoId).toEqual({ 'repo-1': 5 })
   })
 
-  it('deletes the runtime-authored client-hosted rows with their worktree', () => {
-    expect(OWNER_KEYED_SESSION_FIELDS_DELETED_WITH_THEIR_OWNER).toContain(
-      'clientHostedBrowserPagesByWorktree'
-    )
+  // Why spelled out rather than derived: the cases above iterate this list, so a field quietly
+  // reclassified in the census loses its delete and its test case together.
+  it('deletes exactly these fields with their owner', () => {
+    expect(OWNER_KEYED_SESSION_FIELDS_DELETED_WITH_THEIR_OWNER).toEqual([
+      'openFilesByWorktree',
+      'activeFileIdByWorktree',
+      'activeBrowserTabIdByWorktree',
+      'clientHostedBrowserPagesByWorktree',
+      'activeTabTypeByWorktree',
+      'activeTabIdByWorktree',
+      'unifiedTabs',
+      'tabGroups',
+      'tabGroupLayouts',
+      'activeGroupIdByWorktree',
+      'lastVisitedAtByWorktreeId',
+      'defaultTerminalTabsAppliedByWorktreeId'
+    ])
   })
 })
