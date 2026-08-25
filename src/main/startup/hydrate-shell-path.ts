@@ -12,7 +12,14 @@ import { WindowsShellPathOwnership, windowsPathSegmentKey } from './windows-shel
 // Probe the profile-loading shell once instead of hard-coding every tool's install path.
 
 const DELIMITER = '__ORCA_SHELL_PATH__'
-const SPAWN_TIMEOUT_MS = 5000
+// Why 10s: 5s was chosen without measurement and a real profile overruns it —
+// a bash -ilc loading nvm, rvm, conda and gcloud measures ~1s idle but 6-7s on a
+// loaded machine, so a cold start under load silently fell back to the seeded
+// PATH. Startup does not block on this (index.ts fires it and forgets), and the
+// one awaited consumer is agent detection, which gets a worse answer from a
+// probe that gives up at 5s than from one that finishes at 6s. Mirrors the
+// budget mature GUI editors settled on for the same probe.
+const SPAWN_TIMEOUT_MS = 10_000
 
 // ANSI escape sequences can leak into the captured output when the user's rc
 // files print banners or set colored prompts. Strip them before parsing.

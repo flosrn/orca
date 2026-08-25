@@ -1,4 +1,4 @@
-import { accessSync, constants, existsSync, readdirSync, statSync } from 'node:fs'
+import { accessSync, constants, existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, dirname, isAbsolute, join } from 'node:path'
 
@@ -121,17 +121,96 @@ function getBaseVersionManagerDirectories(platform: NodeJS.Platform, homePath: s
   return directories
 }
 
+// Why bounded and cycle-guarded: an nvm alias may point at another alias
+// (`default` -> `lts/*` -> `lts/krypton` -> a version), and a hand-edited pair
+// can point at each other. nvm's own resolver tracks seen aliases; mirror that
+// rather than trusting the files to be acyclic.
+const NVM_ALIAS_CHAIN_LIMIT = 10
+
+/** Resolves `alias/default` to an installed version directory name, or null. */
+function resolveNvmDefaultVersion(nvmVersionsDir: string, installed: string[]): string | null {
+  const aliasDir = join(nvmVersionsDir, '..', '..', 'alias')
+  let token = readNvmAlias(join(aliasDir, 'default'))
+  const seen = new Set<string>()
+  for (let hop = 0; token && hop < NVM_ALIAS_CHAIN_LIMIT; hop += 1) {
+    if (seen.has(token)) {
+      return null
+    }
+    seen.add(token)
+    const next = readNvmAlias(join(aliasDir, token))
+    if (!next) {
+      break
+    }
+    token = next
+  }
+  if (!token || seen.size > NVM_ALIAS_CHAIN_LIMIT) {
+    return null
+  }
+  // Why: `system` selects the OS node, so nvm owns nothing to prefer here.
+  // `node`/`stable` mean newest, which is the ordering we already produce.
+  if (token === 'system' || token === 'node' || token === 'stable') {
+    return null
+  }
+  return matchNvmVersion(token, installed)
+}
+
+function readNvmAlias(aliasPath: string): string | null {
+  // Why the traversal guard: the token is interpolated into a path below, and a
+  // hand-edited alias must not be able to walk out of the alias directory.
+  if (aliasPath.includes('..')) {
+    return null
+  }
+  try {
+    if (!statSync(aliasPath).isFile()) {
+      return null
+    }
+    const value = readFileSync(aliasPath, 'utf8').trim()
+    return value.length > 0 ? value : null
+  } catch {
+    return null
+  }
+}
+
+/** `24` matches the highest installed `v24.x.y`; `v24.18.0` matches exactly. */
+function matchNvmVersion(token: string, installed: string[]): string | null {
+  const wanted = parseVersionSegment(token)
+  if (wanted.length === 0) {
+    return null
+  }
+  const matches = installed.filter((entry) => {
+    const parts = parseVersionSegment(entry)
+    return wanted.every((segment, index) => parts[index] === segment)
+  })
+  return matches.sort(compareVersionDesc)[0] ?? null
+}
+
 function getNvmVersionDirectories(homePath: string): string[] {
   const nvmVersionsDir = join(homePath, '.nvm', 'versions', 'node')
   if (!existsSync(nvmVersionsDir)) {
     return []
   }
 
-  return readdirSync(nvmVersionsDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort(compareVersionDesc)
-    .map((entry) => join(nvmVersionsDir, entry, 'bin'))
+  let installed: string[]
+  try {
+    installed = readdirSync(nvmVersionsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort(compareVersionDesc)
+  } catch {
+    return []
+  }
+
+  // Why default-first rather than newest-first: this ordering decides which node
+  // a CLI runs under whenever the login-shell probe does not land. Newest is
+  // usually the version the user just installed and has put nothing into, so it
+  // hid every globally installed CLI and mismatched native module ABIs
+  // (stablyai/orca#10932). The rest stay behind it as fallbacks, so a CLI
+  // installed outside the default version is still reachable.
+  const preferred = resolveNvmDefaultVersion(nvmVersionsDir, installed)
+  const ordered = preferred
+    ? [preferred, ...installed.filter((entry) => entry !== preferred)]
+    : installed
+  return ordered.map((entry) => join(nvmVersionsDir, entry, 'bin'))
 }
 
 function getVersionManagerDirectories(
