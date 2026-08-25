@@ -97,22 +97,33 @@ describe('createMainWindow', () => {
   })
 
   it('enables renderer sandboxing and opens external links safely', () => {
-    const windowHandlers: Record<string, (...args: any[]) => void> = {}
+    // Why every handler and not the last one: two modules register `will-navigate` on this
+    // webContents, and keeping one slot per event let whichever registered last stand in for both.
+    const windowHandlers: Record<string, ((...args: any[]) => void)[]> = {}
+    const fire = (event: string, ...args: any[]): void => {
+      for (const handler of windowHandlers[event] ?? []) {
+        handler(...args)
+      }
+    }
+    let windowOpenHandler: (...args: any[]) => unknown = () => undefined
+    const record = (event: string, handler: (...args: any[]) => void): void => {
+      ;(windowHandlers[event] ??= []).push(handler)
+    }
     const webContents = {
       getURL: vi.fn(() => 'file:///opt/orca/renderer/index.html'),
       isDestroyed: vi.fn(() => false),
       mainFrame: {},
       on: vi.fn((event, handler) => {
-        windowHandlers[event] = handler
+        record(event, handler)
       }),
       once: vi.fn((event, handler) => {
-        windowHandlers[event] = handler
+        record(event, handler)
       }),
       setZoomLevel: vi.fn(),
       setBackgroundThrottling: vi.fn(),
       invalidate: vi.fn(),
       setWindowOpenHandler: vi.fn((handler) => {
-        windowHandlers.windowOpen = handler
+        windowOpenHandler = handler
       }),
       send: vi.fn(),
       isDevToolsOpened: vi.fn(),
@@ -162,32 +173,30 @@ describe('createMainWindow', () => {
       expect(browserWindowOptions.frame).toBe(false)
     }
 
-    expect(windowHandlers.windowOpen({ url: 'https://example.com' })).toEqual({ action: 'deny' })
-    expect(windowHandlers.windowOpen({ url: 'localhost:3000' })).toEqual({ action: 'deny' })
-    expect(windowHandlers.windowOpen({ url: 'file:///etc/passwd' })).toEqual({ action: 'deny' })
-    expect(windowHandlers.windowOpen({ url: 'not a url' })).toEqual({ action: 'deny' })
+    expect(windowOpenHandler({ url: 'https://example.com' })).toEqual({ action: 'deny' })
+    expect(windowOpenHandler({ url: 'localhost:3000' })).toEqual({ action: 'deny' })
+    expect(windowOpenHandler({ url: 'file:///etc/passwd' })).toEqual({ action: 'deny' })
+    expect(windowOpenHandler({ url: 'not a url' })).toEqual({ action: 'deny' })
 
     expect(openExternalMock).toHaveBeenCalledTimes(2)
     expect(openExternalMock).toHaveBeenCalledWith('https://example.com/')
     expect(openExternalMock).toHaveBeenCalledWith('http://localhost:3000/')
 
     const preventDefault = vi.fn()
-    windowHandlers['will-navigate']({ preventDefault } as never, 'https://example.com/docs')
+    fire('will-navigate', { preventDefault } as never, 'https://example.com/docs')
     expect(preventDefault).toHaveBeenCalledTimes(1)
     expect(openExternalMock).toHaveBeenCalledTimes(3)
     expect(openExternalMock).toHaveBeenLastCalledWith('https://example.com/docs')
 
     const localhostPreventDefault = vi.fn()
-    windowHandlers['will-navigate'](
-      { preventDefault: localhostPreventDefault } as never,
-      'localhost:3000'
-    )
+    fire('will-navigate', { preventDefault: localhostPreventDefault } as never, 'localhost:3000')
     expect(localhostPreventDefault).toHaveBeenCalledTimes(1)
     expect(openExternalMock).toHaveBeenCalledTimes(4)
     expect(openExternalMock).toHaveBeenLastCalledWith('http://localhost:3000/')
 
     const fileNavigationPreventDefault = vi.fn()
-    windowHandlers['will-navigate'](
+    fire(
+      'will-navigate',
       { preventDefault: fileNavigationPreventDefault } as never,
       'file:///etc/passwd'
     )
@@ -196,7 +205,8 @@ describe('createMainWindow', () => {
 
     const allowBlankEvent = { preventDefault: vi.fn() }
     const allowBlankPrefs = { partition: 'persist:orca-browser' }
-    windowHandlers['will-attach-webview'](
+    fire(
+      'will-attach-webview',
       allowBlankEvent as never,
       allowBlankPrefs as never,
       { src: 'data:text/html,' } as never
@@ -214,7 +224,8 @@ describe('createMainWindow', () => {
     )
     const allowRouteEvent = { preventDefault: vi.fn() }
     const allowRoutePrefs = { partition: 'persist:orca-browser-v1-route-partition' }
-    windowHandlers['will-attach-webview'](
+    fire(
+      'will-attach-webview',
       allowRouteEvent as never,
       allowRoutePrefs as never,
       { src: 'about:blank' } as never
@@ -225,7 +236,8 @@ describe('createMainWindow', () => {
       sandbox: true
     })
     const denyRouteNavigationEvent = { preventDefault: vi.fn() }
-    windowHandlers['will-attach-webview'](
+    fire(
+      'will-attach-webview',
       denyRouteNavigationEvent as never,
       { partition: 'persist:orca-browser-v1-route-partition' } as never,
       { src: 'https://example.com/' } as never
@@ -233,7 +245,8 @@ describe('createMainWindow', () => {
     expect(denyRouteNavigationEvent.preventDefault).toHaveBeenCalledOnce()
 
     const denyInlineHtmlEvent = { preventDefault: vi.fn() }
-    windowHandlers['will-attach-webview'](
+    fire(
+      'will-attach-webview',
       denyInlineHtmlEvent as never,
       { partition: 'persist:orca-browser' } as never,
       { src: 'data:text/html,<script>alert(1)</script>' } as never
@@ -241,7 +254,7 @@ describe('createMainWindow', () => {
     expect(denyInlineHtmlEvent.preventDefault).toHaveBeenCalledTimes(1)
 
     const guest = { marker: 'guest' }
-    windowHandlers['did-attach-webview']({} as never, guest as never)
+    fire('did-attach-webview', {} as never, guest as never)
     expect(attachGuestPoliciesMock).toHaveBeenCalledWith(guest)
     expect(attachRouteGuestMock).toHaveBeenCalledWith(guest)
     expect(attachGuestPoliciesMock.mock.invocationCallOrder[0]).toBeLessThan(
@@ -256,7 +269,8 @@ describe('createMainWindow', () => {
       partition: 'persist:orca-browser',
       preload: '/tmp/untrusted-preload.js'
     }
-    windowHandlers['will-attach-webview'](
+    fire(
+      'will-attach-webview',
       { preventDefault: vi.fn() } as never,
       hardenedPrefs as never,
       untrustedPreloadParams as never
@@ -266,7 +280,7 @@ describe('createMainWindow', () => {
     expect(hardenedPrefs.preload).not.toContain('untrusted-preload')
 
     const secondGuest = { marker: 'second-guest' }
-    windowHandlers['did-attach-webview']({} as never, secondGuest as never)
+    fire('did-attach-webview', {} as never, secondGuest as never)
     expect(attachGuestPoliciesMock).toHaveBeenLastCalledWith(secondGuest)
     expect(attachRouteGuestMock).toHaveBeenLastCalledWith(secondGuest)
   })

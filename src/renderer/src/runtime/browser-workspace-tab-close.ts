@@ -124,8 +124,10 @@ function tearDownBrowserWorkspaceTabLocally(worktreeId: string, workspaceId: str
   if (!(state.browserTabsByWorktree[worktreeId] ?? []).some((tab) => tab.id === workspaceId)) {
     return
   }
-  destroyWorkspaceWebviews(state.browserPagesByWorkspace, workspaceId)
+  // Why before the teardown: closeBrowserTab announces the MRU page selection, and a guest torn
+  // down first leaves the fallback picking registration order instead (#16306).
   state.closeBrowserTab(workspaceId)
+  destroyWorkspaceWebviews(state.browserPagesByWorkspace, workspaceId)
   // Read after: closeBrowserTab normally removes the mirror itself, and looking it up again is what
   // keeps this from closing whatever tab later took its place.
   const mirroredTab = (useAppStore.getState().unifiedTabsByWorktree[worktreeId] ?? []).find(

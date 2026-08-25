@@ -705,7 +705,14 @@ if (app.isPackaged && process.platform !== 'win32') {
   void hydrateShellPath().then((result) => {
     if (result.ok) {
       mergePathSegments(result.segments)
+      return
     }
+    // Why: on failure the seeded fallbacks stay in front, which for an nvm user means
+    // the newest install rather than their `default`. Name the reason so that shows up
+    // in a log bundle instead of as an unexplained missing CLI.
+    console.warn(
+      `[shell-path] login-shell probe failed (${result.failureReason}); using seeded PATH`
+    )
   })
 }
 configureDevUserDataPath(is.dev)
@@ -1911,7 +1918,8 @@ function recordProcessGoneCrash(
     reason,
     exitCode,
     expectedTeardown: getExpectedTeardownScope(webContentsId),
-    details
+    details,
+    ...(webContentsId !== undefined ? { webContentsId } : {})
   })
 }
 
@@ -2737,6 +2745,9 @@ void app.whenReady().then(async () => {
       agentHookServer.attestCompatibilityAuthority(candidate),
     retireAgentHookCompatibilityAuthority: (paneKey) =>
       agentHookServer.retirePaneAuthority(paneKey),
+    reconcileAgentStatusForEndedProcess: (paneKeys) => {
+      agentHookServer.reconcileEndedProcessForPaneKeys(paneKeys)
+    },
     canRecoverPersistentLocalPtys: () => getDaemonProvider() !== null,
     // Why: evaluated per call, not captured — the RPC server that owns the device registry is
     // constructed with this runtime and does not exist yet at this point.

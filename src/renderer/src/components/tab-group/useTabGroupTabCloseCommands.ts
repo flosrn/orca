@@ -76,11 +76,13 @@ export function useTabGroupTabCloseCommands({
           ? { preserveWorktreeSelection: true, recordInteraction: false }
           : undefined
       if (plan.closesLocally) {
-        destroyWorkspaceWebviews(state.browserPagesByWorkspace, item.entityId)
+        // Why before the teardown: closeBrowserTab announces the MRU page selection, and a guest
+        // torn down first leaves the fallback picking registration order instead (#16306).
         closeBrowserTab(
           item.entityId,
           plan.localCloseReason ? { reason: plan.localCloseReason } : undefined
         )
+        destroyWorkspaceWebviews(state.browserPagesByWorkspace, item.entityId)
       }
       if (plan.removesVisibleTab) {
         closeUnifiedTab(item.id, cleanupOptions)

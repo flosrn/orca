@@ -41,15 +41,32 @@ const BROWSER_WORKSPACE_CLOSE_SITES: {
     why: 'closeBrowserItem, shared by the split-pane strip X (closeItem) and bulk close (closeMany).'
   },
   {
-    path: 'src/renderer/src/hooks/useIpcEvents.ts',
-    closeBrowserTabMentions: 7,
+    path: 'src/renderer/src/hooks/ipc-events/tab-lifecycle-ipc-bridge.ts',
+    closeBrowserTabMentions: 2,
     reasonCarryingCloseCalls: 1,
     planReasonForwardings: 1,
     routesThroughPlan: true,
     why:
-      'onCloseActiveTab is the local menu close and routes through the plan. The other five ' +
-      '(onCloseSessionTab, onSessionTabCloseRequest, onRequestTabClose) answer a close the HOST ' +
-      'asked for, so consulting the plan would echo a session.tabs.close back at the requester.'
+      'onCloseActiveTab is the local menu close and routes through the plan. Its other close is ' +
+      'the ownerless fallback, which has no worktree for the plan to reason about.'
+  },
+  {
+    path: 'src/renderer/src/hooks/ipc-events/browser-request-ipc-bridge.ts',
+    closeBrowserTabMentions: 3,
+    reasonCarryingCloseCalls: 0,
+    planReasonForwardings: 0,
+    routesThroughPlan: false,
+    why:
+      'onRequestTabClose and the bridge-keyed closes answer a close the HOST asked for, so ' +
+      'consulting the plan would echo a session.tabs.close back at the requester.'
+  },
+  {
+    path: 'src/renderer/src/hooks/ipc-events/session-tab-ipc-bridge.ts',
+    closeBrowserTabMentions: 2,
+    reasonCarryingCloseCalls: 0,
+    planReasonForwardings: 0,
+    routesThroughPlan: false,
+    why: 'onCloseSessionTab and onSessionTabCloseRequest are the host asking; same echo carve-out.'
   },
   {
     path: 'src/renderer/src/components/floating-terminal/FloatingTerminalPanel.tsx',
