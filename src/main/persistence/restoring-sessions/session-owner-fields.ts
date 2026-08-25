@@ -74,6 +74,11 @@ export function deleteOwnerKeyedSessionFields(
   if (next.activeBrowserTabIdByWorktree) {
     delete next.activeBrowserTabIdByWorktree[ownerKey]
   }
+  // Rehydration already refuses rows for a worktree that no longer resolves, so leaving these
+  // behind shows nothing -- it just keeps them on disk for a workspace that will never come back.
+  if (next.clientHostedBrowserPagesByWorktree) {
+    delete next.clientHostedBrowserPagesByWorktree[ownerKey]
+  }
   if (next.activeTabTypeByWorktree) {
     delete next.activeTabTypeByWorktree[ownerKey]
   }

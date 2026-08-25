@@ -142,6 +142,24 @@ describe('Store keeps runtime-authored session fields across desktop writes', ()
     expect(store.getWorkspaceSession().clientHostedBrowserPagesByWorktree).toEqual({})
   })
 
+  it('drops the rows for a removed worktree and keeps its siblings', () => {
+    const store = createStore()
+    const other = 'repo-1::/tmp/worktree-b'
+    store.setWorkspaceSession({
+      ...rendererSession('seed'),
+      clientHostedBrowserPagesByWorktree: {
+        [WT]: [page()],
+        [other]: [{ ...page(), browserPageId: 'page-b', workspaceId: other }]
+      }
+    })
+
+    store.removeWorkspaceSessionStateForWorktree(WT)
+
+    expect(
+      Object.keys(store.getWorkspaceSession().clientHostedBrowserPagesByWorktree ?? {})
+    ).toEqual([other])
+  })
+
   it('still lets the runtime drop one worktree while keeping another', () => {
     const store = createStore()
     const other = 'repo-1::/tmp/worktree-b'
