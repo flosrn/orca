@@ -81,6 +81,17 @@ const BROWSER_WORKSPACE_CLOSE_SITES: {
       'and the deferred-navigation TTL collect those.'
   },
   {
+    path: 'src/renderer/src/runtime/browser-workspace-tab-close.ts',
+    closeBrowserTabMentions: 1,
+    reasonCarryingCloseCalls: 0,
+    planReasonForwardings: 0,
+    routesThroughPlan: true,
+    why:
+      'The funnel itself. Its one close is the disavowal fallback: when every owning host answers ' +
+      'that it has no such tab, nobody is left to retract the mirror through sync, so the funnel ' +
+      'finishes the teardown. No cleanup reason because a disavowed page was never staged.'
+  },
+  {
     path: 'src/renderer/src/store/slices/browser.ts',
     closeBrowserTabMentions: 3,
     reasonCarryingCloseCalls: 0,

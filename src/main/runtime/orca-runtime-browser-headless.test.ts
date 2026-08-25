@@ -134,7 +134,11 @@ describe('RuntimeBrowserCommands headless close and forwarding', () => {
       commands.browserTabClose({ worktree: 'id:wt-1', page: 'page-other' })
     ).rejects.toMatchObject({ code: 'browser_tab_not_found' })
     expect(closeTab).toHaveBeenCalledTimes(1)
-    expect(retireRuntimeOwnedBrowserSessionTab).toHaveBeenCalledTimes(1)
+    // Why the unknown page still reaches retirement: it is the ghost probe — a session row whose
+    // page this runtime no longer has is the one thing left to close. This host reports no such
+    // row, so the close still fails closed rather than claiming it removed something.
+    expect(retireRuntimeOwnedBrowserSessionTab).toHaveBeenCalledTimes(2)
+    expect(retireRuntimeOwnedBrowserSessionTab).toHaveBeenLastCalledWith('wt-1', 'page-other')
   })
 
   it('closes the active headless tab on an implicit close', async () => {

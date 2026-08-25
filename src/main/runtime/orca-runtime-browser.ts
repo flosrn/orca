@@ -271,7 +271,8 @@ export type RuntimeBrowserCommandHost = {
     options?: BrowserSessionTabSelectionOptions
   ): void
   notifyHeadlessBrowserSessionTabsChanged?(worktreeId: string): void
-  retireRuntimeOwnedBrowserSessionTab?(worktreeId: string, browserPageId: string): void
+  /** True when a runtime-owned session row for that page existed and was retired. */
+  retireRuntimeOwnedBrowserSessionTab?(worktreeId: string, browserPageId: string): boolean | void
 }
 
 export class RuntimeBrowserCommands {
@@ -285,6 +286,24 @@ export class RuntimeBrowserCommands {
       throw new BrowserError('browser_no_tab', 'No browser session is active')
     }
     return bridge
+  }
+
+  /**
+   * Retires a session row for a page nothing here can close any more.
+   *
+   * A client-hosted page whose runtime record is gone -- released as unrecoverable, or created by a
+   * build that kept its records in memory only -- still leaves a row every paired device can see,
+   * and every close path below is keyed on a live guest this runtime does not have. Without this
+   * the row's X fails closed and the ghost outlives the browser it named.
+   */
+  private retireGhostBrowserSessionRow(
+    worktreeId: string | undefined,
+    browserPageId: string
+  ): boolean {
+    return (
+      worktreeId !== undefined &&
+      this.host.retireRuntimeOwnedBrowserSessionTab?.(worktreeId, browserPageId) === true
+    )
   }
 
   private hasLiveRegisteredBrowserTab(
@@ -1974,8 +1993,21 @@ export class RuntimeBrowserCommands {
       }
       return { closed: true }
     }
-    const bridge = this.requireAgentBrowserBridge()
     const explicitPage = typeof params.page === 'string' && params.page.length > 0
+    const bridge = this.host.getAgentBrowserBridge()
+    if (!bridge) {
+      if (
+        explicitPage &&
+        params.worktree &&
+        this.retireGhostBrowserSessionRow(
+          (await this.host.resolveWorktreeSelector(params.worktree)).id,
+          params.page as string
+        )
+      ) {
+        return { closed: true }
+      }
+      throw new BrowserError('browser_no_tab', 'No browser session is active')
+    }
     const worktreeId = explicitPage
       ? params.worktree
         ? (await this.host.resolveWorktreeSelector(params.worktree)).id
@@ -2012,6 +2044,9 @@ export class RuntimeBrowserCommands {
         return { closed: false }
       }
       if (explicitPage && !bridge.getRegisteredTabs(worktreeId).has(resolvedTabId)) {
+        if (this.retireGhostBrowserSessionRow(worktreeId, resolvedTabId)) {
+          return { closed: true }
+        }
         const scope = worktreeId ? ' in this worktree' : ''
         throw new BrowserError(
           'browser_tab_not_found',
@@ -2032,6 +2067,9 @@ export class RuntimeBrowserCommands {
     }
 
     if (!authoritativeWindow && tabId && !bridge.getRegisteredTabs(worktreeId).has(tabId)) {
+      if (this.retireGhostBrowserSessionRow(worktreeId, tabId)) {
+        return { closed: true }
+      }
       const scope = worktreeId ? ' in this worktree' : ''
       throw new BrowserError('browser_tab_not_found', `Browser page ${tabId} was not found${scope}`)
     }

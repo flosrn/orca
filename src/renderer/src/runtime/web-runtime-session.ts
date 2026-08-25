@@ -1202,8 +1202,16 @@ export async function activateWebRuntimeSessionTab(args: {
   tabId: string
   environmentId?: string | null
 }): Promise<boolean> {
-  return callWebRuntimeSessionTabMethod('session.tabs.activate', args)
+  return (await callWebRuntimeSessionTabMethod('session.tabs.activate', args)) === 'applied'
 }
+
+/**
+ * Why 'unknown-tab' is its own outcome: it is the host's definitive answer that it has no such
+ * tab, which is the only evidence that lets a client finish a teardown the host cannot. Every
+ * other failure -- a dropped connection, a timeout -- is a "not now", and treating it the same
+ * would tear down tabs a reachable host still holds.
+ */
+export type WebRuntimeSessionTabCloseOutcome = 'applied' | 'unknown-tab' | 'failed'
 
 export async function closeWebRuntimeSessionTab(args: {
   worktreeId: string
@@ -1212,7 +1220,7 @@ export async function closeWebRuntimeSessionTab(args: {
   reason: RuntimeSessionTabCloseReason
   publicationEpoch?: string | null
   terminalHandle?: string | null
-}): Promise<boolean> {
+}): Promise<WebRuntimeSessionTabCloseOutcome> {
   return callWebRuntimeSessionTabMethod('session.tabs.close', args)
 }
 
@@ -1333,13 +1341,13 @@ async function callWebRuntimeSessionTabMethod(
     publicationEpoch?: string | null
     terminalHandle?: string | null
   }
-): Promise<boolean> {
+): Promise<WebRuntimeSessionTabCloseOutcome> {
   const environmentId =
     args.environmentId?.trim() ??
     useAppStore.getState().settings?.activeRuntimeEnvironmentId?.trim() ??
     null
   if (!environmentId || !isWebRuntimeSessionActive(environmentId)) {
-    return false
+    return 'failed'
   }
   const intentOwner = captureWebSessionIntentOwner(environmentId)
   const callEnvironment = captureRuntimeEnvironmentCall(environmentId, intentOwner.pairingRevision)
@@ -1357,7 +1365,7 @@ async function callWebRuntimeSessionTabMethod(
     console.warn('[web-runtime-session] suppressed lifecycle close without incarnation evidence', {
       closeReason: args.reason
     })
-    return false
+    return 'failed'
   }
 
   const immediateHostTabId = toHostSessionTabId(args.tabId)
@@ -1429,7 +1437,7 @@ async function callWebRuntimeSessionTabMethod(
         expectedEnvironmentPairingRevision: intentOwner.pairingRevision
       })
     }
-    return true
+    return 'applied'
   } catch (error) {
     if (activationHostTabId) {
       clearWebSessionFocusIntentIfMatches(intentOwner, args.worktreeId, activationHostTabId)
@@ -1448,7 +1456,9 @@ async function callWebRuntimeSessionTabMethod(
       `[web-runtime-session] failed to ${isClose ? 'close' : 'activate'} tab:`,
       error instanceof Error ? error.message : String(error)
     )
-    return false
+    // Why only for a close: an activate has nothing to fall back to, and its callers read the
+    // boolean, so classifying its failures more finely would only invite a wrong reading.
+    return isClose && hasRuntimeRpcErrorCode(error, 'tab_not_found') ? 'unknown-tab' : 'failed'
   }
 }
 

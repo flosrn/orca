@@ -139,7 +139,7 @@ describe('web runtime session tab actions', () => {
         tabId: 'local-browser-unified',
         reason: 'user'
       })
-    ).resolves.toBe(true)
+    ).resolves.toBe('applied')
 
     expect(runtimeCall).toHaveBeenNthCalledWith(1, {
       selector: ENVIRONMENT_ID,
@@ -216,14 +216,14 @@ describe('web runtime session tab actions', () => {
         publicationEpoch: 'epoch-1',
         terminalHandle: 'term-1'
       })
-    ).resolves.toBe(true)
+    ).resolves.toBe('applied')
     await expect(
       closeWebRuntimeSessionTab({
         worktreeId: WORKTREE_ID,
         tabId: 'local-browser-unified',
         reason: 'user'
       })
-    ).resolves.toBe(true)
+    ).resolves.toBe('applied')
 
     expect(runtimeCall).toHaveBeenNthCalledWith(1, {
       selector: ENVIRONMENT_ID,
@@ -265,7 +265,7 @@ describe('web runtime session tab actions', () => {
         tabId: 'local-browser-unified',
         reason: 'pty-exit'
       })
-    ).resolves.toBe(false)
+    ).resolves.toBe('failed')
 
     expect(runtimeCall).toHaveBeenCalledTimes(1)
     expect(runtimeCall).toHaveBeenCalledWith(
@@ -301,7 +301,7 @@ describe('web runtime session tab actions', () => {
         publicationEpoch: 'epoch-1',
         terminalHandle: 'term-1'
       })
-    ).resolves.toBe(false)
+    ).resolves.toBe('failed')
 
     expect(runtimeCall).toHaveBeenNthCalledWith(
       1,
@@ -352,7 +352,7 @@ describe('web runtime session tab actions', () => {
         publicationEpoch: 'epoch-1',
         terminalHandle: 'term-1'
       })
-    ).resolves.toBe(true)
+    ).resolves.toBe('applied')
 
     expect(
       isWebSessionCloseIntentPending(
@@ -403,7 +403,7 @@ describe('web runtime session tab actions', () => {
         publicationEpoch: 'epoch-1',
         terminalHandle: 'term-1'
       })
-    ).resolves.toBe(true)
+    ).resolves.toBe('applied')
 
     expect(
       isWebSessionCloseIntentPending(
@@ -438,7 +438,7 @@ describe('web runtime session tab actions', () => {
         tabId: 'local-browser-unified',
         reason: 'user'
       })
-    ).resolves.toBe(false)
+    ).resolves.toBe('failed')
 
     expect(
       isWebSessionCloseIntentPending(
