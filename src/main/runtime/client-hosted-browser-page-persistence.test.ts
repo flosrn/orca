@@ -139,14 +139,22 @@ describe('client-hosted browser page persistence', () => {
     const store = sessionStore()
     persistClientHostedBrowserPages(store, registryWith(livePlacement), 'repo-1::wt-a')
     const live = registryWith(livePlacement)
-
-    rehydrateClientHostedBrowserPages(live, {
-      listWorkspaceSessions: () => [store.session],
-      isKnownWorktree: () => true,
-      now: () => NOW
-    })
+    // Why the warning is the assertion: the registry refuses a duplicate publish on its own, so
+    // outcome alone cannot tell a skipped attempt from a rejected one — and only the skip is
+    // silent. A rejected one would log on every start for every page the registry already had.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      rehydrateClientHostedBrowserPages(live, {
+        listWorkspaceSessions: () => [store.session],
+        isKnownWorktree: () => true,
+        now: () => NOW
+      })
+    } finally {
+      warn.mockRestore()
+    }
 
     expect(live.getPage('page-a')?.placement).toEqual(livePlacement)
+    expect(warn).not.toHaveBeenCalled()
   })
 
   it('ignores a row whose worktree key disagrees with its own workspace', () => {

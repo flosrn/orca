@@ -277,6 +277,41 @@ describe('web runtime session tab actions', () => {
     )
   })
 
+  // Why this distinction is load-bearing: a close that reports 'unknown-tab' lets the client
+  // finish a teardown the host cannot, and reporting it for an ordinary failure would tear down
+  // tabs a reachable host still holds.
+  it.each([
+    ['tab_not_found', 'unknown-tab'],
+    ['runtime_rpc_timeout', 'failed']
+  ])('classifies a %s close refusal as %s', async (code, outcome) => {
+    const runtimeCall = vi
+      .fn()
+      .mockResolvedValueOnce({ id: 'close', ok: false, error: { code, message: code } })
+      .mockResolvedValueOnce({ id: 'list', ok: true, result: makeSnapshot() })
+    vi.stubGlobal('window', { api: { runtimeEnvironments: { call: runtimeCall } } })
+
+    await expect(
+      closeWebRuntimeSessionTab({
+        worktreeId: WORKTREE_ID,
+        tabId: 'local-browser-unified',
+        reason: 'user'
+      })
+    ).resolves.toBe(outcome)
+  })
+
+  it('never reports an activate as a forgotten tab, which has nothing to fall back to', async () => {
+    const runtimeCall = vi.fn().mockResolvedValueOnce({
+      id: 'activate',
+      ok: false,
+      error: { code: 'tab_not_found', message: 'tab_not_found' }
+    })
+    vi.stubGlobal('window', { api: { runtimeEnvironments: { call: runtimeCall } } })
+
+    await expect(
+      activateWebRuntimeSessionTab({ worktreeId: WORKTREE_ID, tabId: 'local-browser-unified' })
+    ).resolves.toBe(false)
+  })
+
   it('fails closed when reconnect routes a lifecycle close to an older host', async () => {
     const runtimeCall = vi
       .fn()

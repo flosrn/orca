@@ -100,6 +100,25 @@ function clientHostedHandles(): Partial<AppState> {
   }
 }
 
+/** One workspace whose pages were opened against two different runtime environments. */
+function twoOwnerClientHostedHandles(): Partial<AppState> {
+  const placement = {
+    kind: 'client' as const,
+    browserHostClientId: 'host-a',
+    browserHostGeneration: 1,
+    pageHostGeneration: 1
+  }
+  return {
+    browserPagesByWorkspace: {
+      [WORKSPACE_ID]: [browserPage(PAGE_ID, WORKSPACE_ID), browserPage('page-c', WORKSPACE_ID)]
+    } as AppState['browserPagesByWorkspace'],
+    remoteBrowserPageHandlesByPageId: {
+      [PAGE_ID]: { environmentId: 'environment-a', remotePageId: 'remote-page-a', placement },
+      'page-c': { environmentId: 'environment-b', remotePageId: 'remote-page-c', placement }
+    } as AppState['remoteBrowserPageHandlesByPageId']
+  }
+}
+
 function liveStore(): Record<string, unknown> {
   return {
     browserTabsByWorktree: { 'worktree-a': [{ id: WORKSPACE_ID }] },
@@ -194,6 +213,19 @@ describe('closeBrowserWorkspaceTabOnHosts when the owning host cannot settle the
     closeWorkspace(false, clientHostedHandles())
     await settle()
 
+    expect(destroyWorkspaceWebviews).not.toHaveBeenCalled()
+    expect(storeState.current.closeBrowserTab).not.toHaveBeenCalled()
+  })
+
+  it('leaves the tab standing while any owner still knows the page', async () => {
+    // Two hosts hold pages of this one workspace. The one that still knows it removes the mirror
+    // through tab sync, so tearing down here on the other one's disavowal would race that.
+    closeWebRuntimeSessionTab.mockResolvedValueOnce('unknown-tab').mockResolvedValueOnce('applied')
+
+    closeWorkspace(false, twoOwnerClientHostedHandles())
+    await settle()
+
+    expect(closeWebRuntimeSessionTab).toHaveBeenCalledTimes(2)
     expect(destroyWorkspaceWebviews).not.toHaveBeenCalled()
     expect(storeState.current.closeBrowserTab).not.toHaveBeenCalled()
   })
