@@ -2811,15 +2811,11 @@ export class Store {
 
   setWorkspaceSession(session: PersistedState['workspaceSession'], hostId?: string | null): void {
     const resolved = this.resolveHostId(hostId)
-    const preserved = preserveRuntimeAuthoredWorkspaceSessionFields(
-      session,
-      this.getWorkspaceSession(resolved)
-    )
     if (resolved === LOCAL_EXECUTION_HOST_ID) {
-      this.setLocalWorkspaceSession(preserved)
+      this.setLocalWorkspaceSession(session)
       return
     }
-    this.setHostWorkspaceSession(resolved, preserved)
+    this.setHostWorkspaceSession(resolved, session)
   }
 
   removeWorkspaceSessionStateForWorktree(
@@ -2888,6 +2884,12 @@ export class Store {
 
   /** Persist a non-'local' host partition; remote hosts skip setLocalWorkspaceSession's local-daemon PTY-binding race guards. */
   private setHostWorkspaceSession(hostId: ExecutionHostId, session: WorkspaceSessionState): void {
+    // Why here and not at the callers: the before-unload stage path writes the renderer's payload
+    // straight through, so a per-caller guard leaves the quit write erasing runtime-authored rows.
+    session = preserveRuntimeAuthoredWorkspaceSessionFields(
+      session,
+      this.state.workspaceSessionsByHostId?.[hostId]
+    )
     // Why: each partition owns its topology fence; renderer writes omit it and must rebase locally.
     session = sanitizeWorkspaceSessionTerminalRetirements(
       session,
@@ -2908,6 +2910,9 @@ export class Store {
     deferSnapshotFiles = false
   ): void {
     const prior = this.state.workspaceSession
+    // Why here and not at the callers: the before-unload stage path writes the renderer's payload
+    // straight through, so a per-caller guard leaves the quit write erasing runtime-authored rows.
+    session = preserveRuntimeAuthoredWorkspaceSessionFields(session, prior)
     session = sanitizeWorkspaceSessionTerminalRetirements(session, prior)
     session = pruneWorkspaceSessionBrowserHistory(
       pruneLocalTerminalScrollbackBuffers(session, this.state.repos)
