@@ -46,6 +46,17 @@ describe('preserving runtime-authored workspace session fields', () => {
     ).toEqual(replaced)
   })
 
+  it('treats an explicit undefined as never having mentioned the field', () => {
+    // The one ambiguous input: a writer that spreads the field through as undefined is still a
+    // writer that knows nothing about it, so it must inherit rather than clear.
+    const next = preserveRuntimeAuthoredWorkspaceSessionFields(
+      { ...session(), clientHostedBrowserPagesByWorktree: undefined },
+      session({ 'repo-1::wt-a': [row] })
+    )
+
+    expect(next.clientHostedBrowserPagesByWorktree).toEqual({ 'repo-1::wt-a': [row] })
+  })
+
   it('leaves an untouched write alone rather than inventing a field', () => {
     const next = session()
 
