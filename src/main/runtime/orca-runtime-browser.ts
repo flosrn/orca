@@ -1993,15 +1993,18 @@ export class RuntimeBrowserCommands {
       }
       return { closed: true }
     }
-    const explicitPage = typeof params.page === 'string' && params.page.length > 0
+    const namedPageId = typeof params.page === 'string' && params.page.length > 0 ? params.page : null
+    const explicitPage = namedPageId !== null
     const bridge = this.host.getAgentBrowserBridge()
     if (!bridge) {
+      // Why before the refusal: a runtime with no browser session cannot be holding this page
+      // either, but it can still be carrying the session row that names it.
       if (
-        explicitPage &&
+        namedPageId &&
         params.worktree &&
         this.retireGhostBrowserSessionRow(
           (await this.host.resolveWorktreeSelector(params.worktree)).id,
-          params.page as string
+          namedPageId
         )
       ) {
         return { closed: true }
@@ -2015,8 +2018,8 @@ export class RuntimeBrowserCommands {
       : await this.resolveBrowserWorktreeId(params.worktree)
 
     let tabId: string | null = null
-    if (typeof params.page === 'string' && params.page.length > 0) {
-      tabId = params.page
+    if (namedPageId !== null) {
+      tabId = namedPageId
     } else if (params.index !== undefined) {
       const tabs = bridge.getRegisteredTabs(worktreeId)
       const entries = [...tabs.entries()]

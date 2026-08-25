@@ -59,6 +59,8 @@ export type MirroredBrowserPage = {
   remotePageId: string
   url: string
   visibleTabId: string | null
+  /** The browser workspace the tab strip renders as one row; its X is the product close. */
+  workspaceId: string
 }
 
 export async function findPairedWorktreeId(page: Page, repoPath: string): Promise<string | null> {
@@ -129,7 +131,8 @@ export async function findMirroredBrowserPage(
             placementKind: handle?.placement?.kind ?? null,
             remotePageId: handle?.remotePageId ?? browserPage.id,
             url: browserPage.url,
-            visibleTabId: visibleTab?.id ?? null
+            visibleTabId: visibleTab?.id ?? null,
+            workspaceId: workspace.id
           }
         }
       }

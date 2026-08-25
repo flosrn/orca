@@ -174,12 +174,11 @@ test('closes a restored client-hosted row whose runtime has no record of it', as
     expect(ghost?.visibleTabId, 'the restored row must have a visible tab to close').not.toBeNull()
 
     // The product affordance, not a store action: the defect is that this X does nothing, and a
-    // store call would route around the very close policy under test.
-    const ghostTab = client.page.locator(
-      `[data-testid="sortable-tab"][data-tab-id="${ghost!.visibleTabId!}"]`
-    )
+    // store call would route around the very close policy under test. The strip keys a browser row
+    // by its workspace id, and the X is the row's only button.
+    const ghostTab = client.page.locator(`[data-tab-id="${ghost!.workspaceId}"]`)
     await expect(ghostTab).toBeVisible({ timeout: 60_000 })
-    await ghostTab.getByRole('button', { name: /^Close tab/i }).click()
+    await ghostTab.locator('> button').click()
 
     await expect
       .poll(
