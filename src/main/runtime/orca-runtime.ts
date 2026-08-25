@@ -1631,6 +1631,11 @@ type TerminalCreateOptions = {
   // CLI is `cursor-agent`). Callers that know the agent name it here instead of
   // guessing a command, and the runtime builds the configured launch.
   startupAgent?: TuiAgent
+  // Why: only meaningful with startupAgent. The prompt is embedded in the
+  // agent's launch (argv/flag per promptInjectionMode) so the first turn
+  // starts with the process — no paste, no submission verification. Agents
+  // whose plan would defer the prompt to a post-start paste are refused.
+  agentPrompt?: string
   launchPreferences?: AgentLaunchPreferences
   terminalColorQueryReplies?: TerminalOscColorQueryReplyColors
   viewMode?: 'terminal' | 'chat'
@@ -14845,6 +14850,20 @@ export class OrcaRuntimeService {
       projectRuntime: this.store
         ? resolveLocalProjectRuntimeForWorktreeId(this.requireStore(), pty.worktreeId)
         : undefined
+    })
+  }
+
+  // Why: argv-injected prompts are built BEFORE a terminal exists, so the CLI
+  // name must come from the target workspace rather than a pane handle. This
+  // preserves `orca-ide` for WSL worktrees and bare `orca` for SSH/native.
+  async getWorktreeOrchestrationCliCommand(worktreeId: string): Promise<'orca' | 'orca-ide'> {
+    const workspace = await this.resolveTerminalWorkspaceLaunchScope(`id:${worktreeId}`)
+    return resolveTerminalOrchestrationCliCommand({
+      connectionId: workspace.connectionId,
+      isWsl: null,
+      worktreeId: workspace.id,
+      worktreePath: workspace.path,
+      projectRuntime: this.resolveProjectRuntimeForWorktree(workspace.id)
     })
   }
 
@@ -28589,7 +28608,7 @@ export class OrcaRuntimeService {
     const sessionOptions = this.toAgentSessionOptions(opts.launchPreferences)
     const startupPlan = buildAgentStartupPlan({
       agent,
-      prompt: '',
+      prompt: opts.agentPrompt ?? '',
       cmdOverrides: settings.agentCmdOverrides ?? {},
       agentArgs: resolveTuiAgentLaunchArgs(agent, settings.agentDefaultArgs),
       agentEnv: resolveTuiAgentLaunchEnv(agent, settings.agentDefaultEnv),
@@ -28607,6 +28626,13 @@ export class OrcaRuntimeService {
         throw new Error(`Could not build launch command for ${opts.startupAgent}.`)
       }
       return opts
+    }
+    // Why: a deferred followupPrompt means the plan could NOT embed the prompt
+    // in the launch and expects a post-start paste — exactly the submission
+    // race agentPrompt exists to avoid. Refuse loudly instead of silently
+    // degrading to the paste path.
+    if (opts.agentPrompt && startupPlan.followupPrompt) {
+      throw new Error(`Agent ${agent} cannot embed a startup prompt in its launch command.`)
     }
 
     await this.markWorkspaceTrustedForAgent(agent, workspace.connectionId, workspace.path)
