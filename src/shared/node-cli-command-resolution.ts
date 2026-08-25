@@ -155,8 +155,11 @@ function resolveNvmDefaultVersion(nvmVersionsDir: string, installed: string[]): 
 }
 
 function readNvmAlias(aliasPath: string): string | null {
-  // Why the traversal guard: the token is interpolated into a path below, and a
-  // hand-edited alias must not be able to walk out of the alias directory.
+  // Why this is a cheap check and not the actual containment: join() normalizes
+  // `..` away before we ever see it, so this only rejects the literal spelling.
+  // The real guarantee is downstream — matchNvmVersion can only ever return an
+  // entry of readdirSync(versions/node), so no token can put a foreign path on
+  // PATH regardless of what the alias file says.
   if (aliasPath.includes('..')) {
     return null
   }
@@ -173,10 +176,16 @@ function readNvmAlias(aliasPath: string): string | null {
 
 /** `24` matches the highest installed `v24.x.y`; `v24.18.0` matches exactly. */
 function matchNvmVersion(token: string, installed: string[]): string | null {
-  const wanted = parseVersionSegment(token)
-  if (wanted.length === 0) {
+  // Why a shape check and not a length check: parseVersionSegment coerces every
+  // unparseable segment to 0, so an unresolvable token like `garbage` or
+  // `lts/nonexistent` became [0] and prefix-matched `v0.12.x` — or any stray
+  // non-version directory — instead of matching nothing. (A length check cannot
+  // catch it: ''.split('.') is [''], never empty.) Real nvm answers N/A here,
+  // and so must we, which leaves the newest-first ordering untouched.
+  if (!/^v?\d/.test(token)) {
     return null
   }
+  const wanted = parseVersionSegment(token)
   const matches = installed.filter((entry) => {
     const parts = parseVersionSegment(entry)
     return wanted.every((segment, index) => parts[index] === segment)

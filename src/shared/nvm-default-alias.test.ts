@@ -102,6 +102,27 @@ describe('nvm default alias decides the seeded runtime', () => {
     expect(seededNvmDir(home)).toBe(join(home, '.nvm', 'versions', 'node', 'v26.7.0', 'bin'))
   })
 
+  it.each(['garbage', 'iojs', 'lts/nonexistent', 'my-custom-alias'])(
+    'treats the unresolvable default %s as no preference, like nvm N/A',
+    (token) => {
+      // Why v0.12.7 is in the fixture: parseVersionSegment coerces unparseable
+      // segments to 0, so before the shape guard these tokens became [0] and
+      // prefix-matched the 0.x install — seeding a decade-old node.
+      const home = makeNvmHome({
+        versions: ['v0.12.7', 'v24.18.0', 'v26.7.0'],
+        defaultAlias: token
+      })
+      expect(seededNvmDir(home)).toBe(join(home, '.nvm', 'versions', 'node', 'v26.7.0', 'bin'))
+    }
+  )
+
+  it('still treats a numeric default as a version prefix, matching nvm', () => {
+    // The guard must reject non-versions without rejecting legitimate prefixes:
+    // real nvm resolves `0` to an installed v0.x.
+    const home = makeNvmHome({ versions: ['v0.12.7', 'v24.18.0'], defaultAlias: '0' })
+    expect(seededNvmDir(home)).toBe(join(home, '.nvm', 'versions', 'node', 'v0.12.7', 'bin'))
+  })
+
   it('still finds a CLI that lives outside the default version', () => {
     // Ordering must be a preference, not a restriction: the other versions stay
     // as fallbacks so a CLI installed elsewhere is still reachable.

@@ -15,10 +15,13 @@ const DELIMITER = '__ORCA_SHELL_PATH__'
 // Why 10s: 5s was chosen without measurement and a real profile overruns it —
 // a bash -ilc loading nvm, rvm, conda and gcloud measures ~1s idle but 6-7s on a
 // loaded machine, so a cold start under load silently fell back to the seeded
-// PATH. Startup does not block on this (index.ts fires it and forgets), and the
-// one awaited consumer is agent detection, which gets a worse answer from a
-// probe that gives up at 5s than from one that finishes at 6s. Mirrors the
-// budget mature GUI editors settled on for the same probe.
+// PATH. Mirrors the budget mature GUI editors settled on for the same probe.
+//
+// The tail this lengthens is not uniform. On posix the probe is fire-and-forget
+// (index.ts) and only agent detection awaits it. On packaged Windows it also
+// gates terminal runtime services and every non-WSL git command, so the extra
+// 5s binds there — but only for a profile that already blew the old budget, and
+// those users were otherwise stuck with a wrong PATH for the whole session.
 const SPAWN_TIMEOUT_MS = 10_000
 
 // ANSI escape sequences can leak into the captured output when the user's rc
@@ -39,11 +42,13 @@ export type HydrationResult =
 
 let cached: Promise<HydrationResult> | null = null
 let probeQueue = Promise.resolve()
-// Why: patchPackagedProcessPath seeds a version manager's newest install dir
-// ahead of PATH. nvm's startup `use` honors whatever node is already on PATH over
-// the user's `default` alias, so a probe inheriting that seed comes back pinned to
-// the newest install and every terminal loses the global CLIs installed under
-// `default`. Snapshot PATH here instead: module init runs while the import graph is
+// Why: patchPackagedProcessPath seeds a version-manager install dir ahead of
+// PATH. nvm's startup `use` honors whatever node is already on PATH over the
+// user's `default` alias, so a probe inheriting that seed comes back pinned to
+// the seeded version rather than reporting what the user's shell really
+// resolves. The seed now prefers the `default` alias, but still falls back to
+// newest-first when default resolution yields nothing (no alias, `system`,
+// uninstalled target, cycle), so the probe must stay insulated from it. Snapshot PATH here instead: module init runs while the import graph is
 // evaluated, strictly before any statement in main's body, so it cannot observe the
 // seeds — and unlike an explicit hand-off from the seeding site, there is no call
 // ordering left for a later refactor to break. Windows keys it `Path`, and a Git Bash
