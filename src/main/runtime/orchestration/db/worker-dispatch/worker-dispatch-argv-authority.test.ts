@@ -79,6 +79,15 @@ describe('argv worker authority: mint before spawn, bind after', () => {
     )
   })
 
+  it('refuses to bind without a launch-token commitment', () => {
+    const { d, dispatchId } = startDispatch()
+    d.mintStartingWorkerCapability({ dispatchId })
+    expect(() => d.bindStartingWorkerAuthority(bindParams(dispatchId))).toThrow(
+      /launch-token commitment does not match/
+    )
+    expect(d.getDispatchContextById(dispatchId)).toMatchObject({ assignee_pane_key: null })
+  })
+
   it('refuses to bind a pane whose launch token does not match the commitment', () => {
     const { d, dispatchId } = startDispatch()
     d.commitDispatchLaunchTokenHash(dispatchId, TOKEN_HASH)

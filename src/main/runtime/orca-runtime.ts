@@ -1620,10 +1620,11 @@ type TerminalCreateOptions = {
   // CLI is `cursor-agent`). Callers that know the agent name it here instead of
   // guessing a command, and the runtime builds the configured launch.
   startupAgent?: TuiAgent
-  // Why: only meaningful with startupAgent. The prompt is embedded in the
-  // agent's launch (argv/flag per promptInjectionMode) so the first turn
-  // starts with the process — no paste, no submission verification. Agents
-  // whose plan would defer the prompt to a post-start paste are refused.
+  // Why: embedded for startupAgent and for a bare command that resolves to a
+  // known TUI agent. The prompt is in the launch (argv/flag per
+  // promptInjectionMode) so the first turn starts with the process — no paste,
+  // no submission verification. Agents whose plan would defer the prompt to a
+  // post-start paste are refused.
   agentPrompt?: string
   launchPreferences?: AgentLaunchPreferences
   terminalColorQueryReplies?: TerminalOscColorQueryReplyColors
