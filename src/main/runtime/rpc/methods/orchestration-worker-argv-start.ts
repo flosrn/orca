@@ -84,15 +84,6 @@ export async function startArgvWorkerDispatch(args: {
     warning: terminal.warning
   })
   args.onStage('authority_bind')
-  // Why: adoption paths can substitute a canonical surface handle
-  // (agentSessionEnsure/stablePaneOwner). The preamble already names
-  // preAllocatedHandle as the worker's identity; a substituted handle would
-  // make the worker self-identify wrongly forever.
-  if (terminal.handle !== preAllocatedHandle) {
-    throw new Error(
-      `Worker terminal adopted handle ${terminal.handle} instead of the pre-allocated ${preAllocatedHandle}.`
-    )
-  }
   const setupStage = {
     db,
     dispatchId: args.dispatchId,
@@ -100,6 +91,15 @@ export async function startArgvWorkerDispatch(args: {
     terminalHandle: terminal.handle,
     setup: args.setupReceipt,
     effects
+  }
+  // Why: createTerminal has already spawned the pane. failWorkerStartWithReceipt
+  // rebuilds effects from DB, so the identity mismatch must persist the exact
+  // terminal residual before it throws or the receipt loses the spawned handle.
+  if (terminal.handle !== preAllocatedHandle) {
+    persistWorkerReadinessStage(setupStage)
+    throw new Error(
+      `Worker terminal adopted handle ${terminal.handle} instead of the pre-allocated ${preAllocatedHandle}.`
+    )
   }
   if (persistGatedSetupSpawnFailure(setupStage)) {
     args.onStage('setup_start')
