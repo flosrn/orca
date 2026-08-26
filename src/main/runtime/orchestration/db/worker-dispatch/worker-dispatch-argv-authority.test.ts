@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { afterEach, describe, expect, it } from 'vitest'
 import { OrchestrationDb } from '../orchestration-db'
+import { NESTED_WORKER_MAX_DEPTH_DEFAULT } from '../../../../../shared/nested-worker-depth'
 
 const PANE = 'tab_worker:11111111-1111-4111-8111-111111111111'
 const OTHER_PANE = 'tab_other:22222222-2222-4222-8222-222222222222'
@@ -17,7 +18,15 @@ describe('argv worker authority: mint before spawn, bind after', () => {
   function startDispatch() {
     db = new OrchestrationDb(':memory:')
     const task = db.createTask({ spec: 'argv worker' })
-    const started = db.createStartingWorkerDispatch({ taskId: task.id, startOptions: {} })
+    const started = db.createStartingWorkerDispatch({
+      taskId: task.id,
+      startOptions: {},
+      // Upstream #16668 requires every caller to decide its nesting. These cases mint a
+      // root dispatch and assert authority, not depth, so a root creator and the shipped
+      // default keep the subject unchanged.
+      creator: { kind: 'system' },
+      maxDepth: NESTED_WORKER_MAX_DEPTH_DEFAULT
+    })
     return { d: db, dispatchId: started.dispatch.id }
   }
 
@@ -77,6 +86,15 @@ describe('argv worker authority: mint before spawn, bind after', () => {
     expect(() => d.bindStartingWorkerAuthority(bindParams(dispatchId))).toThrow(
       /has no minted capability to bind/
     )
+  })
+
+  it('refuses to bind without a launch-token commitment', () => {
+    const { d, dispatchId } = startDispatch()
+    d.mintStartingWorkerCapability({ dispatchId })
+    expect(() => d.bindStartingWorkerAuthority(bindParams(dispatchId))).toThrow(
+      /launch-token commitment does not match/
+    )
+    expect(d.getDispatchContextById(dispatchId)).toMatchObject({ assignee_pane_key: null })
   })
 
   it('refuses to bind a pane whose launch token does not match the commitment', () => {
@@ -156,7 +174,15 @@ describe('argv worker authority: mint before spawn, bind after', () => {
     d.markWorkerDispatchReady(dispatchId)
 
     const rival = d.createTask({ spec: 'rival argv worker' })
-    const second = d.createStartingWorkerDispatch({ taskId: rival.id, startOptions: {} })
+    const second = d.createStartingWorkerDispatch({
+      taskId: rival.id,
+      startOptions: {},
+      // Upstream #16668 requires every caller to decide its nesting. These cases mint a
+      // root dispatch and assert authority, not depth, so a root creator and the shipped
+      // default keep the subject unchanged.
+      creator: { kind: 'system' },
+      maxDepth: NESTED_WORKER_MAX_DEPTH_DEFAULT
+    })
     d.commitDispatchLaunchTokenHash(second.dispatch.id, TOKEN_HASH)
     d.mintStartingWorkerCapability({ dispatchId: second.dispatch.id })
     expect(() => d.bindStartingWorkerAuthority(bindParams(second.dispatch.id))).toThrow(
