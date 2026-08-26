@@ -494,6 +494,45 @@ describe('orchestration RPC methods', () => {
       expect(runtime.sendTerminalAgentPrompt).not.toHaveBeenCalled()
     })
 
+    // Why: createTerminal can substitute a canonical surface handle after spawn.
+    // The identity mismatch still fails, but the spawned pane must remain on
+    // the receipt so cleanup/abandon can see it.
+    it('reports a substituted spawn handle as residual on identity mismatch', async () => {
+      setup()
+      mockCurrentWorkerStart()
+      vi.mocked(runtime.createTerminal).mockImplementation(
+        async () =>
+          ({
+            handle: 'term_substituted',
+            worktreeId: 'repo::worktree',
+            title: 'worker'
+          }) as never
+      )
+      const task = db.createTask({ spec: 'substituted handle' })
+
+      const result = (await call('orchestration.workerStart', {
+        task: task.id,
+        from: 'term_coord',
+        agent: 'codex'
+      })) as {
+        state: string
+        failedStage: string
+        residualResources: { kind: string; action?: string; id: string }[]
+      }
+
+      expect(result).toMatchObject({
+        state: 'failed',
+        failedStage: 'authority_bind'
+      })
+      expect(result.residualResources).toEqual([
+        expect.objectContaining({
+          kind: 'terminal',
+          action: 'created',
+          id: 'term_substituted'
+        })
+      ])
+    })
+
     // Why: prompt paste (and its rejection) only exists on the non-argv path.
     it('preserves the exact attached terminal when task input is rejected', async () => {
       setup()
