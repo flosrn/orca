@@ -105,7 +105,7 @@ export function bindStartingWorkerAuthority(
       )
     }
     if (
-      dispatch.launch_token_hash &&
+      !dispatch.launch_token_hash ||
       dispatch.launch_token_hash !== (params.launchTokenHash ?? null)
     ) {
       throw new OrchestrationError(
