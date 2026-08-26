@@ -73,6 +73,9 @@ jobs:
           # Le rebase a besoin de l'historique complet pour trouver la
           # merge-base avec upstream : une profondeur tronquée la rate.
           fetch-depth: 0
+          # Sinon checkout pose un http.extraheader avec GITHUB_TOKEN, qui prime
+          # sur les identifiants de l'URL de push : 403 github-actions[bot].
+          persist-credentials: false
 
       # Décider AVANT de builder : upstream est souvent immobile la nuit, et
       # rebuilder un couple (upstream, patch) déjà publié coûte deux runners et
