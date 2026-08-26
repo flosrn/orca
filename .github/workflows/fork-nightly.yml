@@ -326,18 +326,8 @@ jobs:
           max_attempts: 3
           retry_wait_seconds: 30
           command: pnpm install --frozen-lockfile
-      # Le canal « local build » d'Orca (⌥-clic sur « check for updates ») REFUSE
-      # un build dont la version égale celle qui tourne
-      # (local-build-switch.ts:25). Or tous nos builds portent la version du
-      # package.json d'upstream, donc le deuxième serait rejeté. On réutilise le
-      # schéma d'upstream (`createLocalBuildVersion`) plutôt que d'en inventer un.
-      #
-      # Posé en env de JOB : `extraMetadata.version` est évalué au require() de
-      # la config, donc la variable doit être présente à l'étape Package aussi,
-      # pas seulement au build.
-      #
-      # Job mac UNIQUEMENT : le .deb garde la version du package.json, donc
-      # `debAssetName()` et le pin VPS restent inchangés.
+      # local-build-switch.ts:25 refuse un build dont la version égale celle qui
+      # tourne. En env de JOB, pas d'étape : lu au require() de la config.
       - name: Version unique pour le canal local-build
         run: |
           set -euo pipefail
