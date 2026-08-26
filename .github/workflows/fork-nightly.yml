@@ -327,7 +327,7 @@ jobs:
           retry_wait_seconds: 30
           command: pnpm install --frozen-lockfile
       # local-build-switch.ts:25 refuse un build dont la version égale celle qui
-      # tourne. En env de JOB, pas d'étape : lu au require() de la config.
+      # tourne. Exportée pour les étapes suivantes : lue au require() de la config.
       - name: Version unique pour le canal local-build
         run: |
           set -euo pipefail
