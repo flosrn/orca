@@ -11,6 +11,7 @@ import { getStatusBarUsageSection } from './UsageRosterPanel'
 import { formatRateLimitWindowChipLabel } from '@/lib/window-label-formatter'
 import { formatUsagePercentageLabel } from './usage-percentage-label'
 import { translate } from '@/i18n/i18n'
+import type { UsageAccountBadge } from './usage-account-segments'
 
 function MiniBar({
   usedPct,
@@ -176,25 +177,58 @@ function VerboseProviderUsage({
   )
 }
 
+function ProviderAccountMark({
+  provider,
+  badge
+}: {
+  provider: ProviderRateLimits['provider']
+  badge: UsageAccountBadge | null
+}): React.JSX.Element {
+  if (!badge) {
+    return <ProviderIcon provider={provider} />
+  }
+  return (
+    <span
+      className="inline-flex items-center gap-1"
+      title={badge.email ?? undefined}
+      aria-label={badge.email ?? `${provider} ${badge.ordinal}`}
+    >
+      <ProviderIcon provider={provider} />
+      <span
+        className={
+          badge.isActive
+            ? 'text-[10px] font-semibold leading-none tabular-nums text-foreground/90'
+            : 'text-[10px] font-medium leading-none tabular-nums text-muted-foreground/60'
+        }
+      >
+        {badge.ordinal}
+      </span>
+    </span>
+  )
+}
+
 export function ProviderSegment({
   p,
   compact,
   display,
-  mode = 'verbose'
+  mode = 'verbose',
+  badge = null
 }: {
   p: ProviderRateLimits | null
   compact: boolean
   display: UsagePercentageDisplay
   mode?: StatusBarUsageMode
+  badge?: UsageAccountBadge | null
 }): React.JSX.Element {
   const provider = p?.provider ?? 'claude'
+  const mark = <ProviderAccountMark provider={provider} badge={badge} />
   const statusLabel = p ? getProviderUsageStatusLabel(p) : ''
 
   // Idle / initial load
   if (!p || p.status === 'idle') {
     return (
       <span className="inline-flex items-center gap-1 text-muted-foreground">
-        <ProviderIcon provider={provider} />
+        {mark}
         <span className="animate-pulse">···</span>
       </span>
     )
@@ -206,7 +240,7 @@ export function ProviderSegment({
   if (p.status === 'fetching' && !summary) {
     return (
       <span className="inline-flex items-center gap-1 text-muted-foreground">
-        <ProviderIcon provider={provider} />
+        {mark}
         <span className="animate-pulse">···</span>
       </span>
     )
@@ -215,9 +249,7 @@ export function ProviderSegment({
   // Unavailable (CLI not installed)
   if (p.status === 'unavailable') {
     return (
-      <span className="inline-flex items-center gap-1 text-muted-foreground/50">
-        <ProviderIcon provider={provider} /> --
-      </span>
+      <span className="inline-flex items-center gap-1 text-muted-foreground/50">{mark} --</span>
     )
   }
 
@@ -225,7 +257,7 @@ export function ProviderSegment({
   if (p.status === 'error' && !summary) {
     return (
       <span className="inline-flex items-center gap-1 text-muted-foreground">
-        <ProviderIcon provider={provider} />
+        {mark}
         <AlertTriangle size={11} className="text-muted-foreground/80" />
         {!compact && <span className="text-[11px] font-medium">{statusLabel}</span>}
       </span>
@@ -237,7 +269,7 @@ export function ProviderSegment({
 
   return (
     <span className="inline-flex items-center gap-1.5">
-      <ProviderIcon provider={provider} />
+      {mark}
       {mode === 'verbose' ? (
         <>
           {summary && !compact ? (
