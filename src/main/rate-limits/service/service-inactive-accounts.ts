@@ -4,7 +4,9 @@ import { RateLimitServicePolling } from './service-polling'
 import {
   INACTIVE_CODEX_PROBE_STAGGER_MS,
   INACTIVE_FETCH_DEBOUNCE_MS,
-  delayUnlessAborted
+  delayUnlessAborted,
+  toErrorMessage,
+  type ProviderRateLimits
 } from './service-types'
 
 export abstract class RateLimitServiceInactiveAccounts extends RateLimitServicePolling {
@@ -63,14 +65,16 @@ export abstract class RateLimitServiceInactiveAccounts extends RateLimitServiceP
           }
           const cached = this.inactiveClaudeCache.get(account.id) ?? null
           this.inactiveClaudeCache.set(account.id, this.applyStalePolicy(fresh, cached))
-        } catch {
-          // Why: per-account try/catch keeps one Keychain/network error from aborting the remaining accounts in the batch.
+        } catch (error) {
+          // Why: per-account failures expire through the same stale policy as active meters.
           if (
             signal.aborted ||
             fetchGeneration !== this.inactiveClaudeAccountsGeneration ||
             !this.isCurrentInactiveClaudeAccount(account.id)
           ) {
             this.inactiveClaudeCache.delete(account.id)
+          } else {
+            this.cacheInactiveFailure(this.inactiveClaudeCache, account.id, 'claude', error)
           }
         }
         this.inactiveClaudeFetching.delete(account.id)
@@ -93,7 +97,7 @@ export abstract class RateLimitServiceInactiveAccounts extends RateLimitServiceP
     if (this.inactiveCodexFetchInFlight) {
       return
     }
-    const accounts = this.inactiveCodexAccountsResolver?.() ?? []
+    const accounts = this.inactiveCodexAccountsResolver?.(this.codexFetchTarget) ?? []
     if (accounts.length === 0) {
       return
     }
@@ -163,14 +167,16 @@ export abstract class RateLimitServiceInactiveAccounts extends RateLimitServiceP
           }
           const cached = this.inactiveCodexCache.get(account.id) ?? null
           this.inactiveCodexCache.set(account.id, this.applyStalePolicy(fresh, cached))
-        } catch {
-          // Why: per-account try/catch prevents one failure from aborting the batch.
+        } catch (error) {
+          // Why: per-account failures expire through the same stale policy as active meters.
           if (
             signal.aborted ||
             fetchGeneration !== this.inactiveCodexAccountsGeneration ||
             !this.isCurrentInactiveCodexAccount(account.id)
           ) {
             this.inactiveCodexCache.delete(account.id)
+          } else {
+            this.cacheInactiveFailure(this.inactiveCodexCache, account.id, 'codex', error)
           }
         }
         this.inactiveCodexFetching.delete(account.id)
@@ -191,6 +197,7 @@ export abstract class RateLimitServiceInactiveAccounts extends RateLimitServiceP
     this.inactiveClaudeCache.delete(accountId)
     this.inactiveClaudeFetching.delete(accountId)
     this.pushToRenderer()
+    this.refetchInactiveLanesAfterRosterChange('claude')
   }
 
   protected isCurrentInactiveClaudeAccount(accountId: string): boolean {
@@ -200,7 +207,7 @@ export abstract class RateLimitServiceInactiveAccounts extends RateLimitServiceP
   }
 
   protected isCurrentInactiveCodexAccount(accountId: string): boolean {
-    return (this.inactiveCodexAccountsResolver?.() ?? []).some(
+    return (this.inactiveCodexAccountsResolver?.(this.codexFetchTarget) ?? []).some(
       (account) => account.id === accountId
     )
   }
@@ -223,7 +230,9 @@ export abstract class RateLimitServiceInactiveAccounts extends RateLimitServiceP
 
   protected pruneInactiveCodexState(): void {
     const currentIds = new Set(
-      (this.inactiveCodexAccountsResolver?.() ?? []).map((account) => account.id)
+      (this.inactiveCodexAccountsResolver?.(this.codexFetchTarget) ?? []).map(
+        (account) => account.id
+      )
     )
     for (const accountId of this.inactiveCodexCache.keys()) {
       if (!currentIds.has(accountId)) {
@@ -242,5 +251,48 @@ export abstract class RateLimitServiceInactiveAccounts extends RateLimitServiceP
     this.inactiveCodexCache.delete(accountId)
     this.inactiveCodexFetching.delete(accountId)
     this.pushToRenderer()
+    this.refetchInactiveLanesAfterRosterChange('codex')
+  }
+
+  protected afterActiveFetchAll(cycleAborted: boolean): void {
+    if (cycleAborted || this.stopped || this.managedAccountContextResolver === null) {
+      return
+    }
+    void this.fetchInactiveClaudeAccountsOnOpen().catch(() => {})
+    void this.fetchInactiveCodexAccountsOnOpen().catch(() => {})
+  }
+
+  private refetchInactiveLanesAfterRosterChange(provider: 'claude' | 'codex'): void {
+    if (this.stopped || this.managedAccountContextResolver === null) {
+      return
+    }
+    if (provider === 'claude') {
+      this.lastInactiveClaudeFetchAt = 0
+      void this.fetchInactiveClaudeAccountsOnOpen().catch(() => {})
+      return
+    }
+    this.lastInactiveCodexFetchAt = 0
+    void this.fetchInactiveCodexAccountsOnOpen().catch(() => {})
+  }
+  private cacheInactiveFailure(
+    cache: Map<string, ProviderRateLimits>,
+    accountId: string,
+    provider: ProviderRateLimits['provider'],
+    error: unknown
+  ): void {
+    cache.set(
+      accountId,
+      this.applyStalePolicy(
+        {
+          provider,
+          session: null,
+          weekly: null,
+          updatedAt: Date.now(),
+          error: toErrorMessage(error),
+          status: 'error'
+        },
+        cache.get(accountId) ?? null
+      )
+    )
   }
 }

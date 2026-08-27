@@ -10,6 +10,7 @@ import { getVisibleUsageProvider, isUsageEmptyState } from './status-bar-provide
 import { getUsageProviderAccountsSectionId } from './usage-provider-settings-target'
 import { CLOSE_ALL_CONTEXT_MENUS_EVENT, useStatusBarMenuFocusHandoff } from './ProviderDetailsMenu'
 import { observeStatusBarContainer } from './status-bar-container-observer'
+import { buildStatusBarUsageBarSegments } from './usage-account-segments'
 
 export function useStatusBarController(floatingTerminalOpen: boolean) {
   const floatingTerminalShortcut = useShortcutLabel('floatingTerminal.toggle')
@@ -232,6 +233,30 @@ export function useStatusBarController(floatingTerminalOpen: boolean) {
     showClinePass ? visibleClinePass : null,
     showQwenCloud ? visibleQwenCloud : null
   ].filter((p): p is ProviderRateLimits => p !== null)
+  const usageBarSegments = buildStatusBarUsageBarSegments({
+    providers: rosterProviders,
+    hideAccountRoster: Boolean(settings?.activeRuntimeEnvironmentId?.trim()),
+    claude: showClaude
+      ? {
+          activeAccountId: rateLimits.activeClaudeAccountId,
+          systemDefault: rateLimits.claudeSystemDefault,
+          managedAccounts: settings?.claudeManagedAccounts ?? [],
+          activeLimits: visibleClaude,
+          providerLimits: claude,
+          inactive: rateLimits.inactiveClaudeAccounts
+        }
+      : null,
+    codex: showCodex
+      ? {
+          activeAccountId: rateLimits.activeCodexAccountId,
+          systemDefault: rateLimits.codexSystemDefault,
+          managedAccounts: settings?.codexManagedAccounts ?? [],
+          activeLimits: visibleCodex,
+          providerLimits: codex,
+          inactive: rateLimits.inactiveCodexAccounts
+        }
+      : null
+  })
 
   const handleManageAccounts = (): void => {
     setUsageMenuOpen(false)
@@ -281,7 +306,7 @@ export function useStatusBarController(floatingTerminalOpen: boolean) {
     menuPoint,
     petEnabled,
     recordFeatureInteraction,
-    rosterProviders,
+    usageBarSegments,
     setMenuOpen,
     setMenuPoint,
     setStatusBarUsageMode,
