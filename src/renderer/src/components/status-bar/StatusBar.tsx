@@ -49,6 +49,8 @@ import type {
   RateLimitWindow
 } from '../../../../shared/rate-limit-types'
 import { resolveLocalAccountRuntimeTarget } from '../../../../shared/local-account-runtime'
+import { buildManagedAccountUsageLanes } from '../../../../shared/managed-account-usage-roster'
+import { buildUsageBarSegments, type UsageAccountBadge } from './usage-account-segments'
 import { getRendererAppPlatform } from '../../lib/renderer-app-platform'
 import {
   ProviderIcon,
@@ -1248,25 +1250,63 @@ function VerboseProviderUsage({
   )
 }
 
+/**
+ * Provider mark for one account lane. The ordinal is the compact on-bar label and the email is
+ * the hover disclosure, because two identical provider icons side by side are unreadable.
+ */
+function ProviderAccountMark({
+  provider,
+  badge
+}: {
+  provider: ProviderRateLimits['provider']
+  badge: UsageAccountBadge | null
+}): React.JSX.Element {
+  if (!badge) {
+    return <ProviderIcon provider={provider} />
+  }
+  return (
+    <span
+      className="inline-flex items-center"
+      title={badge.email ?? undefined}
+      aria-label={badge.email ?? `${provider} ${badge.ordinal}`}
+    >
+      <ProviderIcon provider={provider} />
+      <sup
+        className={
+          badge.isActive
+            ? 'ml-0.5 text-[9px] font-semibold text-foreground'
+            : 'ml-0.5 text-[9px] font-medium text-muted-foreground/70'
+        }
+      >
+        {badge.ordinal}
+      </sup>
+    </span>
+  )
+}
+
 export function ProviderSegment({
   p,
   compact,
   display,
-  mode = 'verbose'
+  mode = 'verbose',
+  badge = null
 }: {
   p: ProviderRateLimits | null
   compact: boolean
   display: UsagePercentageDisplay
   mode?: StatusBarUsageMode
+  /** Set when this segment is one account lane of a provider that owns several. */
+  badge?: UsageAccountBadge | null
 }): React.JSX.Element {
   const provider = p?.provider ?? 'claude'
+  const mark = <ProviderAccountMark provider={provider} badge={badge} />
   const statusLabel = p ? getProviderUsageStatusLabel(p) : ''
 
   // Idle / initial load
   if (!p || p.status === 'idle') {
     return (
       <span className="inline-flex items-center gap-1 text-muted-foreground">
-        <ProviderIcon provider={provider} />
+        {mark}
         <span className="animate-pulse">···</span>
       </span>
     )
@@ -1278,7 +1318,7 @@ export function ProviderSegment({
   if (p.status === 'fetching' && !tightest) {
     return (
       <span className="inline-flex items-center gap-1 text-muted-foreground">
-        <ProviderIcon provider={provider} />
+        {mark}
         <span className="animate-pulse">···</span>
       </span>
     )
@@ -1287,9 +1327,7 @@ export function ProviderSegment({
   // Unavailable (CLI not installed)
   if (p.status === 'unavailable') {
     return (
-      <span className="inline-flex items-center gap-1 text-muted-foreground/50">
-        <ProviderIcon provider={provider} /> --
-      </span>
+      <span className="inline-flex items-center gap-1 text-muted-foreground/50">{mark} --</span>
     )
   }
 
@@ -1297,7 +1335,7 @@ export function ProviderSegment({
   if (p.status === 'error' && !tightest) {
     return (
       <span className="inline-flex items-center gap-1 text-muted-foreground">
-        <ProviderIcon provider={provider} />
+        {mark}
         <AlertTriangle size={11} className="text-muted-foreground/80" />
         {!compact && <span className="text-[11px] font-medium">{statusLabel}</span>}
       </span>
@@ -1309,7 +1347,7 @@ export function ProviderSegment({
 
   return (
     <span className="inline-flex items-center gap-1.5">
-      <ProviderIcon provider={provider} />
+      {mark}
       {mode === 'verbose' ? (
         <>
           {tightest && !compact ? (
@@ -2210,6 +2248,45 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
     showGrok ? visibleGrok : null
   ].filter((p): p is ProviderRateLimits => p !== null)
 
+  // Why: with an active Remote Orca Server the meters describe the owner host while local
+  // GlobalSettings still describe this desktop (see resolveClaudeStatusAccountState, #7973).
+  // Joining them would label remote usage with local emails, so lanes collapse to the single
+  // host meter until the owner's account roster is available here.
+  const remoteOwnerHidesAccountRoster = Boolean(settings?.activeRuntimeEnvironmentId?.trim())
+  const claudeLanes =
+    // `undefined` means this host does not report which account is active (an older remote host
+    // omits the field); a provider then keeps its single meter rather than spreading the active
+    // account's numbers across every account.
+    remoteOwnerHidesAccountRoster || rateLimits.activeClaudeAccountId === undefined
+      ? null
+      : buildManagedAccountUsageLanes({
+          systemDefault: rateLimits.claudeSystemDefault ?? null,
+          managedAccounts: settings?.claudeManagedAccounts ?? [],
+          activeAccountId: rateLimits.activeClaudeAccountId,
+          activeLimits: visibleClaude,
+          inactive: claude === null ? [] : rateLimits.inactiveClaudeAccounts
+        })
+  const codexLanes =
+    remoteOwnerHidesAccountRoster || rateLimits.activeCodexAccountId === undefined
+      ? null
+      : buildManagedAccountUsageLanes({
+          systemDefault: rateLimits.codexSystemDefault ?? null,
+          managedAccounts: settings?.codexManagedAccounts ?? [],
+          activeAccountId: rateLimits.activeCodexAccountId,
+          activeLimits: visibleCodex,
+          inactive: codex === null ? [] : rateLimits.inactiveCodexAccounts
+        })
+  const usageBarSegments = buildUsageBarSegments({
+    providers: rosterProviders,
+    lanesByProvider: {
+      ...(showClaude ? { claude: claudeLanes } : {}),
+      ...(showCodex ? { codex: codexLanes } : {})
+    },
+    // Why: the seam for a per-provider "collapse accounts" preference; the status-bar item
+    // toggles already hide a provider outright, so expansion needs no second switch yet.
+    showAllAccounts: true
+  })
+
   const handleManageAccounts = (): void => {
     setUsageMenuOpen(false)
     openSettingsTarget({ pane: 'accounts', repoId: null })
@@ -2275,16 +2352,22 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
                     'Usage'
                   )}
                 >
-                  {rosterProviders.map((p) =>
+                  {usageBarSegments.map((segment) =>
                     iconOnly ? (
                       // Narrow status bar: fall back to main's compact letter badge.
-                      <span key={p.provider} title={getProviderDisplayName(p.provider)}>
-                        <ProviderLetterBadge p={p} />
+                      <span
+                        key={segment.key}
+                        title={
+                          segment.badge?.email ?? getProviderDisplayName(segment.limits.provider)
+                        }
+                      >
+                        <ProviderLetterBadge p={segment.limits} />
                       </span>
                     ) : (
                       <ProviderSegment
-                        key={p.provider}
-                        p={p}
+                        key={segment.key}
+                        p={segment.limits}
+                        badge={segment.badge}
                         compact={compact}
                         display={usagePercentageDisplay}
                         mode={statusBarUsageMode}
@@ -2306,7 +2389,7 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
                 onCloseAutoFocus={usageMenuFocusHandoff.onCloseAutoFocus}
               >
                 <UsageRosterPanel
-                  providers={rosterProviders}
+                  segments={usageBarSegments}
                   display={usagePercentageDisplay}
                   statusBarUsageMode={statusBarUsageMode}
                   onStatusBarUsageModeChange={setStatusBarUsageMode}
@@ -2317,10 +2400,11 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
                   canSignIn={(provider) => getUsageProviderAccountsSectionId(provider) !== null}
                   onManageAccounts={handleManageAccounts}
                   onUsageDetails={handleUsageDetails}
-                  renderRow={(p, rowNode) => {
-                    // Every provider drills into its detail panel (parity with the
+                  renderRow={(segment, rowNode) => {
+                    // Every lane drills into its detail panel (parity with the
                     // per-provider dropdowns on main); Claude/Codex additionally get
                     // the account switcher + runtime toggle + Codex reset credits.
+                    const p = segment.limits
                     if (p.provider === 'claude') {
                       return (
                         <ClaudeSwitcherMenu
