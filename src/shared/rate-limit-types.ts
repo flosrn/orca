@@ -55,6 +55,11 @@ export type ProviderRateLimits = {
     | 'minimax'
     | 'grok'
     | 'antigravity'
+    // Metered through the CodexBar CLI rather than a native fetcher; see
+    // src/main/rate-limits/codexbar-cli-source.ts.
+    | 'cursor'
+    | 'clinepass'
+    | 'qwencloud'
   /** 5-hour session window, null if not available. */
   session: RateLimitWindow | null
   /** 7-day weekly window, null if not available. */
@@ -124,6 +129,9 @@ export type RateLimitState = {
   antigravity: ProviderRateLimits | null
   minimax: ProviderRateLimits | null
   grok: ProviderRateLimits | null
+  cursor: ProviderRateLimits | null
+  clinepass: ProviderRateLimits | null
+  qwencloud: ProviderRateLimits | null
   /**
    * True when a MiniMax session cookie is persisted on disk. The cookie lives
    * outside GlobalSettings, so this flag is the durable signal that the
@@ -133,6 +141,13 @@ export type RateLimitState = {
   minimaxCookieConfigured: boolean
   /** True when main finds a Grok CLI session file (~/.grok/auth.json or GROK_HOME). */
   grokAuthConfigured: boolean
+  /**
+   * True when the CodexBar CLI is on PATH. One flag for all three CodexBar-backed providers:
+   * they share a binary, so its absence is the single reason none of them can report. Acts as
+   * the durable visibility signal the way `grokAuthConfigured` does, keeping the meters on the
+   * bar between snapshot refreshes instead of flickering out.
+   */
+  codexbarAvailable: boolean
   claudeTarget: RateLimitRuntimeTarget
   codexTarget: RateLimitRuntimeTarget
   inactiveClaudeAccounts: InactiveAccountUsage[]
