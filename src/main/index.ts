@@ -274,7 +274,10 @@ import {
   getSelectedClaudeAccountIdForTarget,
   normalizeClaudeRuntimeSelection
 } from './claude-accounts/runtime-selection'
-import { SYSTEM_DEFAULT_ACCOUNT_ID } from '../shared/managed-account-usage-roster'
+import {
+  SYSTEM_DEFAULT_ACCOUNT_ID,
+  isCoveredByManagedAccount
+} from '../shared/managed-account-usage-roster'
 import { codexHookService, setSystemCodexHomeHookSweepSuppressed } from './codex/hook-service'
 import { reconcileRetainedCodexHookHomes } from './codex/retained-codex-hook-state'
 import {
@@ -2810,7 +2813,16 @@ void app.whenReady().then(async () => {
     // Why: getSystemCodexHomePath() is the *host* ~/.codex. A WSL distro has its own, which is
     // not resolved per-distro (see CodexRateLimitAccountsState.systemDefault), so offering the
     // lane there would publish a host reading labelled as the distro's system default.
-    if (target.runtime !== 'host' || selection.host === null) {
+    // Also skipped when a managed account already covers that identity — see the context
+    // resolver below; fetching it would spend a request on a lane nothing renders.
+    if (
+      target.runtime !== 'host' ||
+      selection.host === null ||
+      isCoveredByManagedAccount(
+        codexAccounts?.listAccounts().systemDefault?.email ?? null,
+        settings.codexManagedAccounts
+      )
+    ) {
       return managed
     }
     // Why: ~/.codex is never relocated by account switching, so the system-default login stays
@@ -2840,10 +2852,14 @@ void app.whenReady().then(async () => {
       // Why: an api-key login has no subscription window, so it carries no usage lane at all.
       // Restricted to the host runtime for the same reason as the sentinel above: no per-distro
       // WSL system-default home is resolved, so the lane would be permanently unmeasurable.
+      // Suppressed when a managed account already covers the same identity: signing that login
+      // in as a managed account leaves ~/.codex pointing at it too, so publishing both meters
+      // the same subscription twice under two names.
       codexSystemDefault:
         targets.codex.runtime === 'host' &&
         codexSystemDefault?.hasAuth &&
-        codexSystemDefault.authKind === 'oauth'
+        codexSystemDefault.authKind === 'oauth' &&
+        !isCoveredByManagedAccount(codexSystemDefault.email, settings.codexManagedAccounts)
           ? { email: codexSystemDefault.email, measurableWhenInactive: true }
           : null
     }
