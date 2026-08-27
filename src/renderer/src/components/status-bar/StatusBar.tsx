@@ -63,7 +63,7 @@ import {
 } from './tooltip'
 import { ClaudeIcon, GeminiIcon, MiniMaxIcon, OpenAIIcon, OpenCodeGoIcon } from './icons'
 import { AgentIcon } from '@/lib/agent-catalog'
-import { UsageRosterPanel, getTightestUsageSection } from './UsageRosterPanel'
+import { UsageRosterPanel, getStatusBarUsageSection } from './UsageRosterPanel'
 import { getUsageProviderAccountsSectionId } from './usage-provider-settings-target'
 import { formatRateLimitWindowChipLabel } from '@/lib/window-label-formatter'
 import { useResetCountdownClock } from '@/hooks/useResetCountdownClock'
@@ -1164,6 +1164,12 @@ function getProviderLetter(provider: ProviderRateLimits['provider']): string {
       return 'R'
     case 'codex':
       return 'X'
+    case 'cursor':
+      return 'U'
+    case 'clinepass':
+      return 'P'
+    case 'qwencloud':
+      return 'Q'
   }
 }
 
@@ -1315,10 +1321,10 @@ export function ProviderSegment({
     )
   }
 
-  const tightest = getTightestUsageSection(p)
+  const summary = getStatusBarUsageSection(p)
 
   // Fetching with no prior data
-  if (p.status === 'fetching' && !tightest) {
+  if (p.status === 'fetching' && !summary) {
     return (
       <span className="inline-flex items-center gap-1 text-muted-foreground">
         {mark}
@@ -1335,7 +1341,7 @@ export function ProviderSegment({
   }
 
   // Error with no data
-  if (p.status === 'error' && !tightest) {
+  if (p.status === 'error' && !summary) {
     return (
       <span className="inline-flex items-center gap-1 text-muted-foreground">
         {mark}
@@ -1353,15 +1359,15 @@ export function ProviderSegment({
       {mark}
       {mode === 'verbose' ? (
         <>
-          {tightest && !compact ? (
-            <MiniBar usedPct={clampUsedPercent(tightest.window.usedPercent)} display={display} />
+          {summary && !compact ? (
+            <MiniBar usedPct={clampUsedPercent(summary.window.usedPercent)} display={display} />
           ) : null}
           <VerboseProviderUsage p={p} display={display} />
         </>
-      ) : tightest ? (
+      ) : summary ? (
         <WindowLabel
-          w={tightest.window}
-          label={tightest.label}
+          w={summary.window}
+          label={summary.label}
           display={display}
           showLabel={!compact}
         />
@@ -2148,6 +2154,7 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
   }
 
   const { claude, codex, gemini, opencodeGo, kimi, antigravity, minimax, grok } = rateLimits
+  const { cursor, clinepass, qwencloud } = rateLimits
 
   // Why: a bar is earned by a live snapshot or durable Settings setup; detection-gating hides per-CLI bars when the agent isn't on PATH.
   // Why: Antigravity has no persisted credential, so a checked status item + detected CLI is the durable "show its slot" signal.
@@ -2160,7 +2167,8 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
     ...settings,
     antigravityUsageConfigured,
     minimaxCookieConfigured: rateLimits.minimaxCookieConfigured,
-    grokAuthConfigured: rateLimits.grokAuthConfigured
+    grokAuthConfigured: rateLimits.grokAuthConfigured,
+    codexbarAvailable: rateLimits.codexbarAvailable
   }
   const visibleClaude = getVisibleUsageProvider('claude', claude, usageSettings)
   const visibleCodex = getVisibleUsageProvider('codex', codex, usageSettings)
@@ -2169,6 +2177,9 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
   const visibleAntigravity = getVisibleUsageProvider('antigravity', antigravity, usageSettings)
   const visibleMiniMax = getVisibleUsageProvider('minimax', minimax, usageSettings)
   const visibleGrok = getVisibleUsageProvider('grok', grok, usageSettings)
+  const visibleCursor = getVisibleUsageProvider('cursor', cursor, usageSettings)
+  const visibleClinePass = getVisibleUsageProvider('clinepass', clinepass, usageSettings)
+  const visibleQwenCloud = getVisibleUsageProvider('qwencloud', qwencloud, usageSettings)
   const showClaude =
     visibleClaude !== null &&
     statusBarItems.includes('claude') &&
@@ -2198,6 +2209,10 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
   // Why: OpenCode Go is web/cookie-auth, not a CLI on PATH, so detection-gating doesn't apply.
   const visibleOpencodeGo = getVisibleUsageProvider('opencode-go', opencodeGo, usageSettings)
   const showOpencodeGo = visibleOpencodeGo !== null && statusBarItems.includes('opencode-go')
+  // Why: codexbar meters these three from one external binary, not a CLI on PATH, so detection-gating doesn't apply.
+  const showCursor = visibleCursor !== null && statusBarItems.includes('cursor')
+  const showClinePass = visibleClinePass !== null && statusBarItems.includes('clinepass')
+  const showQwenCloud = visibleQwenCloud !== null && statusBarItems.includes('qwencloud')
   const showSsh = statusBarItems.includes('ssh')
   const showResourceUsage = statusBarItems.includes('resource-usage')
   const showPorts = statusBarItems.includes('ports')
@@ -2212,11 +2227,26 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
     showKimi ||
     showAntigravity ||
     showMiniMax ||
-    showGrok
+    showGrok ||
+    showCursor ||
+    showClinePass ||
+    showQwenCloud
   const anyVisible = hasVisibleUsageMeters || showResourceUsage
   // Why: include Settings so durable managed accounts count — a configured user isn't shown the empty state while snapshots hydrate.
   const isEmptyUsageState = isUsageEmptyState(
-    { claude, codex, gemini, opencodeGo, kimi, antigravity, minimax, grok },
+    {
+      claude,
+      codex,
+      gemini,
+      opencodeGo,
+      kimi,
+      antigravity,
+      minimax,
+      grok,
+      cursor,
+      clinepass,
+      qwencloud
+    },
     usageSettings
   )
   // Why: one-time nudge — once dismissed, stays hidden even if providers reconnect later.
@@ -2229,7 +2259,10 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
     kimi?.status === 'fetching' ||
     antigravity?.status === 'fetching' ||
     minimax?.status === 'fetching' ||
-    grok?.status === 'fetching'
+    grok?.status === 'fetching' ||
+    cursor?.status === 'fetching' ||
+    clinepass?.status === 'fetching' ||
+    qwencloud?.status === 'fetching'
 
   const compact = containerWidth < 900
   const iconOnly = containerWidth < 500
@@ -2248,7 +2281,10 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
     showOpencodeGo ? visibleOpencodeGo : null,
     showKimi ? visibleKimi : null,
     showMiniMax ? visibleMiniMax : null,
-    showGrok ? visibleGrok : null
+    showGrok ? visibleGrok : null,
+    showCursor ? visibleCursor : null,
+    showClinePass ? visibleClinePass : null,
+    showQwenCloud ? visibleQwenCloud : null
   ].filter((p): p is ProviderRateLimits => p !== null)
 
   // Why: with an active Remote Orca Server the meters describe the owner host while local
@@ -2633,6 +2669,42 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
               {translate('auto.components.status.bar.StatusBar.grokUsageMenu', 'Grok Usage')}
             </DropdownMenuCheckboxItem>
           )}
+          <DropdownMenuCheckboxItem
+            checked={statusBarItems.includes('cursor')}
+            onCheckedChange={() => {
+              recordFeatureInteraction('usage-tracking')
+              toggleStatusBarItem('cursor')
+            }}
+          >
+            <AgentIcon agent="cursor" size={14} />
+            {translate('auto.components.status.bar.StatusBar.cursorUsageMenu', 'Cursor Usage')}
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuCheckboxItem
+            checked={statusBarItems.includes('clinepass')}
+            onCheckedChange={() => {
+              recordFeatureInteraction('usage-tracking')
+              toggleStatusBarItem('clinepass')
+            }}
+          >
+            <AgentIcon agent="cline" size={14} />
+            {translate(
+              'auto.components.status.bar.StatusBar.clinePassUsageMenu',
+              'ClinePass Usage'
+            )}
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuCheckboxItem
+            checked={statusBarItems.includes('qwencloud')}
+            onCheckedChange={() => {
+              recordFeatureInteraction('usage-tracking')
+              toggleStatusBarItem('qwencloud')
+            }}
+          >
+            <AgentIcon agent="qwen-code" size={14} />
+            {translate(
+              'auto.components.status.bar.StatusBar.qwenCloudUsageMenu',
+              'Qwen Cloud Usage'
+            )}
+          </DropdownMenuCheckboxItem>
           <DropdownMenuCheckboxItem
             checked={statusBarItems.includes('ssh')}
             onCheckedChange={() => {

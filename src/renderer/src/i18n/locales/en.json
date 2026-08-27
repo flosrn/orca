@@ -132,7 +132,10 @@
         "resourceUsageToggleDescription": "Show the Resource Manager. Click it for CPU, memory, sessions, daemon controls, and workspace disk scans.",
         "portsToggleDescription": "Show live workspace ports. Click it for workspace-scoped ports and external listeners.",
         "antigravityToggleDescription": "Show Antigravity subscription usage for the active workspace.",
-        "grokToggleDescription": "Show Grok subscription credit usage when signed in via Grok CLI."
+        "grokToggleDescription": "Show Grok subscription credit usage when signed in via Grok CLI.",
+        "cursorToggleDescription": "Show Cursor subscription usage reported by the CodexBar CLI.",
+        "clinePassToggleDescription": "Show ClinePass subscription usage reported by the CodexBar CLI.",
+        "qwenCloudToggleDescription": "Show Qwen Cloud subscription usage reported by the CodexBar CLI."
       },
       "menuBarIcon": {
         "title": "Show Menu Bar Icon",
@@ -3643,6 +3646,9 @@
             "antigravityUsageDetails": "Open Antigravity usage details",
             "grokUsageAria": "Open Grok usage details",
             "grokUsageMenu": "Grok Usage",
+            "cursorUsageMenu": "Cursor Usage",
+            "clinePassUsageMenu": "ClinePass Usage",
+            "qwenCloudUsageMenu": "Qwen Cloud Usage",
             "floatingTerminalNewActivity": "{{label}}, new activity",
             "codexSignInSuccess": "Signed in to Codex",
             "codexSignInError": "Codex sign-in failed. Please try again."
@@ -8948,6 +8954,18 @@
             "e7d1b0f3a5": "Show Grok weekly credit usage from Grok CLI OAuth.",
             "d6c0a9e2f4": "grok",
             "c5b9f8d1e3": "xai",
+            "a3f1c07d92": "Cursor Usage",
+            "d7a4b13c85": "Show Cursor subscription usage in the status bar.",
+            "e8b5c24d96": "cursor",
+            "b4e2d18a63": "ClinePass Usage",
+            "f9c6d35ea7": "Show ClinePass subscription usage in the status bar.",
+            "0ad7e46fb8": "clinepass",
+            "1be8f570c9": "cline",
+            "c5d3e29b74": "Qwen Cloud Usage",
+            "3da17692eb": "Show Qwen Cloud subscription usage in the status bar.",
+            "4eb287a3fc": "qwen",
+            "5fc398b40d": "alibaba",
+            "2cf90681da": "codexbar",
             "usagePercentageDisplayTitle": "Usage percentages",
             "usagePercentageDisplayDescription": "Choose whether provider limits show the percentage used or remaining."
           }
