@@ -74,6 +74,7 @@ function usageSettings(overrides: Partial<UsageProviderSettings> = {}): UsagePro
     antigravityUsageConfigured: false,
     minimaxCookieConfigured: false,
     grokAuthConfigured: false,
+    codexbarAvailable: false,
     ...overrides
   }
 }
