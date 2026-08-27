@@ -15456,8 +15456,8 @@ export class OrcaRuntimeService {
     const { rateLimits } = this.requireAccountServices()
     await Promise.allSettled([
       rateLimits.refresh(),
-      rateLimits.fetchInactiveClaudeAccountsOnOpen(),
-      rateLimits.fetchInactiveCodexAccountsOnOpen()
+      rateLimits.fetchInactiveClaudeAccounts(),
+      rateLimits.fetchInactiveCodexAccounts()
     ])
   }
 
@@ -15467,8 +15467,8 @@ export class OrcaRuntimeService {
     const { rateLimits } = this.requireAccountServices()
     await Promise.allSettled([
       rateLimits.refreshIfStale(),
-      rateLimits.fetchInactiveClaudeAccountsOnOpen(),
-      rateLimits.fetchInactiveCodexAccountsOnOpen()
+      rateLimits.fetchInactiveClaudeAccounts(),
+      rateLimits.fetchInactiveCodexAccounts()
     ])
   }
 
