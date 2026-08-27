@@ -457,4 +457,130 @@ describe('RateLimitService', () => {
       }
     ])
   })
+
+  function managedAccountContext() {
+    return {
+      activeClaudeAccountId: null,
+      activeCodexAccountId: null,
+      claudeSystemDefault: null,
+      codexSystemDefault: null
+    }
+  }
+
+  it('refreshes inactive accounts from the poll cycle', async () => {
+    const service = new RateLimitService()
+    service.setManagedAccountContextResolver(managedAccountContext)
+    service.setInactiveClaudeAccountsResolver(() => [
+      { id: 'account-1', managedAuthPath: '/tmp/account-1/auth' }
+    ])
+    service.setClaudeAuthPreparationResolver(async () => ({
+      configDir: '/tmp/.claude',
+      envPatch: {},
+      stripAuthEnv: false,
+      provenance: 'system'
+    }))
+    vi.mocked(fetchClaudeRateLimits).mockResolvedValue(okProvider('claude', 7))
+    vi.mocked(fetchManagedAccountUsage).mockResolvedValue(okProvider('claude', 61))
+
+    await service.refresh()
+    await vi.waitFor(() =>
+      expect(service.getState().inactiveClaudeAccounts).toEqual([
+        {
+          accountId: 'account-1',
+          rateLimits: expect.objectContaining({
+            session: expect.objectContaining({ usedPercent: 61 })
+          }),
+          updatedAt: expect.any(Number),
+          isFetching: false
+        }
+      ])
+    )
+  })
+
+  it('skips the poll-driven inactive refresh when no account context is published', async () => {
+    const service = new RateLimitService()
+    service.setInactiveClaudeAccountsResolver(() => [
+      { id: 'account-1', managedAuthPath: '/tmp/account-1/auth' }
+    ])
+    vi.mocked(fetchClaudeRateLimits).mockResolvedValue(okProvider('claude', 7))
+    vi.mocked(fetchManagedAccountUsage).mockResolvedValue(okProvider('claude', 61))
+
+    await service.refresh()
+
+    expect(fetchManagedAccountUsage).not.toHaveBeenCalled()
+  })
+
+  it('records a per-account failure instead of keeping the previous percentage', async () => {
+    vi.useFakeTimers()
+    try {
+      const service = new RateLimitService()
+      service.setInactiveClaudeAccountsResolver(() => [
+        { id: 'account-1', managedAuthPath: '/tmp/account-1/auth' }
+      ])
+      vi.mocked(fetchManagedAccountUsage).mockResolvedValueOnce(okProvider('claude', 61))
+      await service.fetchInactiveClaudeAccountsOnOpen()
+      expect(service.getState().inactiveClaudeAccounts[0]?.rateLimits?.session?.usedPercent).toBe(
+        61
+      )
+
+      await vi.advanceTimersByTimeAsync(10 * 60_000)
+      vi.mocked(fetchManagedAccountUsage).mockRejectedValueOnce(new Error('429 Too Many Requests'))
+      await service.fetchInactiveClaudeAccountsOnOpen()
+
+      const entry = service.getState().inactiveClaudeAccounts[0]
+      expect(entry?.rateLimits).toMatchObject({
+        status: 'error',
+        error: '429 Too Many Requests'
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('passes the codex fetch target to the inactive-accounts resolver', async () => {
+    const service = new RateLimitService()
+    const seenTargets: { runtime: string; wslDistro: string | null }[] = []
+    service.setInactiveCodexAccountsResolver((target) => {
+      seenTargets.push(target)
+      return []
+    })
+
+    await service.fetchInactiveCodexAccountsOnOpen()
+    expect(seenTargets).toContainEqual({ runtime: 'host', wslDistro: null })
+
+    seenTargets.length = 0
+    service.setCodexFetchTarget({ runtime: 'wsl', wslDistro: 'Ubuntu' })
+    await service.fetchInactiveCodexAccountsOnOpen()
+    expect(seenTargets).toContainEqual({ runtime: 'wsl', wslDistro: 'Ubuntu' })
+  })
+
+  it('refetches inactive lanes when the account roster changes', async () => {
+    const service = new RateLimitService()
+    service.setManagedAccountContextResolver(managedAccountContext)
+    service.setInactiveClaudeAccountsResolver(() => [
+      { id: 'account-new', managedAuthPath: '/tmp/account-new/auth' }
+    ])
+    vi.mocked(fetchManagedAccountUsage).mockResolvedValue(okProvider('claude', 23))
+
+    service.evictInactiveClaudeCache('account-new')
+
+    await vi.waitFor(() =>
+      expect(service.getState().inactiveClaudeAccounts[0]?.rateLimits?.session?.usedPercent).toBe(
+        23
+      )
+    )
+  })
+
+  it('does not refetch on a roster change when no account context is published', async () => {
+    const service = new RateLimitService()
+    service.setInactiveClaudeAccountsResolver(() => [
+      { id: 'account-new', managedAuthPath: '/tmp/account-new/auth' }
+    ])
+    vi.mocked(fetchManagedAccountUsage).mockResolvedValue(okProvider('claude', 23))
+
+    service.evictInactiveClaudeCache('account-new')
+    await Promise.resolve()
+
+    expect(fetchManagedAccountUsage).not.toHaveBeenCalled()
+  })
 })

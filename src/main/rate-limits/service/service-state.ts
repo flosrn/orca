@@ -14,6 +14,7 @@ import {
   type OpenCodeGoRateLimitConfig,
   type MiniMaxRateLimitConfig,
   type GeminiCliOAuthEnabledResolver,
+  type ManagedAccountContextResolver,
   type NormalizedCodexAccountSelectionTarget,
   type NormalizedClaudeAccountSelectionTarget,
   type InactiveClaudeAccountInfo,
@@ -74,6 +75,7 @@ export abstract class RateLimitServiceState {
   protected mainWindow: BrowserWindow | null = null
   protected detachWindowListeners: (() => void) | null = null
   protected isFetching = false
+  protected stopped = false
   protected fullFetchQueued = false
   protected codexOnlyFetchQueued = false
   protected claudeOnlyFetchQueued = false
@@ -104,8 +106,11 @@ export abstract class RateLimitServiceState {
   protected miniMaxConfigResolver: (() => MiniMaxRateLimitConfig) | null = null
   protected geminiCliOAuthEnabledResolver: GeminiCliOAuthEnabledResolver | null = null
   protected inactiveClaudeAccountsResolver: (() => InactiveClaudeAccountInfo[]) | null = null
-  protected inactiveCodexAccountsResolver: (() => InactiveCodexAccountInfo[]) | null = null
+  protected inactiveCodexAccountsResolver:
+    | ((target: NormalizedCodexAccountSelectionTarget) => InactiveCodexAccountInfo[])
+    | null = null
   protected networkProxySettingsResolver: (() => NetworkProxySettings) | null = null
+  protected managedAccountContextResolver: ManagedAccountContextResolver | null = null
   protected inactiveClaudeCache = new Map<string, ProviderRateLimits>()
   protected inactiveCodexCache = new Map<string, ProviderRateLimits>()
   protected inactiveClaudeFetching = new Set<string>()
