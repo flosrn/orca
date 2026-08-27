@@ -140,11 +140,16 @@ jobs:
             )"
             n="$(git rev-list --count --no-merges --cherry-pick --right-only "$patch_sha...$custom_sha")"
             if [ "$n" -eq 0 ]; then
-              echo "::error::$CUSTOM_BRANCH n'ajoute aucun commit à $PATCH_BRANCH — laisse la variable vide pour un canal nu"
-              exit 1
+              # Une branche perso encore vide n'est pas une erreur : c'est
+              # l'état normal entre « je crée la branche » et « je commite ».
+              # La faire échouer imposerait un ordre à respecter, donc
+              # exactement la prise de tête que ce canal doit éviter.
+              echo "$CUSTOM_BRANCH n'a encore aucun commit propre — canal nu ce soir."
+              custom_sha=""
+            else
+              identity="$identity+$custom_id"
+              echo "Branche perso : $CUSTOM_BRANCH @ ${custom_sha:0:12} — $n commit(s) propre(s)"
             fi
-            identity="$identity+$custom_id"
-            echo "Branche perso : $CUSTOM_BRANCH @ ${custom_sha:0:12} — $n commit(s) propre(s)"
           else
             echo "Canal nu : aucune CUSTOM_BRANCH réglée."
           fi
