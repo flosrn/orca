@@ -13,6 +13,24 @@ export type ManagedAccountDescriptor = {
   createdAt: number
 }
 
+/**
+ * True when a managed account already signs in the same identity as the provider's own login.
+ *
+ * Why it matters: signing an identity in as a managed account leaves the system default
+ * pointing at that same login, so publishing both lanes meters one subscription twice under
+ * two names — and the duplicate reads as a third account the user never created.
+ */
+export function isCoveredByManagedAccount(
+  systemDefaultEmail: string | null,
+  managedAccounts: readonly { email: string }[]
+): boolean {
+  const target = systemDefaultEmail?.trim().toLowerCase()
+  if (!target) {
+    return false
+  }
+  return managedAccounts.some((account) => account.email.trim().toLowerCase() === target)
+}
+
 /** Why a lane has no numbers, so the UI explains instead of rendering a blank meter. */
 export type UnmeasuredLaneReason =
   /** A fetch is in flight and has not produced a window yet. */

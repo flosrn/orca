@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   SYSTEM_DEFAULT_ACCOUNT_ID,
   buildManagedAccountUsageLanes,
+  isCoveredByManagedAccount,
   type BuildManagedAccountUsageLanesArgs
 } from './managed-account-usage-roster'
 import type { InactiveAccountUsage, ProviderRateLimits } from './rate-limit-types'
@@ -161,5 +162,28 @@ describe('buildManagedAccountUsageLanes', () => {
       isFetching: true,
       unmeasuredReason: 'pending'
     })
+  })
+})
+
+describe('isCoveredByManagedAccount', () => {
+  // Why: signing the system-default identity in as a managed account leaves ~/.codex pointing
+  // at it too. Publishing both lanes metered one subscription twice and showed a third account
+  // the user never created.
+  it('matches a managed account with the same identity, case and space insensitively', () => {
+    expect(isCoveredByManagedAccount('Flo@Example.com ', [{ email: 'flo@example.com' }])).toBe(true)
+  })
+
+  it('does not match a different identity', () => {
+    expect(isCoveredByManagedAccount('a@example.com', [{ email: 'b@example.com' }])).toBe(false)
+  })
+
+  // Why: an unresolved identity cannot be proven to duplicate anything, so the lane stays.
+  it('treats an unresolved or blank identity as uncovered', () => {
+    expect(isCoveredByManagedAccount(null, [{ email: 'a@example.com' }])).toBe(false)
+    expect(isCoveredByManagedAccount('   ', [{ email: 'a@example.com' }])).toBe(false)
+  })
+
+  it('is false with no managed accounts', () => {
+    expect(isCoveredByManagedAccount('a@example.com', [])).toBe(false)
   })
 })
