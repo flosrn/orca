@@ -1251,8 +1251,11 @@ function VerboseProviderUsage({
 }
 
 /**
- * Provider mark for one account lane. The ordinal is the compact on-bar label and the email is
- * the hover disclosure, because two identical provider icons side by side are unreadable.
+ * Provider mark for one account lane: the icon, then a baseline-aligned ordinal.
+ *
+ * Why not a superscript: raised off a 13px icon it read as a footnote marker and sat
+ * optically outside the pill. Inline and vertically centred, it reads as part of the
+ * label. The bar has no room for the identity, so the email is the hover disclosure.
  */
 function ProviderAccountMark({
   provider,
@@ -1266,20 +1269,20 @@ function ProviderAccountMark({
   }
   return (
     <span
-      className="inline-flex items-center"
+      className="inline-flex items-center gap-1"
       title={badge.email ?? undefined}
       aria-label={badge.email ?? `${provider} ${badge.ordinal}`}
     >
       <ProviderIcon provider={provider} />
-      <sup
+      <span
         className={
           badge.isActive
-            ? 'ml-0.5 text-[9px] font-semibold text-foreground'
-            : 'ml-0.5 text-[9px] font-medium text-muted-foreground/70'
+            ? 'text-[10px] font-semibold leading-none tabular-nums text-foreground/90'
+            : 'text-[10px] font-medium leading-none tabular-nums text-muted-foreground/60'
         }
       >
         {badge.ordinal}
-      </sup>
+      </span>
     </span>
   )
 }

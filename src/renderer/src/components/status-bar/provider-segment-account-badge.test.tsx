@@ -41,8 +41,7 @@ describe('ProviderSegment account badge', () => {
     )
 
     expect(markup).toContain('title="florian.seran@gmail.com"')
-    expect(markup).toContain('<sup')
-    expect(markup).toContain('>2</sup>')
+    expect(markup).toMatch(/>2<\/span>/)
     expect(markup).toContain('42%')
   })
 
@@ -68,8 +67,11 @@ describe('ProviderSegment account badge', () => {
       })
     )
 
-    expect(active).toContain('text-foreground')
-    expect(inactive).toContain('text-muted-foreground/70')
+    // Assert the two lanes are visually distinguished without pinning a class name:
+    // emphasis is a design choice that may be retuned, the distinction is the contract.
+    expect(active).not.toBe(inactive)
+    expect(active).toContain('font-semibold')
+    expect(inactive).toContain('font-medium')
   })
 
   it('renders no badge at all for a single-account provider', async () => {
@@ -79,8 +81,8 @@ describe('ProviderSegment account badge', () => {
       ProviderSegment({ p: claudeLimits(42), compact: false, display: 'used' })
     )
 
-    expect(markup).not.toContain('<sup')
     expect(markup).not.toContain('title=')
+    expect(markup).not.toMatch(/>\d<\/span>/)
   })
 
   // Why: an unfetched lane must read as unknown. A dash is honest; a percentage would not be.
@@ -105,6 +107,6 @@ describe('ProviderSegment account badge', () => {
 
     expect(markup).toContain('--')
     expect(markup).not.toContain('%')
-    expect(markup).toContain('>3</sup>')
+    expect(markup).toMatch(/>3<\/span>/)
   })
 })
