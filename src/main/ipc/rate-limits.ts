@@ -30,4 +30,6 @@ export function registerRateLimitHandlers(
   )
   ipcMain.handle('rateLimits:refreshMiniMax', () => rateLimits.refresh())
   ipcMain.handle('rateLimits:refreshGrok', () => rateLimits.refreshGrok())
+  // Why: one channel for Cursor/ClinePass/Qwen Cloud — they share a single CodexBar CLI batch.
+  ipcMain.handle('rateLimits:refreshCodexBar', () => rateLimits.refreshCodexBar())
 }
