@@ -5,7 +5,8 @@ import type {
   RateLimitState,
   ProviderRateLimits,
   InactiveAccountUsage,
-  RateLimitRuntimeTarget
+  RateLimitRuntimeTarget,
+  SystemDefaultLaneDescriptor
 } from '../../shared/rate-limit-types'
 import { fetchClaudeRateLimits, fetchManagedAccountUsage } from './claude-fetcher'
 import type { InactiveClaudeAccountInfo } from './claude-fetcher'
@@ -63,6 +64,17 @@ type MiniMaxResolvedConfig = {
 }
 
 type GeminiCliOAuthEnabledResolver = () => boolean
+
+export type ManagedAccountContext = {
+  activeClaudeAccountId: string | null
+  activeCodexAccountId: string | null
+  claudeSystemDefault: SystemDefaultLaneDescriptor | null
+  codexSystemDefault: SystemDefaultLaneDescriptor | null
+}
+type ManagedAccountContextResolver = (targets: {
+  claude: NormalizedClaudeAccountSelectionTarget
+  codex: NormalizedCodexAccountSelectionTarget
+}) => ManagedAccountContext
 type ActiveRateLimitProvider = ProviderRateLimits['provider']
 type ActiveProviderState = {
   provider: ActiveRateLimitProvider
@@ -207,6 +219,8 @@ export class RateLimitService {
   private mainWindow: BrowserWindow | null = null
   private detachWindowListeners: (() => void) | null = null
   private isFetching = false
+  /** True between stop() and the next start(); gates work that runs after a fetch cycle settles. */
+  private stopped = false
   private fullFetchQueued = false
   private codexOnlyFetchQueued = false
   private claudeOnlyFetchQueued = false
@@ -237,8 +251,11 @@ export class RateLimitService {
   private miniMaxConfigResolver: (() => MiniMaxRateLimitConfig) | null = null
   private geminiCliOAuthEnabledResolver: GeminiCliOAuthEnabledResolver | null = null
   private inactiveClaudeAccountsResolver: (() => InactiveClaudeAccountInfo[]) | null = null
-  private inactiveCodexAccountsResolver: (() => InactiveCodexAccountInfo[]) | null = null
+  private inactiveCodexAccountsResolver:
+    | ((target: NormalizedCodexAccountSelectionTarget) => InactiveCodexAccountInfo[])
+    | null = null
   private networkProxySettingsResolver: (() => NetworkProxySettings) | null = null
+  private managedAccountContextResolver: ManagedAccountContextResolver | null = null
   private inactiveClaudeCache = new Map<string, ProviderRateLimits>()
   private inactiveCodexCache = new Map<string, ProviderRateLimits>()
   private inactiveClaudeFetching = new Set<string>()
@@ -324,10 +341,22 @@ export class RateLimitService {
     this.inactiveClaudeAccountsGeneration += 1
   }
 
-  setInactiveCodexAccountsResolver(resolver: () => InactiveCodexAccountInfo[]): void {
+  /** The target is passed because a home path is runtime-specific: a host `~/.codex` is not a WSL distro's. */
+  setInactiveCodexAccountsResolver(
+    resolver: (target: NormalizedCodexAccountSelectionTarget) => InactiveCodexAccountInfo[]
+  ): void {
     this.inactiveCodexAccountsResolver = resolver
     this.inactiveCodexAccountsGeneration += 1
     this.pruneInactiveCodexState()
+  }
+
+  /**
+   * Supplies which account each provider is fetching for, and whether the provider's own
+   * login carries a lane. Main owns this because it also picks the fetch target; resolving
+   * it a second time in the renderer is how the two answers drift apart.
+   */
+  setManagedAccountContextResolver(resolver: ManagedAccountContextResolver): void {
+    this.managedAccountContextResolver = resolver
   }
 
   attach(mainWindow: BrowserWindow): void {
@@ -360,6 +389,7 @@ export class RateLimitService {
   }
 
   start(options: { fetchImmediately?: boolean } = {}): void {
+    this.stopped = false
     if (options.fetchImmediately !== false) {
       void this.fetchAll()
     } else {
@@ -369,6 +399,7 @@ export class RateLimitService {
   }
 
   stop(): void {
+    this.stopped = true
     this.abortActiveFetchCycle()
     this.clearQueuedFetches()
     this.inactiveClaudeFetching.clear()
@@ -391,6 +422,12 @@ export class RateLimitService {
       grokAuthConfigured: this.grokAuthConfigured,
       claudeTarget: this.claudeFetchTarget,
       codexTarget: this.codexFetchTarget,
+      // Why: absent (not null) when no resolver is wired, so a consumer can tell "this host
+      // cannot say which account is active" from "the system default is active".
+      ...this.managedAccountContextResolver?.({
+        claude: this.claudeFetchTarget,
+        codex: this.codexFetchTarget
+      }),
       inactiveClaudeAccounts: this.buildInactiveArray(
         this.inactiveClaudeCache,
         this.inactiveClaudeFetching
@@ -571,7 +608,8 @@ export class RateLimitService {
     await this.fetchClaudeOnly({ force: true })
   }
 
-  async fetchInactiveClaudeAccountsOnOpen(): Promise<void> {
+  /** Refreshes every non-active account of this provider. Driven by the poll cycle and by explicit UI refreshes. */
+  async fetchInactiveClaudeAccounts(): Promise<void> {
     if (Date.now() - this.lastInactiveClaudeFetchAt < INACTIVE_FETCH_DEBOUNCE_MS) {
       return
     }
@@ -626,7 +664,7 @@ export class RateLimitService {
           }
           const cached = this.inactiveClaudeCache.get(account.id) ?? null
           this.inactiveClaudeCache.set(account.id, this.applyStalePolicy(fresh, cached))
-        } catch {
+        } catch (error) {
           // Why: per-account try/catch keeps one Keychain/network error from aborting the remaining accounts in the batch.
           if (
             signal.aborted ||
@@ -634,6 +672,11 @@ export class RateLimitService {
             !this.isCurrentInactiveClaudeAccount(account.id)
           ) {
             this.inactiveClaudeCache.delete(account.id)
+          } else {
+            // Why: a swallowed failure left the previous percentage cached forever. These lanes
+            // are now polled and rendered, so the failure goes through the same stale policy as
+            // the active providers — bounded staleness, and a signalled error once it expires.
+            this.cacheInactiveFailure(this.inactiveClaudeCache, account.id, 'claude', error)
           }
         }
         this.inactiveClaudeFetching.delete(account.id)
@@ -648,7 +691,8 @@ export class RateLimitService {
     }
   }
 
-  async fetchInactiveCodexAccountsOnOpen(): Promise<void> {
+  /** Refreshes every non-active account of this provider. Driven by the poll cycle and by explicit UI refreshes. */
+  async fetchInactiveCodexAccounts(): Promise<void> {
     if (Date.now() - this.lastInactiveCodexFetchAt < INACTIVE_FETCH_DEBOUNCE_MS) {
       return
     }
@@ -656,7 +700,7 @@ export class RateLimitService {
     if (this.inactiveCodexFetchInFlight) {
       return
     }
-    const accounts = this.inactiveCodexAccountsResolver?.() ?? []
+    const accounts = this.inactiveCodexAccountsResolver?.(this.codexFetchTarget) ?? []
     if (accounts.length === 0) {
       return
     }
@@ -726,7 +770,7 @@ export class RateLimitService {
           }
           const cached = this.inactiveCodexCache.get(account.id) ?? null
           this.inactiveCodexCache.set(account.id, this.applyStalePolicy(fresh, cached))
-        } catch {
+        } catch (error) {
           // Why: per-account try/catch prevents one failure from aborting the batch.
           if (
             signal.aborted ||
@@ -734,6 +778,8 @@ export class RateLimitService {
             !this.isCurrentInactiveCodexAccount(account.id)
           ) {
             this.inactiveCodexCache.delete(account.id)
+          } else {
+            this.cacheInactiveFailure(this.inactiveCodexCache, account.id, 'codex', error)
           }
         }
         this.inactiveCodexFetching.delete(account.id)
@@ -754,6 +800,7 @@ export class RateLimitService {
     this.inactiveClaudeCache.delete(accountId)
     this.inactiveClaudeFetching.delete(accountId)
     this.pushToRenderer()
+    this.refetchInactiveLanesAfterRosterChange('claude')
   }
 
   private isCurrentInactiveClaudeAccount(accountId: string): boolean {
@@ -763,7 +810,7 @@ export class RateLimitService {
   }
 
   private isCurrentInactiveCodexAccount(accountId: string): boolean {
-    return (this.inactiveCodexAccountsResolver?.() ?? []).some(
+    return (this.inactiveCodexAccountsResolver?.(this.codexFetchTarget) ?? []).some(
       (account) => account.id === accountId
     )
   }
@@ -786,7 +833,9 @@ export class RateLimitService {
 
   private pruneInactiveCodexState(): void {
     const currentIds = new Set(
-      (this.inactiveCodexAccountsResolver?.() ?? []).map((account) => account.id)
+      (this.inactiveCodexAccountsResolver?.(this.codexFetchTarget) ?? []).map(
+        (account) => account.id
+      )
     )
     for (const accountId of this.inactiveCodexCache.keys()) {
       if (!currentIds.has(accountId)) {
@@ -805,6 +854,26 @@ export class RateLimitService {
     this.inactiveCodexCache.delete(accountId)
     this.inactiveCodexFetching.delete(accountId)
     this.pushToRenderer()
+    this.refetchInactiveLanesAfterRosterChange('codex')
+  }
+
+  /**
+   * Adding or removing an account changes which lanes the status bar shows. Eviction alone left a
+   * new account reading "--" until the next poll — up to the full poll interval — which looks
+   * broken rather than pending. Clearing the debounce stamp lets that refetch happen now; the
+   * in-flight guards inside each fetch still collapse bursts from a multi-account edit.
+   */
+  private refetchInactiveLanesAfterRosterChange(provider: 'claude' | 'codex'): void {
+    if (this.stopped || this.managedAccountContextResolver === null) {
+      return
+    }
+    if (provider === 'claude') {
+      this.lastInactiveClaudeFetchAt = 0
+      void this.fetchInactiveClaudeAccounts().catch(() => {})
+      return
+    }
+    this.lastInactiveCodexFetchAt = 0
+    void this.fetchInactiveCodexAccounts().catch(() => {})
   }
 
   setPollingInterval(ms: number): void {
@@ -985,6 +1054,7 @@ export class RateLimitService {
     }
     this.isFetching = true
 
+    let cycleAborted = false
     try {
       let shouldContinue = true
       // Why: only user-directed (force) fetches may bypass a provider's Retry-After gate; queued reruns inherit force because only forced calls queue them.
@@ -996,6 +1066,7 @@ export class RateLimitService {
         shouldContinue = false
         cycleForce = true
         if (signal.aborted) {
+          cycleAborted = true
           break
         }
         if (this.fullFetchQueued) {
@@ -1009,6 +1080,7 @@ export class RateLimitService {
             this.runFetchCodexOnlyCycle(fetchSignal)
           )
           if (codexSignal.aborted) {
+            cycleAborted = true
             break
           }
         }
@@ -1018,6 +1090,7 @@ export class RateLimitService {
             this.runFetchClaudeOnlyCycle(fetchSignal, { force: true })
           )
           if (claudeSignal.aborted) {
+            cycleAborted = true
             break
           }
         }
@@ -1027,6 +1100,7 @@ export class RateLimitService {
             this.runFetchGrokOnlyCycle(fetchSignal)
           )
           if (grokSignal.aborted) {
+            cycleAborted = true
             break
           }
         }
@@ -1035,6 +1109,19 @@ export class RateLimitService {
       this.isFetching = false
       this.resolveFetchIdleWaiters()
     }
+    // Why: inactive accounts are rendered as their own status-bar lanes, so they refresh on the
+    // poll like every other meter. Deliberately not awaited: callers await fetchAll for the
+    // active providers, and a user-clicked refresh must not block on N extra account fetches.
+    // Results reach the renderer through the same push channel. Gated on abort and on stop() so
+    // shutdown cannot start a fresh Claude/Codex probe here.
+    // Why: these lanes exist to feed per-account status-bar meters, which only render when a
+    // managed-account context is published. With no resolver wired, nothing consumes them and
+    // the extra per-account network calls would be pure waste.
+    if (cycleAborted || this.stopped || this.managedAccountContextResolver === null) {
+      return
+    }
+    void this.fetchInactiveClaudeAccounts().catch(() => {})
+    void this.fetchInactiveCodexAccounts().catch(() => {})
   }
 
   private async fetchCodexOnly(options?: { force?: boolean }): Promise<void> {
@@ -2131,6 +2218,28 @@ export class RateLimitService {
           previous.usageMetadata?.lastSuccessfulSource ?? previous.usageMetadata?.source
       }
     }
+  }
+
+  /**
+   * Records a per-account fetch failure so a rendered lane cannot keep serving an expired
+   * percentage. Routed through applyStalePolicy for the same bounded staleness the active
+   * providers get, rather than a second ad hoc policy for inactive lanes.
+   */
+  private cacheInactiveFailure(
+    cache: Map<string, ProviderRateLimits>,
+    accountId: string,
+    provider: ProviderRateLimits['provider'],
+    error: unknown
+  ): void {
+    const failure: ProviderRateLimits = {
+      provider,
+      session: null,
+      weekly: null,
+      updatedAt: Date.now(),
+      error: error instanceof Error ? error.message : 'Unknown error',
+      status: 'error'
+    }
+    cache.set(accountId, this.applyStalePolicy(failure, cache.get(accountId) ?? null))
   }
 
   private buildInactiveArray(

@@ -93,23 +93,27 @@ describe('UsageRow', () => {
     const markup = renderToStaticMarkup(
       <TooltipProvider>
         <UsageRosterPanel
-          providers={[
+          segments={[
             {
-              ...signedOutCodex,
-              session: {
-                usedPercent: 25,
-                windowMinutes: 300,
-                resetsAt: sessionReset,
-                resetDescription: null
-              },
-              weekly: {
-                usedPercent: 10,
-                windowMinutes: 10_080,
-                resetsAt: weeklyReset,
-                resetDescription: null
-              },
-              status: 'ok',
-              error: null
+              key: 'codex',
+              badge: null,
+              limits: {
+                ...signedOutCodex,
+                session: {
+                  usedPercent: 25,
+                  windowMinutes: 300,
+                  resetsAt: sessionReset,
+                  resetDescription: null
+                },
+                weekly: {
+                  usedPercent: 10,
+                  windowMinutes: 10_080,
+                  resetsAt: weeklyReset,
+                  resetDescription: null
+                },
+                status: 'ok',
+                error: null
+              }
             }
           ]}
           display="used"
@@ -275,7 +279,7 @@ describe('UsageRosterPanel density picker', () => {
       root.render(
         <TooltipProvider>
           <UsageRosterPanel
-            providers={[]}
+            segments={[]}
             display="used"
             statusBarUsageMode={statusBarUsageMode}
             onStatusBarUsageModeChange={onStatusBarUsageModeChange}

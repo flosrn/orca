@@ -267,10 +267,15 @@ import { CodexAccountService } from './codex-accounts/service'
 import { CodexRuntimeHomeService } from './codex-accounts/runtime-home-service'
 import { markCodexProjectTrusted } from './agent-trust-presets'
 import {
+  getSelectedCodexAccountIdForTarget,
   normalizeCodexRuntimeSelection,
   type CodexAccountSelectionTarget
 } from './codex-accounts/runtime-selection'
-import { normalizeClaudeRuntimeSelection } from './claude-accounts/runtime-selection'
+import {
+  getSelectedClaudeAccountIdForTarget,
+  normalizeClaudeRuntimeSelection
+} from './claude-accounts/runtime-selection'
+import { SYSTEM_DEFAULT_ACCOUNT_ID } from '../shared/managed-account-usage-roster'
 import { codexHookService, setSystemCodexHomeHookSweepSuppressed } from './codex/hook-service'
 import { reconcileRetainedCodexHookHomes } from './codex/retained-codex-hook-state'
 import {
@@ -2815,15 +2820,11 @@ void app.whenReady().then(async () => {
         wslLinuxAuthPath: account.wslLinuxAuthPath
       }))
   })
-  rateLimits.setInactiveCodexAccountsResolver(() => {
+  rateLimits.setInactiveCodexAccountsResolver((target) => {
     const settings = store!.getSettings()
-    const activeIds = new Set(
-      [
-        normalizeCodexRuntimeSelection(settings).host,
-        ...Object.values(normalizeCodexRuntimeSelection(settings).wsl)
-      ].filter(Boolean)
-    )
-    return settings.codexManagedAccounts
+    const selection = normalizeCodexRuntimeSelection(settings)
+    const activeIds = new Set([selection.host, ...Object.values(selection.wsl)].filter(Boolean))
+    const managed = settings.codexManagedAccounts
       .filter((account) => !activeIds.has(account.id))
       .map((account) => ({
         id: account.id,
@@ -2834,6 +2835,46 @@ void app.whenReady().then(async () => {
             : { kind: 'skip' as const }
         }
       }))
+    // Why: getSystemCodexHomePath() is the *host* ~/.codex. A WSL distro has its own, which is
+    // not resolved per-distro (see CodexRateLimitAccountsState.systemDefault), so offering the
+    // lane there would publish a host reading labelled as the distro's system default.
+    if (target.runtime !== 'host' || selection.host === null) {
+      return managed
+    }
+    // Why: ~/.codex is never relocated by account switching, so the system-default login stays
+    // readable while a managed account is active. Without this lane its usage would be invisible
+    // for anyone whose second ChatGPT identity *is* the system default.
+    return [
+      {
+        id: SYSTEM_DEFAULT_ACCOUNT_ID,
+        resolveHome: () => ({ kind: 'ready' as const, managedHomePath: getSystemCodexHomePath() })
+      },
+      ...managed
+    ]
+  })
+  rateLimits.setManagedAccountContextResolver((targets) => {
+    const settings = store!.getSettings()
+    const activeClaudeAccountId = getSelectedClaudeAccountIdForTarget(settings, targets.claude)
+    const codexSystemDefault = codexAccounts?.listAccounts().systemDefault
+    return {
+      activeClaudeAccountId,
+      activeCodexAccountId: getSelectedCodexAccountIdForTarget(settings, targets.codex),
+      // Why: Claude parks its system default in a restore-on-deselect snapshot, and the managed
+      // fetcher writes refreshed tokens back to the path it reads. Reading that snapshot for a
+      // status-bar number would put the credential-restoration path at risk, so the lane is
+      // published only while it is the measured one.
+      claudeSystemDefault:
+        activeClaudeAccountId === null ? { email: null, measurableWhenInactive: false } : null,
+      // Why: an api-key login has no subscription window, so it carries no usage lane at all.
+      // Restricted to the host runtime for the same reason as the sentinel above: no per-distro
+      // WSL system-default home is resolved, so the lane would be permanently unmeasurable.
+      codexSystemDefault:
+        targets.codex.runtime === 'host' &&
+        codexSystemDefault?.hasAuth &&
+        codexSystemDefault.authKind === 'oauth'
+          ? { email: codexSystemDefault.email, measurableWhenInactive: true }
+          : null
+    }
   })
   const orchestrationEnvironmentTransport: OrchestrationEnvironmentTransport = {
     resolve: (selector) => {

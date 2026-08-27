@@ -115,6 +115,19 @@ export type GrokAccountStatus = {
   error: string | null
 }
 
+/**
+ * The provider's own login (real ~/.claude / ~/.codex), when one exists and can carry
+ * subscription usage. Null means there is no such lane to show: signed out, or an
+ * API-key login with no subscription window. An email is not a presence signal —
+ * Claude's own default reports none — so presence is the descriptor's existence.
+ */
+export type SystemDefaultLaneDescriptor = {
+  /** Identity, when resolved. */
+  email: string | null
+  /** True when usage for this login is fetchable while another account is active. */
+  measurableWhenInactive: boolean
+}
+
 export type RateLimitState = {
   claude: ProviderRateLimits | null
   codex: ProviderRateLimits | null
@@ -135,6 +148,17 @@ export type RateLimitState = {
   grokAuthConfigured: boolean
   claudeTarget: RateLimitRuntimeTarget
   codexTarget: RateLimitRuntimeTarget
+  /**
+   * Managed account the service fetches for, per the current target; `null` selects the
+   * system default. Absent (`undefined`) from hosts that predate per-account lanes, and the
+   * two cases must stay distinct: `undefined` means "this host cannot say", which degrades
+   * to the single active-account meter, while `null` is a positive answer.
+   */
+  activeClaudeAccountId?: string | null
+  activeCodexAccountId?: string | null
+  /** `null` when the provider's own login carries no usage lane; absent on older hosts. */
+  claudeSystemDefault?: SystemDefaultLaneDescriptor | null
+  codexSystemDefault?: SystemDefaultLaneDescriptor | null
   inactiveClaudeAccounts: InactiveAccountUsage[]
   inactiveCodexAccounts: InactiveAccountUsage[]
 }
