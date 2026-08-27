@@ -119,6 +119,12 @@ export type GrokAccountStatus = {
   tokenFresh: boolean
   error: string | null
 }
+/** Provider-owned login that can carry subscription usage. */
+export type SystemDefaultLaneDescriptor = {
+  email: string | null
+  /** Whether usage stays fetchable while a managed account is active. */
+  measurableWhenInactive: boolean
+}
 
 export type RateLimitState = {
   claude: ProviderRateLimits | null
@@ -150,6 +156,12 @@ export type RateLimitState = {
   codexbarAvailable: boolean
   claudeTarget: RateLimitRuntimeTarget
   codexTarget: RateLimitRuntimeTarget
+  /** Active managed account; `null` selects the provider login, absent on older hosts. */
+  activeClaudeAccountId?: string | null
+  activeCodexAccountId?: string | null
+  /** Provider-login lane; `null` means no subscription lane, absent on older hosts. */
+  claudeSystemDefault?: SystemDefaultLaneDescriptor | null
+  codexSystemDefault?: SystemDefaultLaneDescriptor | null
   inactiveClaudeAccounts: InactiveAccountUsage[]
   inactiveCodexAccounts: InactiveAccountUsage[]
 }

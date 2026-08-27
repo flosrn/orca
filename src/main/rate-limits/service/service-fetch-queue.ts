@@ -10,6 +10,7 @@ export abstract class RateLimitServiceFetchQueue extends RateLimitServiceProvide
       return
     }
     this.isFetching = true
+    let cycleAborted = false
 
     try {
       let shouldContinue = true
@@ -22,6 +23,7 @@ export abstract class RateLimitServiceFetchQueue extends RateLimitServiceProvide
         shouldContinue = false
         cycleForce = true
         if (signal.aborted) {
+          cycleAborted = true
           break
         }
         if (this.fullFetchQueued) {
@@ -35,6 +37,7 @@ export abstract class RateLimitServiceFetchQueue extends RateLimitServiceProvide
             this.runFetchCodexOnlyCycle(fetchSignal)
           )
           if (codexSignal.aborted) {
+            cycleAborted = true
             break
           }
         }
@@ -44,6 +47,7 @@ export abstract class RateLimitServiceFetchQueue extends RateLimitServiceProvide
             this.runFetchClaudeOnlyCycle(fetchSignal, { force: true })
           )
           if (claudeSignal.aborted) {
+            cycleAborted = true
             break
           }
         }
@@ -53,6 +57,7 @@ export abstract class RateLimitServiceFetchQueue extends RateLimitServiceProvide
             this.runFetchGrokOnlyCycle(fetchSignal)
           )
           if (grokSignal.aborted) {
+            cycleAborted = true
             break
           }
         }
@@ -61,7 +66,10 @@ export abstract class RateLimitServiceFetchQueue extends RateLimitServiceProvide
       this.isFetching = false
       this.resolveFetchIdleWaiters()
     }
+    this.afterActiveFetchAll(cycleAborted)
   }
+
+  protected afterActiveFetchAll(_cycleAborted: boolean): void {}
 
   protected async fetchCodexOnly(options?: { force?: boolean }): Promise<void> {
     if (this.isFetching) {
