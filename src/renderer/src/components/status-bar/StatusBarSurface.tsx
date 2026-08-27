@@ -74,7 +74,7 @@ export function StatusBarSurface({
     isEmptyUsageState,
     isRefreshing,
     petEnabled,
-    rosterProviders,
+    usageBarSegments,
     setMenuOpen,
     setMenuPoint,
     setStatusBarUsageMode,
@@ -128,16 +128,21 @@ export function StatusBarSurface({
                     'Usage'
                   )}
                 >
-                  {rosterProviders.map((p) =>
+                  {usageBarSegments.map((segment) =>
                     iconOnly ? (
-                      // Narrow status bar: fall back to main's compact letter badge.
-                      <span key={p.provider} title={getProviderDisplayName(p.provider)}>
-                        <ProviderLetterBadge p={p} />
+                      <span
+                        key={segment.key}
+                        title={
+                          segment.badge?.email ?? getProviderDisplayName(segment.limits.provider)
+                        }
+                      >
+                        <ProviderLetterBadge p={segment.limits} />
                       </span>
                     ) : (
                       <ProviderSegment
-                        key={p.provider}
-                        p={p}
+                        key={segment.key}
+                        p={segment.limits}
+                        badge={segment.badge}
                         compact={compact}
                         display={usagePercentageDisplay}
                         mode={statusBarUsageMode}
@@ -159,7 +164,7 @@ export function StatusBarSurface({
                 onCloseAutoFocus={usageMenuFocusHandoff.onCloseAutoFocus}
               >
                 <UsageRosterPanel
-                  providers={rosterProviders}
+                  segments={usageBarSegments}
                   display={usagePercentageDisplay}
                   statusBarUsageMode={statusBarUsageMode}
                   onStatusBarUsageModeChange={setStatusBarUsageMode}
@@ -170,10 +175,8 @@ export function StatusBarSurface({
                   canSignIn={(provider) => getUsageProviderAccountsSectionId(provider) !== null}
                   onManageAccounts={handleManageAccounts}
                   onUsageDetails={handleUsageDetails}
-                  renderRow={(p, rowNode) => {
-                    // Every provider drills into its detail panel (parity with the
-                    // per-provider dropdowns on main); Claude/Codex additionally get
-                    // the account switcher + runtime toggle + Codex reset credits.
+                  renderRow={(segment, rowNode) => {
+                    const p = segment.limits
                     if (p.provider === 'claude') {
                       return (
                         <ClaudeSwitcherMenu
