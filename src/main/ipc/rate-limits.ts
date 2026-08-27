@@ -23,10 +23,10 @@ export function registerRateLimitHandlers(
     rateLimits.setPollingInterval(ms)
   )
   ipcMain.handle('rateLimits:fetchInactiveClaudeAccounts', () =>
-    rateLimits.fetchInactiveClaudeAccountsOnOpen()
+    rateLimits.fetchInactiveClaudeAccounts()
   )
   ipcMain.handle('rateLimits:fetchInactiveCodexAccounts', () =>
-    rateLimits.fetchInactiveCodexAccountsOnOpen()
+    rateLimits.fetchInactiveCodexAccounts()
   )
   ipcMain.handle('rateLimits:refreshMiniMax', () => rateLimits.refresh())
   ipcMain.handle('rateLimits:refreshGrok', () => rateLimits.refreshGrok())
