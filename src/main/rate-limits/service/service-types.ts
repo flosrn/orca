@@ -1,8 +1,17 @@
-import type { ProviderRateLimits } from '../../../shared/rate-limit-types'
+import type {
+  ProviderRateLimits,
+  SystemDefaultLaneDescriptor
+} from '../../../shared/rate-limit-types'
 import type { ClaudeRuntimeAuthPreparation } from '../../claude-accounts/runtime-auth-service'
-import type { ClaudeAccountSelectionTarget } from '../../claude-accounts/runtime-selection'
+import type {
+  ClaudeAccountSelectionTarget,
+  NormalizedClaudeAccountSelectionTarget
+} from '../../claude-accounts/runtime-selection'
 import type { KimiHomeResolution } from '../../kimi/kimi-runtime-home'
-import type { CodexAccountSelectionTarget } from '../../codex-accounts/runtime-selection'
+import type {
+  CodexAccountSelectionTarget,
+  NormalizedCodexAccountSelectionTarget
+} from '../../codex-accounts/runtime-selection'
 import type { CodexRateLimitHomeResolution } from '../../codex-accounts/runtime-home-service'
 
 export type {
@@ -32,6 +41,18 @@ export type InactiveCodexAccountInfo = {
   id: string
   resolveHome: () => { kind: 'ready'; managedHomePath: string } | { kind: 'skip' }
 }
+
+export type ManagedAccountContext = {
+  activeClaudeAccountId: string | null
+  activeCodexAccountId: string | null
+  claudeSystemDefault: SystemDefaultLaneDescriptor | null
+  codexSystemDefault: SystemDefaultLaneDescriptor | null
+}
+
+export type ManagedAccountContextResolver = (targets: {
+  claude: NormalizedClaudeAccountSelectionTarget
+  codex: NormalizedCodexAccountSelectionTarget
+}) => ManagedAccountContext
 
 export type CodexHomePathResolver = (
   target?: CodexAccountSelectionTarget
