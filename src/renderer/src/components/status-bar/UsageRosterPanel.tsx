@@ -147,13 +147,11 @@ export function UsageRow({
   return (
     <div data-usage-mode={mode} className="flex min-w-0 flex-1 flex-col gap-1">
       <div className="flex items-center gap-2.5">
+        {/* Why no ordinal here: the row already carries the identity, so a badge crammed
+            into the 20px icon tile added noise without adding information. The ordinal
+            exists for the bar, where there is no room for an email. */}
         <span className="flex size-5 shrink-0 items-center justify-center rounded-md border border-border bg-secondary">
           <ProviderIcon provider={p.provider} />
-          {account ? (
-            <sup className="ml-0.5 text-[8px] font-semibold text-muted-foreground">
-              {account.ordinal}
-            </sup>
-          ) : null}
         </span>
         <span className="min-w-0 shrink truncate text-[13px] font-medium text-foreground">
           {name}
@@ -255,11 +253,22 @@ export function UsageRosterPanel({
       usedSections(segment.limits).map((section) => section.window.resetsAt)
     )
   )
-  // Worst-first so the account nearest a limit sits on top. Ordinal breaks ties so
-  // sibling lanes of one provider keep a stable order instead of shuffling per refresh.
+  // Providers are ranked worst-first so the one nearest a limit sits on top, but the accounts
+  // of one provider stay adjacent and in ordinal order. Ranking each lane independently
+  // interleaved them — two Claude rows split by Grok — which made the numbering read as random.
+  const worstByProvider = new Map<string, number>()
+  for (const segment of segments) {
+    const used = providerMaxUsed(usedSections(segment.limits))
+    const seen = worstByProvider.get(segment.limits.provider)
+    if (seen === undefined || used > seen) {
+      worstByProvider.set(segment.limits.provider, used)
+    }
+  }
   const sorted = [...segments].sort(
     (a, b) =>
-      providerMaxUsed(usedSections(b.limits)) - providerMaxUsed(usedSections(a.limits)) ||
+      (worstByProvider.get(b.limits.provider) ?? 0) -
+        (worstByProvider.get(a.limits.provider) ?? 0) ||
+      a.limits.provider.localeCompare(b.limits.provider) ||
       (a.badge?.ordinal ?? 0) - (b.badge?.ordinal ?? 0)
   )
 
