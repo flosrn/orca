@@ -77,7 +77,7 @@ describe('RateLimitService', () => {
         })
     )
 
-    const previewFetch = service.fetchInactiveClaudeAccountsOnOpen()
+    const previewFetch = service.fetchInactiveClaudeAccounts()
     await Promise.resolve()
 
     service.stop()
@@ -106,7 +106,7 @@ describe('RateLimitService', () => {
         })
     )
 
-    const previewFetch = service.fetchInactiveCodexAccountsOnOpen()
+    const previewFetch = service.fetchInactiveCodexAccounts()
     await Promise.resolve()
 
     service.stop()
@@ -127,7 +127,7 @@ describe('RateLimitService', () => {
     ])
     vi.mocked(fetchCodexRateLimits).mockResolvedValueOnce(okProvider('codex', 33, Date.now()))
 
-    await service.fetchInactiveCodexAccountsOnOpen()
+    await service.fetchInactiveCodexAccounts()
 
     expect(fetchCodexRateLimits).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -168,10 +168,10 @@ describe('RateLimitService', () => {
         .mockResolvedValueOnce(okProvider('codex', 33, Date.now()))
         .mockResolvedValueOnce(okProvider('codex', 67, Date.now()))
 
-      await service.fetchInactiveCodexAccountsOnOpen()
+      await service.fetchInactiveCodexAccounts()
       unavailable = true
       await vi.advanceTimersByTimeAsync(10 * 60_000)
-      await service.fetchInactiveCodexAccountsOnOpen()
+      await service.fetchInactiveCodexAccounts()
 
       expect(fetchCodexRateLimits).toHaveBeenCalledOnce()
       expect(service.getState().inactiveCodexAccounts).toEqual([
@@ -186,7 +186,7 @@ describe('RateLimitService', () => {
 
       unavailable = false
       await vi.advanceTimersByTimeAsync(10 * 60_000)
-      await service.fetchInactiveCodexAccountsOnOpen()
+      await service.fetchInactiveCodexAccounts()
 
       expect(fetchCodexRateLimits).toHaveBeenCalledTimes(2)
       expect(service.getState().inactiveCodexAccounts[0]?.rateLimits?.session?.usedPercent).toBe(67)
@@ -201,7 +201,7 @@ describe('RateLimitService', () => {
     service.setInactiveClaudeAccountsResolver(() => [account])
     vi.mocked(fetchManagedAccountUsage).mockResolvedValueOnce(okProvider('claude', 33, Date.now()))
 
-    await service.fetchInactiveClaudeAccountsOnOpen()
+    await service.fetchInactiveClaudeAccounts()
 
     expect(fetchManagedAccountUsage).toHaveBeenCalledWith(
       account,
@@ -220,9 +220,9 @@ describe('RateLimitService', () => {
     ])
     vi.mocked(fetchManagedAccountUsage).mockReturnValueOnce(accountFetch.promise)
 
-    const firstFetch = service.fetchInactiveClaudeAccountsOnOpen()
+    const firstFetch = service.fetchInactiveClaudeAccounts()
     await Promise.resolve()
-    await service.fetchInactiveClaudeAccountsOnOpen()
+    await service.fetchInactiveClaudeAccounts()
 
     expect(fetchManagedAccountUsage).toHaveBeenCalledTimes(1)
 
@@ -238,9 +238,9 @@ describe('RateLimitService', () => {
     ])
     vi.mocked(fetchCodexRateLimits).mockReturnValueOnce(accountFetch.promise)
 
-    const firstFetch = service.fetchInactiveCodexAccountsOnOpen()
+    const firstFetch = service.fetchInactiveCodexAccounts()
     await Promise.resolve()
-    await service.fetchInactiveCodexAccountsOnOpen()
+    await service.fetchInactiveCodexAccounts()
 
     expect(fetchCodexRateLimits).toHaveBeenCalledTimes(1)
 
@@ -258,7 +258,7 @@ describe('RateLimitService', () => {
     service.setInactiveCodexAccountsResolver(() => inactiveAccounts)
     vi.mocked(fetchCodexRateLimits).mockReturnValueOnce(accountFetch.promise)
 
-    const fetchOnOpen = service.fetchInactiveCodexAccountsOnOpen()
+    const fetchOnOpen = service.fetchInactiveCodexAccounts()
     await Promise.resolve()
     expect(service.getState().inactiveCodexAccounts).toEqual([
       { accountId: 'account-a', rateLimits: null, updatedAt: 0, isFetching: true }
@@ -296,7 +296,7 @@ describe('RateLimitService', () => {
       .mockReturnValueOnce(accountFetch.promise)
       .mockResolvedValueOnce(okProvider('codex', 7, Date.now()))
 
-    const fetchOnOpen = service.fetchInactiveCodexAccountsOnOpen()
+    const fetchOnOpen = service.fetchInactiveCodexAccounts()
     await Promise.resolve()
     expect(service.getState().inactiveCodexAccounts).toEqual([
       { accountId: 'account-b', rateLimits: null, updatedAt: 0, isFetching: true }
@@ -317,7 +317,7 @@ describe('RateLimitService', () => {
     ])
     vi.mocked(fetchCodexRateLimits).mockImplementation(async () => okProvider('codex', 10))
 
-    await service.fetchInactiveCodexAccountsOnOpen()
+    await service.fetchInactiveCodexAccounts()
     expect(fetchCodexRateLimits).toHaveBeenCalledTimes(1)
 
     // The switch triggers exactly one fetch: the newly active account's.
@@ -326,7 +326,7 @@ describe('RateLimitService', () => {
 
     // Why: re-opening the switcher inside the debounce window must not spawn
     // codex in every inactive credential home again.
-    await service.fetchInactiveCodexAccountsOnOpen()
+    await service.fetchInactiveCodexAccounts()
     expect(fetchCodexRateLimits).toHaveBeenCalledTimes(2)
   })
 
@@ -340,7 +340,7 @@ describe('RateLimitService', () => {
       ])
       vi.mocked(fetchCodexRateLimits).mockImplementation(async () => okProvider('codex', 5))
 
-      const fetchOnOpen = service.fetchInactiveCodexAccountsOnOpen()
+      const fetchOnOpen = service.fetchInactiveCodexAccounts()
       await vi.advanceTimersByTimeAsync(0)
       expect(fetchCodexRateLimits).toHaveBeenCalledTimes(1)
 
@@ -365,14 +365,14 @@ describe('RateLimitService', () => {
       ])
       vi.mocked(fetchCodexRateLimits).mockImplementation(async () => okProvider('codex', 5))
 
-      const fetchOnOpen = service.fetchInactiveCodexAccountsOnOpen()
+      const fetchOnOpen = service.fetchInactiveCodexAccounts()
       await vi.advanceTimersByTimeAsync(0)
       expect(fetchCodexRateLimits).toHaveBeenCalledOnce()
       expect(service.getState().inactiveCodexAccounts).toEqual([
         expect.objectContaining({ accountId: 'account-a', isFetching: false })
       ])
 
-      await service.fetchInactiveCodexAccountsOnOpen()
+      await service.fetchInactiveCodexAccounts()
       expect(fetchCodexRateLimits).toHaveBeenCalledOnce()
 
       await vi.advanceTimersByTimeAsync(2_000)
@@ -398,7 +398,7 @@ describe('RateLimitService', () => {
     await service.refresh()
     vi.mocked(fetchManagedAccountUsage).mockReturnValueOnce(accountFetch.promise)
 
-    const fetchOnOpen = service.fetchInactiveClaudeAccountsOnOpen()
+    const fetchOnOpen = service.fetchInactiveClaudeAccounts()
     await Promise.resolve()
     expect(service.getState().inactiveClaudeAccounts).toEqual([
       { accountId: 'account-1', rateLimits: null, updatedAt: 0, isFetching: true }
@@ -433,7 +433,7 @@ describe('RateLimitService', () => {
     await service.refresh()
     vi.mocked(fetchManagedAccountUsage).mockReturnValueOnce(accountFetch.promise)
 
-    const fetchOnOpen = service.fetchInactiveClaudeAccountsOnOpen()
+    const fetchOnOpen = service.fetchInactiveClaudeAccounts()
     await Promise.resolve()
 
     await service.refreshForClaudeAccountChange('account-1')
@@ -451,5 +451,141 @@ describe('RateLimitService', () => {
         isFetching: false
       }
     ])
+  })
+
+  function managedAccountContext() {
+    return {
+      activeClaudeAccountId: null,
+      activeCodexAccountId: null,
+      claudeSystemDefault: null,
+      codexSystemDefault: null
+    }
+  }
+
+  // Why: per-account status-bar meters are only correct if the poll refreshes them; before this,
+  // inactive usage was fetched solely when the account switcher was expanded.
+  it('refreshes inactive accounts from the poll cycle', async () => {
+    const service = new RateLimitService()
+    service.setManagedAccountContextResolver(managedAccountContext)
+    service.setInactiveClaudeAccountsResolver(() => [
+      { id: 'account-1', managedAuthPath: '/tmp/account-1/auth' }
+    ])
+    service.setClaudeAuthPreparationResolver(async () => ({
+      configDir: '/tmp/.claude',
+      envPatch: {},
+      stripAuthEnv: false,
+      provenance: 'system'
+    }))
+    vi.mocked(fetchClaudeRateLimits).mockResolvedValue(okProvider('claude', 7))
+    vi.mocked(fetchManagedAccountUsage).mockResolvedValue(okProvider('claude', 61))
+
+    await service.refresh()
+    await vi.waitFor(() =>
+      expect(service.getState().inactiveClaudeAccounts).toEqual([
+        {
+          accountId: 'account-1',
+          rateLimits: expect.objectContaining({
+            session: expect.objectContaining({ usedPercent: 61 })
+          }),
+          updatedAt: expect.any(Number),
+          isFetching: false
+        }
+      ])
+    )
+  })
+
+  // Why: with no consumer of per-account lanes, the extra per-account calls are pure waste.
+  it('skips the poll-driven inactive refresh when no account context is published', async () => {
+    const service = new RateLimitService()
+    service.setInactiveClaudeAccountsResolver(() => [
+      { id: 'account-1', managedAuthPath: '/tmp/account-1/auth' }
+    ])
+    vi.mocked(fetchClaudeRateLimits).mockResolvedValue(okProvider('claude', 7))
+    vi.mocked(fetchManagedAccountUsage).mockResolvedValue(okProvider('claude', 61))
+
+    await service.refresh()
+
+    expect(fetchManagedAccountUsage).not.toHaveBeenCalled()
+  })
+
+  // Why: a swallowed per-account failure kept the previous percentage cached forever. Rendered as
+  // a permanent pill, that reports a number nothing observed.
+  it('records a per-account failure instead of keeping the previous percentage', async () => {
+    vi.useFakeTimers()
+    try {
+      const service = new RateLimitService()
+      service.setInactiveClaudeAccountsResolver(() => [
+        { id: 'account-1', managedAuthPath: '/tmp/account-1/auth' }
+      ])
+      vi.mocked(fetchManagedAccountUsage).mockResolvedValueOnce(okProvider('claude', 61))
+      await service.fetchInactiveClaudeAccounts()
+      expect(service.getState().inactiveClaudeAccounts[0]?.rateLimits?.session?.usedPercent).toBe(
+        61
+      )
+
+      // Past the per-batch debounce so the next call actually refetches.
+      await vi.advanceTimersByTimeAsync(10 * 60_000)
+      vi.mocked(fetchManagedAccountUsage).mockRejectedValueOnce(new Error('429 Too Many Requests'))
+      await service.fetchInactiveClaudeAccounts()
+
+      const entry = service.getState().inactiveClaudeAccounts[0]
+      expect(entry?.rateLimits).toMatchObject({
+        status: 'error',
+        error: '429 Too Many Requests'
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // Why: a Codex home path is runtime-specific. The host `~/.codex` is not a WSL distro's, so a
+  // resolver that cannot see the target would offer a host lane under a WSL reading.
+  it('passes the codex fetch target to the inactive-accounts resolver', async () => {
+    const service = new RateLimitService()
+    const seenTargets: { runtime: string; wslDistro: string | null }[] = []
+    service.setInactiveCodexAccountsResolver((target) => {
+      seenTargets.push(target)
+      return []
+    })
+
+    await service.fetchInactiveCodexAccounts()
+    expect(seenTargets).toContainEqual({ runtime: 'host', wslDistro: null })
+
+    seenTargets.length = 0
+    service.setCodexFetchTarget({ runtime: 'wsl', wslDistro: 'Ubuntu' })
+    await service.fetchInactiveCodexAccounts()
+    expect(seenTargets).toContainEqual({ runtime: 'wsl', wslDistro: 'Ubuntu' })
+  })
+
+  // Why: adding an account previously left its status-bar meter reading "--" until the next
+  // poll — up to the full interval — which reads as broken rather than pending.
+  it('refetches inactive lanes when the account roster changes', async () => {
+    const service = new RateLimitService()
+    service.setManagedAccountContextResolver(managedAccountContext)
+    service.setInactiveClaudeAccountsResolver(() => [
+      { id: 'account-new', managedAuthPath: '/tmp/account-new/auth' }
+    ])
+    vi.mocked(fetchManagedAccountUsage).mockResolvedValue(okProvider('claude', 23))
+
+    service.evictInactiveClaudeCache('account-new')
+
+    await vi.waitFor(() =>
+      expect(service.getState().inactiveClaudeAccounts[0]?.rateLimits?.session?.usedPercent).toBe(
+        23
+      )
+    )
+  })
+
+  it('does not refetch on a roster change when no account context is published', async () => {
+    const service = new RateLimitService()
+    service.setInactiveClaudeAccountsResolver(() => [
+      { id: 'account-new', managedAuthPath: '/tmp/account-new/auth' }
+    ])
+    vi.mocked(fetchManagedAccountUsage).mockResolvedValue(okProvider('claude', 23))
+
+    service.evictInactiveClaudeCache('account-new')
+    await Promise.resolve()
+
+    expect(fetchManagedAccountUsage).not.toHaveBeenCalled()
   })
 })
