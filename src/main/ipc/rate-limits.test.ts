@@ -46,8 +46,8 @@ function makeService(): {
     refreshClaudeForTarget: vi.fn(() => Promise.resolve({} as RateLimitState)),
     consumeCodexRateLimitResetCredit,
     setPollingInterval: vi.fn(() => Promise.resolve()),
-    fetchInactiveClaudeAccountsOnOpen: vi.fn(() => Promise.resolve()),
-    fetchInactiveCodexAccountsOnOpen: vi.fn(() => Promise.resolve())
+    fetchInactiveClaudeAccounts: vi.fn(() => Promise.resolve()),
+    fetchInactiveCodexAccounts: vi.fn(() => Promise.resolve())
   }
   return {
     service: service as unknown as RateLimitService,
