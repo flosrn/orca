@@ -29,6 +29,8 @@ import { readGrokAuthSession } from './grok-auth'
 import { hasMiniMaxSessionCookie } from '../minimax/minimax-cookie-store'
 import { fetchMiniMaxRateLimits } from './minimax-fetcher'
 import { fetchOpenCodeGoRateLimits } from './opencode-go-usage-fetcher'
+import { fetchCodexBarUsage, type CodexBarUsageSnapshot } from './codexbar-cli-source'
+import { CODEXBAR_PROVIDERS, type CodexBarProvider } from './codexbar-usage-mapper'
 import {
   normalizeCodexAccountSelectionTarget,
   type CodexAccountSelectionTarget,
@@ -98,7 +100,11 @@ const MAX_ACTIVE_FAILURE_STREAK = 8
 const INDIVIDUALLY_REFRESHABLE_PROVIDERS: ReadonlySet<ActiveRateLimitProvider> = new Set([
   'claude',
   'codex',
-  'grok'
+  'grok',
+  // Why: one CodexBar batch refreshes all three, so a partial failure recovers without a full fetch.
+  'cursor',
+  'clinepass',
+  'qwencloud'
 ])
 const STALE_THRESHOLD_MS = 30 * 60 * 1000 // 30 minutes — after this, stale data is dropped
 // Why: usage-endpoint 429 windows can outlast the generic threshold (Retry-After ~1h); quota is informational, so a stale snapshot beats a bare "Limited".
@@ -122,6 +128,9 @@ type InternalRateLimitState = {
   antigravity: ProviderRateLimits | null
   minimax: ProviderRateLimits | null
   grok: ProviderRateLimits | null
+  cursor: ProviderRateLimits | null
+  clinepass: ProviderRateLimits | null
+  qwencloud: ProviderRateLimits | null
 }
 
 function normalizePollingInterval(ms: number): number {
@@ -179,6 +188,11 @@ function isSameUsageWindow(
   return a.usedPercent === b.usedPercent && a.resetsAt === b.resetsAt
 }
 
+// Why: one CodexBar batch meters all three; this guard keeps that grouping in a single place.
+function isCodexBarProvider(provider: ActiveRateLimitProvider): provider is CodexBarProvider {
+  return (CODEXBAR_PROVIDERS as readonly string[]).includes(provider)
+}
+
 export class RateLimitService {
   private state: InternalRateLimitState = {
     claude: null,
@@ -188,9 +202,15 @@ export class RateLimitService {
     kimi: null,
     antigravity: null,
     minimax: null,
-    grok: null
+    grok: null,
+    cursor: null,
+    clinepass: null,
+    qwencloud: null
   }
   private grokAuthConfigured = readGrokAuthSession().status === 'ok'
+  // Why: probing the binary is async (PATH lookup), so it can only be known from the first fetch
+  // cycle onward; false keeps the three CodexBar meters off the bar until then.
+  private codexbarAvailable = false
   private pollInterval: number = DEFAULT_POLL_MS
   private timer: ReturnType<typeof setInterval> | null = null
   private deferredStartupRefreshTimer: ReturnType<typeof setTimeout> | null = null
@@ -203,7 +223,10 @@ export class RateLimitService {
     kimi: 0,
     minimax: 0,
     grok: 0,
-    antigravity: 0
+    antigravity: 0,
+    cursor: 0,
+    clinepass: 0,
+    qwencloud: 0
   }
   // Why: consecutive failures drive exponential backoff of the fast activation-retry lane; reset on any success/unavailable result.
   private activeFailureStreakByProvider: Record<ActiveRateLimitProvider, number> = {
@@ -214,7 +237,10 @@ export class RateLimitService {
     kimi: 0,
     minimax: 0,
     grok: 0,
-    antigravity: 0
+    antigravity: 0,
+    cursor: 0,
+    clinepass: 0,
+    qwencloud: 0
   }
   private mainWindow: BrowserWindow | null = null
   private detachWindowListeners: (() => void) | null = null
@@ -225,6 +251,7 @@ export class RateLimitService {
   private codexOnlyFetchQueued = false
   private claudeOnlyFetchQueued = false
   private grokOnlyFetchQueued = false
+  private codexBarOnlyFetchQueued = false
   private activeFetchAbortControllers = new Set<AbortController>()
   private fetchIdleResolvers: (() => void)[] = []
   private codexFetchGeneration = 0
@@ -420,6 +447,9 @@ export class RateLimitService {
       // Why: the cookie lives on the filesystem, not GlobalSettings; surface its presence so the renderer keeps the MiniMax bar across reloads.
       minimaxCookieConfigured: hasMiniMaxSessionCookie(),
       grokAuthConfigured: this.grokAuthConfigured,
+      // Why: absence of the shared binary is the single reason all three CodexBar meters can't
+      // report; the renderer treats it as "unconfigured", not as a failure.
+      codexbarAvailable: this.codexbarAvailable,
       claudeTarget: this.claudeFetchTarget,
       codexTarget: this.codexFetchTarget,
       // Why: absent (not null) when no resolver is wired, so a consumer can tell "this host
@@ -454,6 +484,12 @@ export class RateLimitService {
 
   async refreshGrok(): Promise<RateLimitState> {
     await this.fetchGrokOnly({ force: true })
+    return this.getState()
+  }
+
+  async refreshCodexBar(): Promise<RateLimitState> {
+    // Why: one batch covers Cursor/ClinePass/Qwen Cloud, so all three share this refresh.
+    await this.fetchCodexBarOnly({ force: true })
     return this.getState()
   }
 
@@ -941,12 +977,21 @@ export class RateLimitService {
       kimi: this.state.kimi,
       minimax: this.state.minimax,
       grok: this.state.grok,
-      antigravity: this.state.antigravity
+      antigravity: this.state.antigravity,
+      cursor: this.state.cursor,
+      clinepass: this.state.clinepass,
+      qwencloud: this.state.qwencloud
     }
-    return Object.entries(byProvider).map(([provider, limits]) => ({
-      provider: provider as ActiveRateLimitProvider,
-      limits
-    }))
+    return (
+      Object.entries(byProvider)
+        .map(([provider, limits]) => ({
+          provider: provider as ActiveRateLimitProvider,
+          limits
+        }))
+        // Why: without the binary these three hold no data and cannot fetch any; leaving their null
+        // slots in would read as "never fetched" and force a full cycle on every activation.
+        .filter(({ provider }) => this.codexbarAvailable || !isCodexBarProvider(provider))
+    )
   }
 
   private getActiveWindowRefreshPlan(now: number): ActiveWindowRefreshPlan {
@@ -1034,6 +1079,10 @@ export class RateLimitService {
     if (plan.providers.includes('grok')) {
       await this.fetchGrokOnly()
     }
+    // Why: the batch covers all three, so any one failing provider is refreshed by a single call.
+    if (plan.providers.some(isCodexBarProvider)) {
+      await this.fetchCodexBarOnly()
+    }
   }
 
   private async refreshIfWindowActive(): Promise<void> {
@@ -1100,6 +1149,16 @@ export class RateLimitService {
             this.runFetchGrokOnlyCycle(fetchSignal)
           )
           if (grokSignal.aborted) {
+            cycleAborted = true
+            break
+          }
+        }
+        if (this.codexBarOnlyFetchQueued) {
+          this.codexBarOnlyFetchQueued = false
+          const codexBarSignal = await this.runWithFetchAbortSignal((fetchSignal) =>
+            this.runFetchCodexBarOnlyCycle(fetchSignal)
+          )
+          if (codexBarSignal.aborted) {
             cycleAborted = true
             break
           }
@@ -1176,6 +1235,15 @@ export class RateLimitService {
             break
           }
         }
+        if (this.codexBarOnlyFetchQueued) {
+          this.codexBarOnlyFetchQueued = false
+          const codexBarSignal = await this.runWithFetchAbortSignal((fetchSignal) =>
+            this.runFetchCodexBarOnlyCycle(fetchSignal)
+          )
+          if (codexBarSignal.aborted) {
+            break
+          }
+        }
       }
     } finally {
       this.isFetching = false
@@ -1238,6 +1306,15 @@ export class RateLimitService {
             break
           }
         }
+        if (this.codexBarOnlyFetchQueued) {
+          this.codexBarOnlyFetchQueued = false
+          const codexBarSignal = await this.runWithFetchAbortSignal((fetchSignal) =>
+            this.runFetchCodexBarOnlyCycle(fetchSignal)
+          )
+          if (codexBarSignal.aborted) {
+            break
+          }
+        }
       }
     } finally {
       this.isFetching = false
@@ -1297,6 +1374,83 @@ export class RateLimitService {
             break
           }
         }
+        if (this.codexBarOnlyFetchQueued) {
+          this.codexBarOnlyFetchQueued = false
+          const codexBarSignal = await this.runWithFetchAbortSignal((fetchSignal) =>
+            this.runFetchCodexBarOnlyCycle(fetchSignal)
+          )
+          if (codexBarSignal.aborted) {
+            break
+          }
+        }
+      }
+    } finally {
+      this.isFetching = false
+      this.resolveFetchIdleWaiters()
+    }
+  }
+
+  private async fetchCodexBarOnly(options?: { force?: boolean }): Promise<void> {
+    if (this.isFetching) {
+      if (options?.force) {
+        this.codexBarOnlyFetchQueued = true
+        return this.waitForFetchIdle()
+      }
+      return
+    }
+    this.isFetching = true
+
+    try {
+      let shouldContinue = true
+      while (shouldContinue) {
+        const signal = await this.runWithFetchAbortSignal((fetchSignal) =>
+          this.runFetchCodexBarOnlyCycle(fetchSignal)
+        )
+        shouldContinue = false
+        if (signal.aborted) {
+          break
+        }
+        if (this.fullFetchQueued) {
+          this.fullFetchQueued = false
+          const fullSignal = await this.runWithFetchAbortSignal((fetchSignal) =>
+            this.runFetchAllCycle(fetchSignal, { force: true })
+          )
+          if (fullSignal.aborted) {
+            break
+          }
+          continue
+        }
+        if (this.codexBarOnlyFetchQueued) {
+          this.codexBarOnlyFetchQueued = false
+          shouldContinue = true
+        }
+        if (this.codexOnlyFetchQueued) {
+          this.codexOnlyFetchQueued = false
+          const codexSignal = await this.runWithFetchAbortSignal((fetchSignal) =>
+            this.runFetchCodexOnlyCycle(fetchSignal)
+          )
+          if (codexSignal.aborted) {
+            break
+          }
+        }
+        if (this.claudeOnlyFetchQueued) {
+          this.claudeOnlyFetchQueued = false
+          const claudeSignal = await this.runWithFetchAbortSignal((fetchSignal) =>
+            this.runFetchClaudeOnlyCycle(fetchSignal, { force: true })
+          )
+          if (claudeSignal.aborted) {
+            break
+          }
+        }
+        if (this.grokOnlyFetchQueued) {
+          this.grokOnlyFetchQueued = false
+          const grokSignal = await this.runWithFetchAbortSignal((fetchSignal) =>
+            this.runFetchGrokOnlyCycle(fetchSignal)
+          )
+          if (grokSignal.aborted) {
+            break
+          }
+        }
       }
     } finally {
       this.isFetching = false
@@ -1310,7 +1464,8 @@ export class RateLimitService {
       !this.fullFetchQueued &&
       !this.codexOnlyFetchQueued &&
       !this.claudeOnlyFetchQueued &&
-      !this.grokOnlyFetchQueued
+      !this.grokOnlyFetchQueued &&
+      !this.codexBarOnlyFetchQueued
     ) {
       return Promise.resolve()
     }
@@ -1326,7 +1481,8 @@ export class RateLimitService {
       this.fullFetchQueued ||
       this.codexOnlyFetchQueued ||
       this.claudeOnlyFetchQueued ||
-      this.grokOnlyFetchQueued
+      this.grokOnlyFetchQueued ||
+      this.codexBarOnlyFetchQueued
     ) {
       return
     }
@@ -1371,6 +1527,7 @@ export class RateLimitService {
     this.codexOnlyFetchQueued = false
     this.claudeOnlyFetchQueued = false
     this.grokOnlyFetchQueued = false
+    this.codexBarOnlyFetchQueued = false
   }
 
   private resolveAndClearFetchIdleWaiters(): void {
@@ -1666,6 +1823,9 @@ export class RateLimitService {
       | 'minimax'
       | 'grok'
       | 'antigravity'
+      | 'cursor'
+      | 'clinepass'
+      | 'qwencloud'
   ): ProviderRateLimits {
     if (!current) {
       return {
@@ -1682,6 +1842,56 @@ export class RateLimitService {
       return current
     }
     return { ...current, status: 'fetching' }
+  }
+
+  // Why: mark fetching only once the binary is known present, else hosts without CodexBar get
+  // three chips that never settle.
+  private withCodexBarFetchingStatus(
+    previous: InternalRateLimitState
+  ): Pick<InternalRateLimitState, 'cursor' | 'clinepass' | 'qwencloud'> {
+    if (!this.codexbarAvailable) {
+      return {
+        cursor: previous.cursor,
+        clinepass: previous.clinepass,
+        qwencloud: previous.qwencloud
+      }
+    }
+    return {
+      cursor: this.withFetchingStatus(previous.cursor, 'cursor'),
+      clinepass: this.withFetchingStatus(previous.clinepass, 'clinepass'),
+      qwencloud: this.withFetchingStatus(previous.qwencloud, 'qwencloud')
+    }
+  }
+
+  private fetchCodexBarSnapshot(signal: AbortSignal): Promise<CodexBarUsageSnapshot> {
+    // Why: a rejected batch cannot say which provider broke, so treat it as "CodexBar can't
+    // report" rather than inventing three error rows.
+    return fetchCodexBarUsage({ signal }).catch(() => ({ binaryPath: null, results: {} }))
+  }
+
+  private applyCodexBarSnapshot(
+    snapshot: CodexBarUsageSnapshot,
+    previousState: InternalRateLimitState
+  ): void {
+    this.codexbarAvailable = snapshot.binaryPath !== null
+    const apply = (
+      provider: CodexBarProvider,
+      previous: ProviderRateLimits | null
+    ): ProviderRateLimits | null => {
+      const fresh = snapshot.results[provider]?.limits
+      // Why: no binary means CodexBar was never installed; an error row would invent a failure.
+      if (!fresh) {
+        return null
+      }
+      this.trackActiveFailureStreak(provider, fresh)
+      return this.applyStalePolicy(fresh, previous)
+    }
+    this.updateState({
+      ...this.state,
+      cursor: apply('cursor', previousState.cursor),
+      clinepass: apply('clinepass', previousState.clinepass),
+      qwencloud: apply('qwencloud', previousState.qwencloud)
+    })
   }
 
   private async runFetchAllCycle(
@@ -1759,7 +1969,8 @@ export class RateLimitService {
       minimax: miniMaxConfigChanged
         ? this.withFetchingStatus(null, 'minimax')
         : this.withFetchingStatus(previousState.minimax, 'minimax'),
-      grok: this.withFetchingStatus(previousState.grok, 'grok')
+      grok: this.withFetchingStatus(previousState.grok, 'grok'),
+      ...this.withCodexBarFetchingStatus(previousState)
     })
 
     const missingWslCodexHome =
@@ -1771,6 +1982,9 @@ export class RateLimitService {
       (value) => ({ status: 'fulfilled', value }) as const,
       (reason) => ({ status: 'rejected', reason }) as const
     )
+    // Why: one batch reads all three CodexBar providers in parallel; started here so its CLI
+    // round trips overlap the HTTP fetches below instead of adding to the cycle's latency.
+    const codexBarSnapshotPromise = this.fetchCodexBarSnapshot(signal)
 
     // Why: skip automated Claude fetches while a Retry-After window is open or a live session feed is fresher than the OAuth poll would be.
     const claudeFetchGated =
@@ -1986,6 +2200,12 @@ export class RateLimitService {
       ...this.state,
       grok: this.applyStalePolicy(grok, previousState.grok)
     })
+
+    const codexBarSnapshot = await codexBarSnapshotPromise
+    if (signal.aborted) {
+      return
+    }
+    this.applyCodexBarSnapshot(codexBarSnapshot, previousState)
   }
 
   private async runFetchCodexOnlyCycle(signal: AbortSignal): Promise<void> {
@@ -2167,6 +2387,26 @@ export class RateLimitService {
       ...this.state,
       grok: this.applyStalePolicy(grok, previousState.grok)
     })
+  }
+
+  private async runFetchCodexBarOnlyCycle(signal: AbortSignal): Promise<void> {
+    if (signal.aborted) {
+      return
+    }
+    const previousState = this.state
+    // Why: with no binary there is nothing to mark; skip the no-op renderer push.
+    if (this.codexbarAvailable) {
+      this.updateState({
+        ...previousState,
+        ...this.withCodexBarFetchingStatus(previousState)
+      })
+    }
+
+    const snapshot = await this.fetchCodexBarSnapshot(signal)
+    if (signal.aborted) {
+      return
+    }
+    this.applyCodexBarSnapshot(snapshot, previousState)
   }
 
   private applyStalePolicy(
