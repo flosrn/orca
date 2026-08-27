@@ -9,14 +9,20 @@ import { createCodexSessionMigrationScheduler } from '../codex/codex-session-mig
 import { startCodexSessionBackfillInBackground } from '../codex/codex-session-backfill'
 import { startCodexSessionIndexHealInBackground } from '../codex/codex-session-index-heal'
 import { startCodexStateDbBackfillRecoveryInBackground } from '../codex/codex-state-db-backfill-recovery'
-import { getOrcaManagedCodexHomePath } from '../codex/codex-home-paths'
+import { getOrcaManagedCodexHomePath, getSystemCodexHomePath } from '../codex/codex-home-paths'
 import { getInitialCodexRateLimitTarget } from '../rate-limits/codex-rate-limit-target'
 import { getInitialClaudeRateLimitTarget } from '../rate-limits/claude-rate-limit-target'
 import { getKimiRuntimeTarget, resolveKimiHome } from '../kimi/kimi-runtime-home'
 import { readMiniMaxSessionCookie } from '../minimax/minimax-cookie-store'
 import { createAccountRuntimeTargetSettingsSync } from '../rate-limits/account-runtime-target-sync'
-import { normalizeCodexRuntimeSelection } from '../codex-accounts/runtime-selection'
-import { normalizeClaudeRuntimeSelection } from '../claude-accounts/runtime-selection'
+import {
+  getSelectedCodexAccountIdForTarget,
+  normalizeCodexRuntimeSelection
+} from '../codex-accounts/runtime-selection'
+import {
+  getSelectedClaudeAccountIdForTarget,
+  normalizeClaudeRuntimeSelection
+} from '../claude-accounts/runtime-selection'
 import { isAgentStatusHooksEnabled } from '../agent-hooks/managed-agent-hook-controls'
 import { agentHookServer } from '../agent-hooks/server'
 import { setSystemCodexHomeHookSweepSuppressed } from '../codex/hook-service'
@@ -24,6 +30,7 @@ import { isRealHomeCodexHookLaneUsable } from '../codex/codex-real-home-hook-ins
 import { resolveHostCodexSessionSourceHome } from '../codex/codex-session-source-home'
 import { browserManager } from '../browser/browser-manager'
 import { mainProcessState as state } from './main-process-state'
+import { SYSTEM_DEFAULT_ACCOUNT_ID } from '../../shared/managed-account-usage-roster'
 
 export function initializeMainProcessAccountServices(): void {
   const store = state.store
@@ -137,15 +144,11 @@ export function initializeMainProcessAccountServices(): void {
         wslLinuxAuthPath: account.wslLinuxAuthPath
       }))
   })
-  state.rateLimits.setInactiveCodexAccountsResolver(() => {
+  state.rateLimits.setInactiveCodexAccountsResolver((target) => {
     const settings = store.getSettings()
-    const activeIds = new Set(
-      [
-        normalizeCodexRuntimeSelection(settings).host,
-        ...Object.values(normalizeCodexRuntimeSelection(settings).wsl)
-      ].filter(Boolean)
-    )
-    return settings.codexManagedAccounts
+    const selection = normalizeCodexRuntimeSelection(settings)
+    const activeIds = new Set([selection.host, ...Object.values(selection.wsl)].filter(Boolean))
+    const managed = settings.codexManagedAccounts
       .filter((account) => !activeIds.has(account.id))
       .map((account) => ({
         id: account.id,
@@ -157,5 +160,33 @@ export function initializeMainProcessAccountServices(): void {
             : { kind: 'skip' as const }
         }
       }))
+    if (target.runtime !== 'host' || selection.host === null) {
+      return managed
+    }
+    return [
+      {
+        id: SYSTEM_DEFAULT_ACCOUNT_ID,
+        resolveHome: () => ({ kind: 'ready' as const, managedHomePath: getSystemCodexHomePath() })
+      },
+      ...managed
+    ]
+  })
+  state.rateLimits.setManagedAccountContextResolver((targets) => {
+    const settings = store.getSettings()
+    const activeClaudeAccountId = getSelectedClaudeAccountIdForTarget(settings, targets.claude)
+    const codexSystemDefault = state.codexAccounts?.listAccounts().systemDefault
+    return {
+      activeClaudeAccountId,
+      activeCodexAccountId: getSelectedCodexAccountIdForTarget(settings, targets.codex),
+      // Claude's parked system credential is not safe to refresh while another login is active.
+      claudeSystemDefault:
+        activeClaudeAccountId === null ? { email: null, measurableWhenInactive: false } : null,
+      codexSystemDefault:
+        targets.codex.runtime === 'host' &&
+        codexSystemDefault?.hasAuth &&
+        codexSystemDefault.authKind === 'oauth'
+          ? { email: codexSystemDefault.email, measurableWhenInactive: true }
+          : null
+    }
   })
 }
