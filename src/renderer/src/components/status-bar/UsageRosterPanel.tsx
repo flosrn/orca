@@ -55,19 +55,29 @@ function shortLabel(
     : formatWindowLabel(section.window.windowMinutes)
 }
 
-export function getTightestUsageSection(p: ProviderRateLimits): UsageSection | null {
+/**
+ * The single window the bar pill and the compact row summarize.
+ *
+ * Why weekly first: the 5h session window churns constantly and is the one a user trips by
+ * accident, so it kept stealing the pill from the weekly pool — the quota that actually
+ * decides whether the day's work can continue. Providers with no weekly window (Grok's
+ * monthly, Gemini's per-model buckets) fall back to the highest-used window so the pill
+ * still reports the binding constraint rather than nothing.
+ */
+export function getStatusBarUsageSection(p: ProviderRateLimits): UsageSection | null {
   const sections = usedSections(p)
   if (sections.length === 0) {
     return null
   }
-  // Why: the footer promises one quiet summary per provider; choose urgency by
-  // consumption even when the user displays the complementary “% left” value.
-  const tightest = sections.reduce((current, candidate) =>
-    clampUsedPercent(candidate.window.usedPercent) > clampUsedPercent(current.window.usedPercent)
-      ? candidate
-      : current
-  )
-  return { ...tightest, label: shortLabel(p, tightest, true) }
+  // Identity, not label: `shortLabel` renders both weekly pools as 7d text.
+  const chosen =
+    sections.find((s) => s.window === p.weekly) ??
+    sections.reduce((current, candidate) =>
+      clampUsedPercent(candidate.window.usedPercent) > clampUsedPercent(current.window.usedPercent)
+        ? candidate
+        : current
+    )
+  return { ...chosen, label: shortLabel(p, chosen, true) }
 }
 
 // The soonest-resetting window summarizes the agent's next reset in one line.
@@ -142,7 +152,7 @@ export function UsageRow({
     : null
   const plan = formatPlanLabel(p.planType)
   const reset = hasUsage ? soonestResetLabel(sections, now) : null
-  const tightest = mode === 'compact' ? getTightestUsageSection(p) : null
+  const summary = mode === 'compact' ? getStatusBarUsageSection(p) : null
 
   return (
     <div data-usage-mode={mode} className="flex min-w-0 flex-1 flex-col gap-1">
@@ -180,11 +190,11 @@ export function UsageRow({
               </span>
             ) : null}
           </>
-        ) : tightest ? (
+        ) : summary ? (
           <span className="ml-auto">
             <UsageMetric
-              section={tightest}
-              label={tightest.label}
+              section={summary}
+              label={summary.label}
               display={display}
               showBar={false}
             />
