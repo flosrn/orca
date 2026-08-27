@@ -30,6 +30,7 @@ ce dépôt est. Un visiteur ne prend pas ce fork pour une copie d'Orca.
 | `main` | miroir d'`upstream/main`, jamais modifié | `gh repo sync` |
 | `feat/argv-worker-start` | **la source de vérité** — head de la PR upstream #16425, rebasée sur `upstream/main` chaque nuit | un humain pour le contenu, **la CI pour la base** |
 | tags `fork-*` | le SHA exact buildé et publié, immuable | **la CI seule** |
+| `$CUSTOM_BRANCH` (au choix) | **tes personnalisations**, empilées sur le patch. Buildée et publiée, **jamais poussée nulle part** | **toi seul** |
 
 **La surface du patch est gelée, pas sa base.** La CI ne change jamais ce que le
 patch fait : elle rejoue exactement la plage
@@ -44,6 +45,55 @@ prix d'une PR dont la base est vivante ; ça n'ajoute aucun commit au diff.
 
 Le tag existe en plus de la branche parce qu'une branche bouge : la release doit
 pointer un SHA immuable, celui qui a été testé et buildé.
+
+## Personnaliser Orca sans que rien ne parte upstream
+
+Le canal build une branche à toi, réglée par la **variable de dépôt**
+`CUSTOM_BRANCH` (Settings → Secrets and variables → Actions → Variables). Vide,
+le canal est nu : le patch seul, comportement d'origine.
+
+```
+upstream/main
+  └── feat/argv-worker-start      ← gelée, PR #16425, force-pushée par la CI
+        └── <ta branche>          ← tes commits. La CI les LIT, ne les écrit pas.
+```
+
+Pour commencer :
+
+```bash
+git checkout -b feat/mon-orca feat/argv-worker-start
+# ... code, commit ...
+git push -u origin feat/mon-orca
+gh variable set CUSTOM_BRANCH --repo flosrn/orca --body feat/mon-orca
+```
+
+Ce qui garantit que ça ne remonte jamais, et qui n'est pas de la discipline :
+
+- **La CI ne pousse ta branche nulle part.** Elle la lit, rejoue tes commits sur
+  le patch du jour, et le résultat ne vit que dans le tag immuable de la release.
+  Ta copie locale ne divergera donc jamais d'un force-push nocturne.
+- **`feat/argv-worker-start` ne reçoit QUE la plage du patch.** Une garde compte
+  les commits poussés sur cette branche et échoue si le compte dépasse la plage
+  attendue — une fuite arrête le run avant tout push.
+- **La variable refuse `CUSTOM_BRANCH == PATCH_BRANCH`**, le seul réglage qui
+  ferait atterrir tes commits dans la PR.
+- **Aucune URL vers upstream côté push.** Le remote d'écriture est construit
+  depuis `$GITHUB_REPOSITORY` ; le remote `upstream` ne sert qu'au `fetch`.
+
+Ta branche peut être basée sur un état **périmé** du patch : la sélection se fait
+par patch-id (`git rev-list --cherry-pick --right-only`), pas par ancêtre commun.
+`merge-base` remonterait avant les commits du patch que ta branche porte encore
+et les rejouerait en double — mesuré : 4 commits sélectionnés au lieu de 2, dont
+les 2 du patch. `test-cherry-selection.sh` garde cette propriété.
+
+Deux contraintes qui restent tiennes :
+
+- **Garde ta branche linéaire** (rebase, pas merge) : `cherry-pick` ne sait pas
+  rejouer un commit de merge, et ils sont écartés par `--no-merges`.
+- **Les tests du canal restent ciblés** sur `src/main/runtime/orchestration` et
+  `src/main/runtime/rpc`, les deux arbres que le patch touche. Le typecheck est
+  complet, lui. Si tu customises ailleurs, élargis la liste du job `test` —
+  sinon tu build vert sur du code que rien n'exerce.
 
 ## Ce que le workflow fait (`.github/workflows/fork-nightly.yml`)
 

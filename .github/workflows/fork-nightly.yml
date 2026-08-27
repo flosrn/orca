@@ -32,7 +32,13 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  # La branche de la PR upstream #16425. Elle ne reçoit QUE la plage du patch,
+  # jamais une personnalisation — et une garde le vérifie commit par commit.
   PATCH_BRANCH: feat/argv-worker-start
+  # Branche perso, empilée sur le patch. C'est elle que le canal build.
+  # Vide = canal nu (patch seul). Réglable SANS commit :
+  # Settings > Secrets and variables > Actions > Variables > CUSTOM_BRANCH.
+  CUSTOM_BRANCH: ${{ vars.CUSTOM_BRANCH }}
   CHANNEL_BRANCH: fork-channel
   UPSTREAM_URL: https://github.com/stablyai/orca.git
   # Le Mac a mesuré que Node 22 casse le packaging de node-pty et que 24.11.1
@@ -57,6 +63,7 @@ jobs:
       upstream_sha: ${{ steps.plan.outputs.upstream_sha }}
       patch_sha: ${{ steps.plan.outputs.patch_sha }}
       identity: ${{ steps.plan.outputs.identity }}
+      custom_sha: ${{ steps.plan.outputs.custom_sha }}
     steps:
       - name: Checkout la branche de pilotage (cache rerere)
         uses: actions/checkout@v6
@@ -100,9 +107,51 @@ jobs:
           base="$(git merge-base upstream/main HEAD)"
           patch_id="$(git diff "$base"..HEAD | git patch-id --stable | cut -d' ' -f1)"
           identity="${upstream_sha:0:12}+${patch_id:0:12}"
+
+          # La branche perso entre dans l'identité. Sans ça, un commit de
+          # personnalisation ne déclencherait AUCUN build : le couple
+          # (upstream, patch) n'aurait pas bougé et la fraîcheur conclurait
+          # « rien de neuf » — le canal ignorerait silencieusement ton travail.
+          #
+          # `--cherry-pick --right-only` sélectionne les commits propres à la
+          # branche perso PAR PATCH-ID, pas par ancêtre commun. C'est ce qui
+          # rend le canal indifférent à la base sur laquelle tu travailles :
+          # `merge-base` remonterait trop loin dès que ta branche est basée sur
+          # un patch d'avant-hier, et les commits du patch seraient rejoués en
+          # double. Ici ils sont reconnus comme déjà présents et écartés.
+          #
+          # `--no-merges` : `cherry-pick` ne sait pas rejouer un commit de
+          # merge. Garde ta branche perso linéaire (rebase, pas merge).
+          custom_sha=""
+          if [ -n "${CUSTOM_BRANCH:-}" ]; then
+            if [ "$CUSTOM_BRANCH" = "$PATCH_BRANCH" ]; then
+              echo "::error::CUSTOM_BRANCH == PATCH_BRANCH : tes commits partiraient dans la PR upstream"
+              exit 1
+            fi
+            git fetch --no-tags --quiet origin "$CUSTOM_BRANCH"
+            custom_sha="$(git rev-parse FETCH_HEAD)"
+            custom_id="$(
+              git rev-list --reverse --no-merges --cherry-pick --right-only \
+                "$patch_sha...$custom_sha" \
+                | while read -r c; do
+                    git show "$c" | git patch-id --stable | cut -d' ' -f1
+                  done \
+                | sha256sum | cut -c1-12
+            )"
+            n="$(git rev-list --count --no-merges --cherry-pick --right-only "$patch_sha...$custom_sha")"
+            if [ "$n" -eq 0 ]; then
+              echo "::error::$CUSTOM_BRANCH n'ajoute aucun commit à $PATCH_BRANCH — laisse la variable vide pour un canal nu"
+              exit 1
+            fi
+            identity="$identity+$custom_id"
+            echo "Branche perso : $CUSTOM_BRANCH @ ${custom_sha:0:12} — $n commit(s) propre(s)"
+          else
+            echo "Canal nu : aucune CUSTOM_BRANCH réglée."
+          fi
           {
             echo "upstream_sha=$upstream_sha"
             echo "patch_sha=$patch_sha"
+            echo "custom_sha=$custom_sha"
             echo "identity=$identity"
           } >>"$GITHUB_OUTPUT"
 
@@ -133,12 +182,13 @@ jobs:
             echo "$last portait ${previous:-<illisible>}, maintenant $identity — on build."
           fi
 
-      - name: Rejouer le patch sur upstream/main
+      - name: Rejouer le patch, puis les personnalisations
         id: rebase
         if: steps.plan.outputs.should_build == 'true'
         working-directory: src
         env:
           UPSTREAM_SHA: ${{ steps.plan.outputs.upstream_sha }}
+          CUSTOM_SHA: ${{ steps.plan.outputs.custom_sha }}
           FORK_PUSH_TOKEN: ${{ secrets.FORK_PUSH_TOKEN }}
         run: |
           set -euo pipefail
@@ -158,60 +208,97 @@ jobs:
             echo "rerere: aucun cache publié."
           fi
 
-          # La plage transportée, et RIEN de plus : les commits que la branche
-          # patch ajoute à sa base upstream. Pas de merge, pas de squash, pas
-          # d'ajout — la surface du patch est gelée et cette ligne est ce qui
-          # le garantit.
-          base="$(git merge-base "$UPSTREAM_SHA" HEAD)"
-          mapfile -t commits < <(git rev-list --reverse "$base..HEAD")
+          patch_head="$(git rev-parse HEAD)"
+
+          # Rejoue une plage sur HEAD. $1 nomme l'étage, pour que le message de
+          # conflit dise À QUI est le travail : un conflit dans le patch et un
+          # conflit dans tes customs ne se résolvent pas au même endroit.
+          replay() {
+            stage="$1"
+            shift
+            set +e
+            git cherry-pick -x "$@"
+            status=$?
+            while [ $status -ne 0 ]; do
+              unresolved="$(git diff --name-only --diff-filter=U)"
+              if [ -n "$unresolved" ]; then
+                set -e
+                {
+                  echo "### Conflit de rebase — étage \`$stage\` — résolution humaine requise"
+                  echo
+                  echo "Cet étage ne se rejoue plus tel quel sur \`upstream/main\` (\`$UPSTREAM_SHA\`)."
+                  echo
+                  echo "Fichiers en conflit :"
+                  echo '```'
+                  echo "$unresolved"
+                  echo '```'
+                  echo "Résous-le une fois en local et publie la résolution dans \`rerere-cache/\` :"
+                  echo "les runs suivants la rejoueront seuls (mode opératoire dans le README de \`fork-pipeline\`)."
+                } >>"$GITHUB_STEP_SUMMARY"
+                echo "::error::conflit de rebase ($stage) sur : $(echo "$unresolved" | tr '\n' ' ')"
+                exit 1
+              fi
+              # Rien en conflit mais rien à committer non plus : la résolution a
+              # rendu ce commit vide (upstream a déjà pris ce morceau). On saute.
+              if git diff --cached --quiet; then
+                git cherry-pick --skip
+              else
+                git -c core.editor=true cherry-pick --continue
+              fi
+              status=$?
+            done
+            set -e
+          }
+
+          # --- étage 1 : le patch, et RIEN de plus ---------------------------
+          # Pas de merge, pas de squash, pas d'ajout — la surface du patch est
+          # gelée et cette plage est ce qui le garantit. Ce SHA, et lui seul,
+          # part sur la branche de la PR upstream.
+          base="$(git merge-base "$UPSTREAM_SHA" "$patch_head")"
+          mapfile -t patch_commits < <(git rev-list --reverse "$base..$patch_head")
           echo "Base commune : $base"
-          echo "Commits transportés : ${#commits[@]}"
-          git log --oneline --no-decorate "$base..HEAD"
-          if [ "${#commits[@]}" -eq 0 ]; then
+          echo "Commits du patch : ${#patch_commits[@]}"
+          git log --oneline --no-decorate "$base..$patch_head"
+          if [ "${#patch_commits[@]}" -eq 0 ]; then
             echo "::error::la branche patch n'ajoute aucun commit à sa base — rien à rejouer"
             exit 1
           fi
-
           git checkout -B "$CHANNEL_BRANCH" "$UPSTREAM_SHA"
+          replay patch "${patch_commits[@]}"
+          patch_sha="$(git rev-parse HEAD)"
 
-          # `cherry-pick` s'arrête au premier conflit. rerere.autoUpdate stage
-          # ce qu'il sait rejouer, donc « plus aucun fichier en conflit » ==
-          # « rerere a tout résolu » et on peut continuer. S'il en reste un, la
-          # décision est humaine : on échoue en le nommant.
-          set +e
-          git cherry-pick -x "${commits[@]}"
-          status=$?
-          while [ $status -ne 0 ]; do
-            unresolved="$(git diff --name-only --diff-filter=U)"
-            if [ -n "$unresolved" ]; then
-              set -e
-              {
-                echo "### Conflit de rebase — résolution humaine requise"
-                echo
-                echo "Le patch ne se rejoue plus tel quel sur \`upstream/main\` (\`$UPSTREAM_SHA\`)."
-                echo
-                echo "Fichiers en conflit :"
-                echo '```'
-                echo "$unresolved"
-                echo '```'
-                echo "Résous-le une fois en local et publie la résolution dans \`rerere-cache/\` :"
-                echo "les runs suivants la rejoueront seuls (mode opératoire dans le README de \`fork-pipeline\`)."
-              } >>"$GITHUB_STEP_SUMMARY"
-              echo "::error::conflit de rebase sur : $(echo "$unresolved" | tr '\n' ' ')"
-              exit 1
-            fi
-            # Rien en conflit mais rien à committer non plus : la résolution a
-            # rendu ce commit vide (upstream a déjà pris ce morceau). On le saute.
-            if git diff --cached --quiet; then
-              git cherry-pick --skip
-            else
-              git -c core.editor=true cherry-pick --continue
-            fi
-            status=$?
-          done
-          set -e
+          # Garde : la branche de la PR ne doit JAMAIS porter autre chose que le
+          # patch. Le compte est exact — un commit qui fuirait ferait dépasser.
+          # Il peut être inférieur : un commit rendu vide par upstream est sauté.
+          got="$(git rev-list --count "$UPSTREAM_SHA..$patch_sha")"
+          if [ "$got" -gt "${#patch_commits[@]}" ]; then
+            echo "::error::$got commits sur la branche PR pour ${#patch_commits[@]} attendus — fuite, on ne pousse rien"
+            exit 1
+          fi
 
-          sha="$(git rev-parse HEAD)"
+          # --- étage 2 : tes personnalisations, empilées ---------------------
+          # Sélection par PATCH-ID (`--cherry-pick --right-only`), pas par
+          # ancêtre commun : ta branche peut être basée sur n'importe quel état
+          # du patch, même vieux de plusieurs jours. Les commits du patch qu'elle
+          # porte déjà sont reconnus et écartés au lieu d'être rejoués en double.
+          #
+          # Ta branche n'est JAMAIS réécrite par ce job. C'est la tienne : si le
+          # pipeline la force-pushait, ta copie locale divergerait chaque nuit et
+          # tu devrais réconcilier avant chaque commit. Le résultat du rebase ne
+          # vit que dans le tag immuable de la release.
+          build_sha="$patch_sha"
+          if [ -n "${CUSTOM_SHA:-}" ]; then
+            mapfile -t custom_commits < <(
+              git rev-list --reverse --no-merges --cherry-pick --right-only \
+                "$patch_head...$CUSTOM_SHA"
+            )
+            echo "Commits perso : ${#custom_commits[@]}"
+            git log --oneline --no-decorate --no-walk "${custom_commits[@]}"
+            replay perso "${custom_commits[@]}"
+            build_sha="$(git rev-parse HEAD)"
+          fi
+
+          sha="$build_sha"
           version="$(node -p "require('./package.json').version")"
           tag="fork-$(date -u +%Y%m%d-%H%M)-${sha:0:12}"
           {
@@ -219,12 +306,11 @@ jobs:
             echo "tag=$tag"
             echo "version=$version"
           } >>"$GITHUB_OUTPUT"
-          echo "Rejoué en $sha (version $version), tag prévu $tag."
+          echo "Buildé depuis $sha (version $version), tag prévu $tag."
 
           # GITHUB_TOKEN n'a pas le scope `workflow`, et l'arbre rejoué contient
           # les ~30 workflows d'upstream : ni la branche ni le tag ne passent
-          # sans PAT. On échoue fermé — on ne tague jamais autre chose que cet
-          # arbre (upstream + patch, rien de plus).
+          # sans PAT. On échoue fermé.
           if [ -z "${FORK_PUSH_TOKEN:-}" ]; then
             {
               echo "### Secret manquant — impossible de pousser le SHA rejoué"
@@ -238,14 +324,11 @@ jobs:
             echo "::error::FORK_PUSH_TOKEN absent — gh secret set FORK_PUSH_TOKEN --repo $GITHUB_REPOSITORY"
             exit 1
           fi
+          # Construit depuis $GITHUB_REPOSITORY : ce job ne peut pousser que sur
+          # CE dépôt. Le remote `upstream` ajouté plus haut ne sert qu'au fetch.
           remote="https://x-access-token:${FORK_PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
-          # ADR 0026 §Decision : `feat/argv-worker-start` EST la source de
-          # vérité, « patch commits only, rebased onto upstream tags ». Donc
-          # c'est elle qu'on avance — pas une branche parallèle qui la
-          # laisserait rassir et ferait diverger la base de la PR #16425.
-          # Conséquence assumée : la PR upstream voit un force-push par nuit.
-          git push --force "$remote" "$sha:refs/heads/$PATCH_BRANCH"
+          git push --force "$remote" "$patch_sha:refs/heads/$PATCH_BRANCH"
           # Le même SHA, immuable, pour que la release soit taggée sur l'arbre
           # exact qui a été testé et buildé.
           git push "$remote" "$sha:refs/tags/$tag"
