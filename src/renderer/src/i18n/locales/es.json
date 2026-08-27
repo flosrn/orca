@@ -34,7 +34,10 @@
         "resourceUsageToggleDescription": "Muestra el Administrador de recursos. Haz clic para ver CPU, memoria, sesiones, controles del daemon y análisis de disco de los espacios de trabajo.",
         "portsToggleDescription": "Muestra los puertos activos de los espacios de trabajo. Haz clic para ver los puertos de cada espacio de trabajo y los puertos externos.",
         "antigravityToggleDescription": "Muestra el uso de suscripción de Antigravity para el espacio de trabajo activo.",
-        "grokToggleDescription": "Muestra el uso de créditos de suscripción de Grok cuando has iniciado sesión con Grok CLI."
+        "grokToggleDescription": "Muestra el uso de créditos de suscripción de Grok cuando has iniciado sesión con Grok CLI.",
+        "cursorToggleDescription": "Muestra el uso de suscripción de Cursor informado por la CLI de CodexBar.",
+        "clinePassToggleDescription": "Muestra el uso de suscripción de ClinePass informado por la CLI de CodexBar.",
+        "qwenCloudToggleDescription": "Muestra el uso de suscripción de Qwen Cloud informado por la CLI de CodexBar."
       },
       "menuBarIcon": {
         "title": "Mostrar icono en la barra de menús",
@@ -3297,6 +3300,9 @@
             "antigravityUsageDetails": "Abrir detalles de uso de Antigravity",
             "grokUsageAria": "Abrir detalles de uso de Grok",
             "grokUsageMenu": "Uso de Grok",
+            "cursorUsageMenu": "Uso de Cursor",
+            "clinePassUsageMenu": "Uso de ClinePass",
+            "qwenCloudUsageMenu": "Uso de Qwen Cloud",
             "floatingTerminalNewActivity": "{{label}}, nueva actividad",
             "codexSignInSuccess": "Sesión iniciada en Codex",
             "codexSignInError": "No se pudo iniciar sesión en Codex. Inténtalo de nuevo."
@@ -7937,6 +7943,18 @@
             "e7d1b0f3a5": "Muestra el uso semanal de créditos de Grok desde OAuth de Grok CLI.",
             "d6c0a9e2f4": "grok",
             "c5b9f8d1e3": "xai",
+            "a3f1c07d92": "Uso de Cursor",
+            "d7a4b13c85": "Muestra el uso de suscripción de Cursor en la barra de estado.",
+            "e8b5c24d96": "cursor",
+            "b4e2d18a63": "Uso de ClinePass",
+            "f9c6d35ea7": "Muestra el uso de suscripción de ClinePass en la barra de estado.",
+            "0ad7e46fb8": "clinepass",
+            "1be8f570c9": "cline",
+            "c5d3e29b74": "Uso de Qwen Cloud",
+            "3da17692eb": "Muestra el uso de suscripción de Qwen Cloud en la barra de estado.",
+            "4eb287a3fc": "qwen",
+            "5fc398b40d": "alibaba",
+            "2cf90681da": "codexbar",
             "usagePercentageDisplayTitle": "Porcentajes de uso",
             "usagePercentageDisplayDescription": "Elige si los límites del proveedor muestran el porcentaje usado o restante."
           }
