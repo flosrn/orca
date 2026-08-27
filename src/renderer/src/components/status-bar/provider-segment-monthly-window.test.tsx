@@ -70,7 +70,7 @@ describe('ProviderSegment monthly window', () => {
     expect(markup).not.toContain('···')
   })
 
-  it('shows only the highest-used window when several windows exist', async () => {
+  it('prefers the weekly window over hotter session and monthly windows', async () => {
     const { ProviderSegment } = await import('./StatusBar')
 
     const limits: ProviderRateLimits = {
@@ -86,12 +86,12 @@ describe('ProviderSegment monthly window', () => {
       <ProviderSegment p={limits} compact={false} display="used" mode="compact" />
     )
 
-    expect(markup).toContain('30% used 30d')
+    expect(markup).toContain('20% used wk')
     expect(markup).not.toContain('10% used')
-    expect(markup).not.toContain('20% used')
+    expect(markup).not.toContain('30% used')
   })
 
-  it('selects a named bucket as the tightest provider window', async () => {
+  it('falls back to the highest-used bucket when the provider has no weekly window', async () => {
     const { ProviderSegment } = await import('./StatusBar')
     const limits: ProviderRateLimits = {
       provider: 'gemini',
@@ -115,7 +115,8 @@ describe('ProviderSegment monthly window', () => {
   })
 
   // Why: #8378 — status-bar chip showed fixed window size ("5h") while the
-  // usage popup showed remaining time for the same resetsAt.
+  // usage popup showed remaining time for the same resetsAt. Weekly is absent here,
+  // so the session window is the fallback summary and must still count down live.
   it('shows remaining session time on the chip when resetsAt is known (repro-8378)', async () => {
     const { ProviderSegment } = await import('./StatusBar')
     const now = 1_700_000_000_000
@@ -126,7 +127,7 @@ describe('ProviderSegment monthly window', () => {
       const limits: ProviderRateLimits = {
         provider: 'codex',
         session: windowOf(42, 300, now + remainingMs),
-        weekly: windowOf(10, 10080, now + 6 * 24 * 60 * 60_000),
+        weekly: null,
         updatedAt: now,
         error: null,
         status: 'ok'
@@ -137,9 +138,32 @@ describe('ProviderSegment monthly window', () => {
 
       expect(markup).toContain('42% used 2h 33m')
       expect(markup).not.toContain('5h')
-      // The consolidated footer intentionally renders only the tightest window.
-      expect(markup).not.toContain('10% used')
-      expect(markup).not.toContain('wk')
+    } finally {
+      dateNow.mockRestore()
+    }
+  })
+
+  // The weekly pill counts down too: a fixed "wk" label would disagree with the popover.
+  it('counts the weekly window down instead of labelling it "wk" when resetsAt is known', async () => {
+    const { ProviderSegment } = await import('./StatusBar')
+    const now = 1_700_000_000_000
+    const dateNow = vi.spyOn(Date, 'now').mockReturnValue(now)
+
+    try {
+      const limits: ProviderRateLimits = {
+        provider: 'codex',
+        session: windowOf(42, 300, now + 2 * 60 * 60_000),
+        weekly: windowOf(10, 10080, now + 5 * 24 * 60 * 60_000 + 2 * 60 * 60_000),
+        updatedAt: now,
+        error: null,
+        status: 'ok'
+      }
+      const markup = renderToStaticMarkup(
+        <ProviderSegment p={limits} compact={false} display="used" mode="compact" />
+      )
+
+      expect(markup).toContain('10% used 5d 2h')
+      expect(markup).not.toContain('42% used')
     } finally {
       dateNow.mockRestore()
     }
@@ -188,7 +212,7 @@ describe('undefined provider window safety (crash d2c1da69 / bb74236c)', () => {
   // A partial/rehydrated provider can carry an undefined (not null) window even
   // though the type declares `session`/`weekly` as `RateLimitWindow | null`. The
   // old `s.window !== null` filter let the undefined-window section through, so
-  // getTightestUsageSection's reduce read `.usedPercent` of undefined and crashed
+  // getStatusBarUsageSection's reduce read `.usedPercent` of undefined and crashed
   // the status-bar overlay (TypeError in ProviderSegment).
   const partialProvider = {
     provider: 'codex',
@@ -198,10 +222,10 @@ describe('undefined provider window safety (crash d2c1da69 / bb74236c)', () => {
     status: 'ok'
   } as unknown as ProviderRateLimits // `session` omitted -> undefined at runtime
 
-  it('getTightestUsageSection ignores an undefined window instead of crashing', async () => {
-    const { getTightestUsageSection } = await import('./UsageRosterPanel')
-    expect(() => getTightestUsageSection(partialProvider)).not.toThrow()
-    expect(getTightestUsageSection(partialProvider)?.window.usedPercent).toBe(42)
+  it('getStatusBarUsageSection ignores an undefined window instead of crashing', async () => {
+    const { getStatusBarUsageSection } = await import('./UsageRosterPanel')
+    expect(() => getStatusBarUsageSection(partialProvider)).not.toThrow()
+    expect(getStatusBarUsageSection(partialProvider)?.window.usedPercent).toBe(42)
   })
 
   it('ProviderSegment renders without crashing when a provider window is undefined', async () => {

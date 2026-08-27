@@ -97,6 +97,17 @@ export function ProviderIcon({ provider }: { provider: string }): React.JSX.Elem
   if (provider === 'grok') {
     return <AgentIcon agent="grok" size={13} />
   }
+  // Why: reuse the agent catalog's brand marks — these providers meter the same
+  // vendors already listed there, so no new asset is needed.
+  if (provider === 'cursor') {
+    return <AgentIcon agent="cursor" size={13} />
+  }
+  if (provider === 'clinepass') {
+    return <AgentIcon agent="cline" size={13} />
+  }
+  if (provider === 'qwencloud') {
+    return <AgentIcon agent="qwen-code" size={13} />
+  }
   return <ClaudeIcon size={13} />
 }
 
@@ -142,26 +153,23 @@ function ErrorMessage({
 export function getWindowSections(
   p: ProviderRateLimits
 ): { label: string; window: RateLimitWindow | null }[] {
-  if (p.buckets?.length) {
-    const bucketSections = p.buckets.map((b) => ({ label: b.name, window: b as RateLimitWindow }))
-    return [
-      ...bucketSections,
-      {
-        label: translate('auto.components.status.bar.tooltip.252c096536', 'Weekly'),
-        window: p.weekly
-      }
-    ]
-  }
-  const sections: { label: string; window: RateLimitWindow | null }[] = [
-    {
-      label: translate('auto.components.status.bar.tooltip.94038ad2fa', 'Session'),
-      window: p.session
-    },
-    {
-      label: translate('auto.components.status.bar.tooltip.252c096536', 'Weekly'),
-      window: p.weekly
-    }
-  ]
+  const hasBuckets = Boolean(p.buckets?.length)
+  // Why buckets stand in for the session row rather than for every window: Gemini's per-model
+  // pools ARE its 5h quota broken down, so listing the aggregate beside them just repeats it.
+  // Replacing the whole list was the bug — it also swallowed `monthly`, which hid Cursor's entire
+  // 31-day subscription pool behind a side-pool like "Grok Bot".
+  const sections: { label: string; window: RateLimitWindow | null }[] = hasBuckets
+    ? (p.buckets ?? []).map((b) => ({ label: b.name, window: b as RateLimitWindow }))
+    : [
+        {
+          label: translate('auto.components.status.bar.tooltip.94038ad2fa', 'Session'),
+          window: p.session
+        }
+      ]
+  sections.push({
+    label: translate('auto.components.status.bar.tooltip.252c096536', 'Weekly'),
+    window: p.weekly
+  })
   if (p.fableWeekly !== undefined && p.fableWeekly !== null) {
     sections.push({
       label: translate('auto.components.status.bar.tooltip.a79c64f87e', 'Fable'),

@@ -49,6 +49,11 @@ vi.mock('./grok-fetcher', () => ({
   fetchGrokRateLimits: vi.fn()
 }))
 
+vi.mock('./codexbar-cli-source', () => ({
+  // Why: the CodexBar batch shells out to a CLI; unit tests must not spawn real processes.
+  fetchCodexBarUsage: vi.fn(async () => ({ binaryPath: null, results: {} }))
+}))
+
 vi.mock('./grok-auth', () => ({
   readGrokAuthSession: vi.fn(() => ({ status: 'missing' }))
 }))
