@@ -22,6 +22,9 @@ const STATUS_BAR_PROVIDERS = [
   ['auto.components.status.bar.StatusBar.5e59007df4', 'Kimi'],
   ['auto.components.status.bar.StatusBar.3bbf140864', 'MiniMax'],
   ['auto.components.status.bar.StatusBar.grokUsageMenu', 'Grok'],
+  ['auto.components.status.bar.StatusBar.cursorUsageMenu', 'Cursor'],
+  ['auto.components.status.bar.StatusBar.clinePassUsageMenu', 'ClinePass'],
+  ['auto.components.status.bar.StatusBar.qwenCloudUsageMenu', 'Qwen Cloud'],
   ['auto.components.settings.accounts.search.f4a8c2e1b7', 'Grok (xAI)']
 ]
 

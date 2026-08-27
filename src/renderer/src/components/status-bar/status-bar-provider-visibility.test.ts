@@ -76,6 +76,7 @@ function usageSettings(overrides: Partial<UsageProviderSettings> = {}): UsagePro
     minimaxCookieConfigured: false,
     minimaxApiKeyConfigured: false,
     grokAuthConfigured: false,
+    codexbarAvailable: false,
     ...overrides
   }
 }
