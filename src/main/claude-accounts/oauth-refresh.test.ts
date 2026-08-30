@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   applyRefreshedToken,
+  isOauthTokenExpired,
   isOauthTokenExpiring,
   parseClaudeOauthBlob,
   readRefreshToken,
-  refreshClaudeOauthCredentials
+  refreshClaudeOauthCredentials,
+  refreshClaudeOauthCredentialsOutcome,
+  resetClaudeOauthRefreshRuntimeStateForTest
 } from './oauth-refresh'
 
 const { netFetchMock } = vi.hoisted(() => ({
@@ -129,6 +132,7 @@ describe('applyRefreshedToken', () => {
 describe('refreshClaudeOauthCredentials', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    resetClaudeOauthRefreshRuntimeStateForTest()
   })
 
   afterEach(() => {
@@ -182,5 +186,97 @@ describe('refreshClaudeOauthCredentials', () => {
   it('returns null when the request throws (never rejects)', async () => {
     netFetchMock.mockRejectedValue(new Error('network down'))
     await expect(refreshClaudeOauthCredentials(credentials(), NOW)).resolves.toBeNull()
+  })
+})
+
+describe('isOauthTokenExpired', () => {
+  it('is false within validity and inside the refresh buffer', () => {
+    expect(isOauthTokenExpired(credentials(), NOW)).toBe(false)
+    expect(isOauthTokenExpired(credentials({ expiresAt: NOW + 60_000 }), NOW)).toBe(false)
+  })
+
+  it('is true only at and past a provable expiry', () => {
+    expect(isOauthTokenExpired(credentials({ expiresAt: NOW }), NOW)).toBe(true)
+    expect(isOauthTokenExpired(credentials({ expiresAt: NOW - 1 }), NOW)).toBe(true)
+    // Why: missing expiry metadata is not proof — the server judges the bearer.
+    expect(isOauthTokenExpired(credentials({ expiresAt: undefined }), NOW)).toBe(false)
+  })
+})
+
+describe('refreshClaudeOauthCredentialsOutcome', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetClaudeOauthRefreshRuntimeStateForTest()
+  })
+
+  it('shares one exchange across concurrent callers of the same token', async () => {
+    const { promise, resolve: resolveFetch } = Promise.withResolvers<unknown>()
+    netFetchMock.mockReturnValue(promise)
+    const a = refreshClaudeOauthCredentialsOutcome(credentials(), NOW)
+    const b = refreshClaudeOauthCredentialsOutcome(credentials(), NOW)
+    resolveFetch({
+      ok: true,
+      json: async () => ({
+        access_token: 'fresh-access',
+        expires_in: 3600,
+        refresh_token: 'fresh-refresh'
+      })
+    })
+    const [first, second] = await Promise.all([a, b])
+    expect(netFetchMock).toHaveBeenCalledTimes(1)
+    expect(parseClaudeOauthBlob(first.credentialsJson!)!.refreshToken).toBe('fresh-refresh')
+    expect(parseClaudeOauthBlob(second.credentialsJson!)!.refreshToken).toBe('fresh-refresh')
+  })
+
+  it('serves a just-rotated token from the memo instead of re-POSTing it', async () => {
+    netFetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        access_token: 'fresh-access',
+        expires_in: 3600,
+        refresh_token: 'fresh-refresh'
+      })
+    })
+    await refreshClaudeOauthCredentialsOutcome(credentials(), NOW)
+    const replay = await refreshClaudeOauthCredentialsOutcome(credentials(), NOW)
+    expect(netFetchMock).toHaveBeenCalledTimes(1)
+    expect(parseClaudeOauthBlob(replay.credentialsJson!)!.accessToken).toBe('fresh-access')
+  })
+
+  it('reports status and Retry-After on a 429 and cools down instead of re-POSTing', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    netFetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      headers: new Headers({ 'retry-after': '120' }),
+      json: async () => ({})
+    })
+    const first = await refreshClaudeOauthCredentialsOutcome(credentials(), NOW)
+    expect(first.credentialsJson).toBeNull()
+    expect(first.failure).toMatchObject({ status: 429, retryAfterMs: 120_000 })
+    const second = await refreshClaudeOauthCredentialsOutcome(credentials(), NOW)
+    expect(netFetchMock).toHaveBeenCalledTimes(1)
+    expect(second.failure).toMatchObject({ status: 429 })
+    warn.mockRestore()
+  })
+
+  it('memoizes a rejected token without blocking a re-authenticated one', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    netFetchMock.mockResolvedValue({
+      ok: false,
+      status: 400,
+      headers: new Headers(),
+      json: async () => ({})
+    })
+    const rejected = await refreshClaudeOauthCredentialsOutcome(credentials(), NOW)
+    expect(rejected.failure).toMatchObject({ status: 400, retryAfterMs: null })
+    // Why: a re-auth stores a NEW refresh token, which must not hit the memo.
+    const rebound = await refreshClaudeOauthCredentialsOutcome(
+      credentials({ refreshToken: 'reissued-refresh' }),
+      NOW
+    )
+    expect(netFetchMock).toHaveBeenCalledTimes(2)
+    expect(rebound.failure).toMatchObject({ status: 400 })
+    warn.mockRestore()
   })
 })

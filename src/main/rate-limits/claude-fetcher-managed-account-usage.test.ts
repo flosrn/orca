@@ -15,6 +15,7 @@ import {
   writeActiveClaudeKeychainCredentials,
   writeManagedClaudeKeychainCredentials
 } from '../claude-accounts/keychain'
+import { resetClaudeOauthRefreshRuntimeStateForTest } from '../claude-accounts/oauth-refresh'
 
 const { netFetchMock, readFileMock, resolveProxyMock, setProxyMock, appGetPathMock } = vi.hoisted(
   () => ({
@@ -70,6 +71,7 @@ describe('fetchClaudeRateLimits', () => {
       setProxyMock,
       appGetPathMock
     })
+    resetClaudeOauthRefreshRuntimeStateForTest()
   })
 
   afterEach(() => {
@@ -421,5 +423,129 @@ describe('fetchClaudeRateLimits', () => {
       String(url).includes('/api/oauth/usage')
     )
     expect(usageCall?.[1]?.headers?.Authorization).toBe('Bearer fresh-access')
+  })
+
+  it('does not replay a hard-expired bearer when its refresh fails', async () => {
+    setPlatform('linux')
+    tempDir = mkdtempSync(join(tmpdir(), 'orca-claude-fetcher-'))
+    appGetPathMock.mockReturnValue(tempDir)
+    const ownedAuthPath = join(tempDir, 'claude-accounts', 'account-1', 'auth')
+    mkdirSync(ownedAuthPath, { recursive: true })
+    writeFileSync(join(ownedAuthPath, '.orca-managed-claude-auth'), 'account-1\n', 'utf-8')
+    writeFileSync(
+      join(ownedAuthPath, '.credentials.json'),
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'expired-token',
+          refreshToken: 'dead-refresh',
+          expiresAt: Date.now() - 60_000
+        }
+      }),
+      'utf-8'
+    )
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    netFetchMock.mockResolvedValue({
+      ok: false,
+      status: 400,
+      headers: new Headers(),
+      json: async () => ({})
+    })
+
+    const result = await fetchManagedAccountUsage({
+      id: 'account-1',
+      managedAuthPath: ownedAuthPath
+    })
+
+    expect(result).toMatchObject({
+      provider: 'claude',
+      status: 'error',
+      error: 'Claude token refresh was rejected. Re-authenticate this account.'
+    })
+    expect(result.usageMetadata).toMatchObject({ failureKind: 'stale-token', source: 'oauth' })
+    expect(netFetchMock).toHaveBeenCalledTimes(1)
+    expect(netFetchMock).toHaveBeenCalledWith(
+      'https://platform.claude.com/v1/oauth/token',
+      expect.anything()
+    )
+    warn.mockRestore()
+  })
+
+  it('propagates Retry-After as retryAtMs when the refresh is throttled', async () => {
+    setPlatform('linux')
+    tempDir = mkdtempSync(join(tmpdir(), 'orca-claude-fetcher-'))
+    appGetPathMock.mockReturnValue(tempDir)
+    const ownedAuthPath = join(tempDir, 'claude-accounts', 'account-1', 'auth')
+    mkdirSync(ownedAuthPath, { recursive: true })
+    writeFileSync(join(ownedAuthPath, '.orca-managed-claude-auth'), 'account-1\n', 'utf-8')
+    writeFileSync(
+      join(ownedAuthPath, '.credentials.json'),
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'expired-token',
+          refreshToken: 'throttled-refresh',
+          expiresAt: Date.now() - 60_000
+        }
+      }),
+      'utf-8'
+    )
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    netFetchMock.mockResolvedValue({
+      ok: false,
+      status: 429,
+      headers: new Headers({ 'retry-after': '300' }),
+      json: async () => ({})
+    })
+
+    const before = Date.now()
+    const result = await fetchManagedAccountUsage({
+      id: 'account-1',
+      managedAuthPath: ownedAuthPath
+    })
+
+    expect(result.status).toBe('error')
+    expect(result.usageMetadata).toMatchObject({ failureKind: 'rate-limited' })
+    expect(result.usageMetadata?.retryAtMs).toBeGreaterThanOrEqual(before + 300_000)
+    expect(result.usageMetadata?.retryAtMs).toBeLessThanOrEqual(Date.now() + 300_000)
+    expect(netFetchMock).toHaveBeenCalledTimes(1)
+    warn.mockRestore()
+  })
+
+  it('still uses a bearer within the refresh buffer when the refresh fails', async () => {
+    setPlatform('linux')
+    tempDir = mkdtempSync(join(tmpdir(), 'orca-claude-fetcher-'))
+    appGetPathMock.mockReturnValue(tempDir)
+    const ownedAuthPath = join(tempDir, 'claude-accounts', 'account-1', 'auth')
+    mkdirSync(ownedAuthPath, { recursive: true })
+    writeFileSync(join(ownedAuthPath, '.orca-managed-claude-auth'), 'account-1\n', 'utf-8')
+    writeFileSync(
+      join(ownedAuthPath, '.credentials.json'),
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'still-valid-token',
+          refreshToken: 'transient-refresh',
+          expiresAt: Date.now() + 2 * 60_000
+        }
+      }),
+      'utf-8'
+    )
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    netFetchMock.mockImplementation(async (url: string) =>
+      url === 'https://platform.claude.com/v1/oauth/token'
+        ? { ok: false, status: 503, headers: new Headers(), json: async () => ({}) }
+        : new Response(
+            JSON.stringify({ five_hour: { utilization: 12 }, seven_day: { utilization: 34 } }),
+            { status: 200 }
+          )
+    )
+
+    const result = await fetchManagedAccountUsage({
+      id: 'account-1',
+      managedAuthPath: ownedAuthPath
+    })
+
+    expect(result.status).toBe('ok')
+    expect(result.session).toMatchObject({ usedPercent: 12 })
+    expect(netFetchMock).toHaveBeenCalledTimes(2)
+    warn.mockRestore()
   })
 })
