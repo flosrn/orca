@@ -17,7 +17,7 @@ import { colors, radii, spacing, typography } from '../../../src/theme/mobile-th
 import { loadHosts, updateHostNameAndEndpoint } from '../../../src/transport/host-store'
 import { displayHostEndpoint } from '../../../src/transport/host-endpoint'
 import { resolveHostEndpointEdit } from '../../../src/transport/host-endpoint-edit'
-import { useForceReconnect, usePrimeHosts } from '../../../src/transport/client-context'
+import { usePrimeHosts, useRefreshHostClient } from '../../../src/transport/client-context'
 import type { HostProfile } from '../../../src/transport/types'
 
 export default function EditHostScreen() {
@@ -25,7 +25,7 @@ export default function EditHostScreen() {
   const insets = useSafeAreaInsets()
   const { hostId } = useLocalSearchParams<{ hostId: string }>()
   const primeHosts = usePrimeHosts()
-  const forceReconnectHost = useForceReconnect()
+  const refreshHostClient = useRefreshHostClient()
 
   const [host, setHost] = useState<HostProfile | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -134,10 +134,10 @@ export default function EditHostScreen() {
     router.back()
 
     if (nextEndpoint !== undefined) {
-      // Why: reconnect is a follow-on side effect of a save that already
-      // committed — its failure or a hang must not be reported as a save
-      // failure or block navigating back.
-      void forceReconnectHost(host.id).catch(() => {})
+      // Why: forceReconnect deliberately preserves a live Relay facade. An
+      // address edit must instead discard that facade so the next client reads
+      // the newly persisted endpoint rather than probing the old one forever.
+      refreshHostClient(host.id)
     }
   }
 

@@ -25,7 +25,8 @@ import {
   RpcClientProvider,
   useDisconnectHostClient,
   useForceReconnect,
-  useHostClient
+  useHostClient,
+  useRefreshHostClient
 } from './client-context'
 import { useAllHostClients } from './use-all-host-clients'
 import { useRelayRecoveryStatus } from './client-context-connection-metrics'
@@ -38,7 +39,10 @@ type FakeClient = RpcClient & {
   closeMock: ReturnType<typeof vi.fn>
 }
 
-function makeFakeClient(initialState: ConnectionState): FakeClient {
+function makeFakeClient(
+  initialState: ConnectionState,
+  initialPath: MobileConnectionPath = 'tailscale'
+): FakeClient {
   let state = initialState
   let pendingPath: MobileConnectionPath | null = null
   let pairingRejected = false
@@ -52,7 +56,7 @@ function makeFakeClient(initialState: ConnectionState): FakeClient {
     getState: () => state,
     getReconnectAttempt: () => 0,
     getLastConnectedAt: () => null,
-    getActivePath: () => 'tailscale',
+    getActivePath: () => initialPath,
     getPendingPath: () => pendingPath,
     isPairingRejected: () => pairingRejected,
     onConnectionPathChange: (listener: () => void) => {
@@ -350,6 +354,43 @@ describe('useHostClient', () => {
       expect(first.closeMock).toHaveBeenCalled()
       expect(states.at(-1)).toBe('connecting')
       expect(states).not.toContain('disconnected')
+    } finally {
+      act(() => renderer?.unmount())
+    }
+  })
+  it('reloads a changed endpoint for a Relay-active host without dropping its owner', async () => {
+    const relayClient = makeFakeClient('connected', 'relay')
+    const lanClient = makeFakeClient('connected', 'lan')
+    const relayHost = { ...HOST, endpoint: 'ws://100.67.222.13:6768' }
+    const lanHost = { ...HOST, endpoint: 'ws://192.168.110.252:6768' }
+    connectMock.mockReturnValueOnce(relayClient).mockReturnValueOnce(lanClient)
+    loadHostsMock.mockResolvedValueOnce([relayHost]).mockResolvedValueOnce([lanHost])
+
+    let selected: { client: RpcClient | null; state: ConnectionState } | null = null
+    let refreshHostClient: ((hostId: string) => void) | null = null
+    let renderer: ReactTestRenderer | null = null
+    function Probe(): null {
+      selected = useHostClient(HOST.id)
+      refreshHostClient = useRefreshHostClient()
+      return null
+    }
+
+    try {
+      await act(async () => {
+        renderer = create(createElement(RpcClientProvider, null, createElement(Probe)))
+        await Promise.resolve()
+      })
+      expect(selected).toMatchObject({ client: relayClient, state: 'connected' })
+
+      await act(async () => {
+        refreshHostClient?.(HOST.id)
+        await Promise.resolve()
+      })
+
+      expect(relayClient.closeMock).toHaveBeenCalledOnce()
+      expect(connectMock).toHaveBeenCalledTimes(2)
+      expect(connectMock.mock.calls[1]?.[0]).toEqual(lanHost)
+      expect(selected).toMatchObject({ client: lanClient, state: 'connected' })
     } finally {
       act(() => renderer?.unmount())
     }
