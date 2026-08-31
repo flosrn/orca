@@ -9,6 +9,10 @@ import {
   writeActiveClaudeKeychainCredentialsForRuntime
 } from './keychain'
 
+vi.mock('../codex-cli/command', () => ({
+  resolveClaudeCommand: vi.fn(() => '/opt/test/bin/claude')
+}))
+
 vi.mock('node:child_process', () => ({
   execFile: vi.fn()
 }))
@@ -117,7 +121,11 @@ describe('Claude Keychain credentials', () => {
       '-a',
       process.env.USER || process.env.USERNAME || 'user',
       '-w',
-      'credentials-json'
+      'credentials-json',
+      '-T',
+      '/usr/bin/security',
+      '-T',
+      '/opt/test/bin/claude'
     ])
   })
 
@@ -140,7 +148,11 @@ describe('Claude Keychain credentials', () => {
         '-a',
         process.env.USER || process.env.USERNAME || 'user',
         '-w',
-        'credentials-json'
+        'credentials-json',
+        '-T',
+        '/usr/bin/security',
+        '-T',
+        '/opt/test/bin/claude'
       ],
       [
         'add-generic-password',
@@ -150,7 +162,11 @@ describe('Claude Keychain credentials', () => {
         '-a',
         process.env.USER || process.env.USERNAME || 'user',
         '-w',
-        'credentials-json'
+        'credentials-json',
+        '-T',
+        '/usr/bin/security',
+        '-T',
+        '/opt/test/bin/claude'
       ]
     ])
   })

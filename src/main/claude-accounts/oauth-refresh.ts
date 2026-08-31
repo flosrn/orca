@@ -1,6 +1,7 @@
 import { net, session } from 'electron'
 import { ensureElectronProxyFromEnvironment } from '../network/proxy-settings'
 import { parseRetryAfterMs } from '../rate-limits/claude-oauth-usage-error'
+import { logClaudeAuthDiagnostic } from '../rate-limits/claude-auth-diagnostics-log'
 
 // Why: the OAuth client id and token endpoint are the public Claude Code
 // values, verified against the installed `claude` binary (2.1.177) and the
@@ -36,6 +37,7 @@ type TokenEndpointResponse = {
   access_token?: unknown
   expires_in?: unknown
   refresh_token?: unknown
+  refresh_token_expires_in?: unknown
   scope?: unknown
 }
 
@@ -156,7 +158,13 @@ export function applyRefreshedToken(
     oauth.refreshToken = response.refresh_token
   }
   if (typeof response.scope === 'string' && response.scope.trim() !== '') {
-    oauth.scopes = response.scope.split(' ')
+    const scopes = response.scope.split(' ')
+    // Why: the claude CLI (verified against 2.1.220 by CCSwitcher) rejects a
+    // stored login whose scopes lack user:inference; adopt the server's scope
+    // only while it still carries it.
+    if (scopes.includes('user:inference')) {
+      oauth.scopes = scopes
+    }
   }
   parsed.claudeAiOauth = oauth
   return JSON.stringify(parsed)
@@ -255,6 +263,10 @@ async function exchangeClaudeRefreshToken(refreshToken: string): Promise<SharedC
       // dead refresh token (400/401 invalid_grant) is diagnosable in the
       // field, instead of a silent null that looks identical to success.
       console.warn(`[claude-oauth-refresh] token endpoint returned ${res.status}`)
+      logClaudeAuthDiagnostic('claude-refresh-failed', {
+        status: res.status,
+        retryAfter: res.headers?.get('retry-after') ?? null
+      })
       const retryAfterMs =
         res.status === 429
           ? (parseRetryAfterMs(res.headers?.get('retry-after') ?? null) ?? FAILED_REFRESH_MEMO_MS)
@@ -272,6 +284,11 @@ async function exchangeClaudeRefreshToken(refreshToken: string): Promise<SharedC
       })
     }
     const data = (await res.json()) as TokenEndpointResponse
+    logClaudeAuthDiagnostic('claude-refresh-ok', {
+      expiresIn: typeof data.expires_in === 'number' ? data.expires_in : null,
+      refreshTokenExpiresIn:
+        typeof data.refresh_token_expires_in === 'number' ? data.refresh_token_expires_in : null
+    })
     return rememberSharedRefresh(refreshToken, {
       response: data,
       failure: null,
@@ -284,6 +301,9 @@ async function exchangeClaudeRefreshToken(refreshToken: string): Promise<SharedC
       '[claude-oauth-refresh] token refresh request failed:',
       error instanceof Error ? error.message : error
     )
+    logClaudeAuthDiagnostic('claude-refresh-error', {
+      message: error instanceof Error ? error.message : String(error)
+    })
     // Why: transient network errors are not memoized; the next attempt may retry at once.
     return {
       response: null,
