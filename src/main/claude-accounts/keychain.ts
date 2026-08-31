@@ -134,26 +134,21 @@ async function writeKeychainPassword(
   if (process.platform !== 'darwin') {
     return
   }
-  // Why: `add-generic-password -U` resets the item ACL to the writing tool only
-  // (claude-code#19456, claude-swap#279). Without -T entries the claude binary
-  // is locked out of its own scoped credential after a restart and silently
-  // falls back to the stale legacy slot.
+  // Why: writes recreate the item instead of `-U`-updating it. Item ACLs can
+  // only be granted silently at creation — `-U` + `-T` on an existing item
+  // prompts for the keychain password on every write, and `-U` without `-T`
+  // resets the ACL to the writing tool only (claude-code#19456,
+  // claude-swap#279), locking the claude binary out of its scoped credential
+  // after a restart.
   const acl = ['-T', '/usr/bin/security']
   const claudeCommand = resolveClaudeCommand()
   if (isAbsolute(claudeCommand)) {
     acl.push('-T', claudeCommand)
   }
-  await execSecurity([
-    'add-generic-password',
-    '-U',
-    '-s',
-    service,
-    '-a',
-    account,
-    '-w',
-    contents,
-    ...acl
-  ])
+  await execSecurity(['delete-generic-password', '-s', service, '-a', account], {
+    ignoreNotFound: true
+  })
+  await execSecurity(['add-generic-password', '-s', service, '-a', account, '-w', contents, ...acl])
 }
 
 async function deleteKeychainPassword(

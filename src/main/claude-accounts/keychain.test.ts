@@ -27,6 +27,9 @@ function setPlatform(platform: NodeJS.Platform): void {
   })
 }
 
+function user(): string {
+  return process.env.USER || process.env.USERNAME || 'user'
+}
 function serviceForConfigDir(configDir: string): string {
   const suffix = createHash('sha256').update(configDir).digest('hex').slice(0, 8)
   return `Claude Code-credentials-${suffix}`
@@ -106,26 +109,30 @@ describe('Claude Keychain credentials', () => {
   it('writes active credentials to the config-scoped Claude Code service', async () => {
     const configDir = '/tmp/orca-claude-login-test'
     const scopedService = serviceForConfigDir(configDir)
-    execFileMock.mockImplementationOnce((_file, _args, _options, callback) => {
+    execFileMock.mockImplementation((_file, _args, _options, callback) => {
       invokeExecFileCallback(callback, null, '', '')
       return null as never
     })
 
     await writeActiveClaudeKeychainCredentials('credentials-json', configDir)
 
-    expect(execFileMock.mock.calls[0][1]).toEqual([
-      'add-generic-password',
-      '-U',
-      '-s',
-      scopedService,
-      '-a',
-      process.env.USER || process.env.USERNAME || 'user',
-      '-w',
-      'credentials-json',
-      '-T',
-      '/usr/bin/security',
-      '-T',
-      '/opt/test/bin/claude'
+    // Why: ACLs are only grantable silently at creation, so writes delete then
+    // re-create the item with -T entries instead of `-U`-updating in place.
+    expect(execFileMock.mock.calls.map((call) => call[1])).toEqual([
+      ['delete-generic-password', '-s', scopedService, '-a', user()],
+      [
+        'add-generic-password',
+        '-s',
+        scopedService,
+        '-a',
+        user(),
+        '-w',
+        'credentials-json',
+        '-T',
+        '/usr/bin/security',
+        '-T',
+        '/opt/test/bin/claude'
+      ]
     ])
   })
 
@@ -140,13 +147,13 @@ describe('Claude Keychain credentials', () => {
     await writeActiveClaudeKeychainCredentialsForRuntime('credentials-json', configDir)
 
     expect(execFileMock.mock.calls.map((call) => call[1])).toEqual([
+      ['delete-generic-password', '-s', scopedService, '-a', user()],
       [
         'add-generic-password',
-        '-U',
         '-s',
         scopedService,
         '-a',
-        process.env.USER || process.env.USERNAME || 'user',
+        user(),
         '-w',
         'credentials-json',
         '-T',
@@ -154,13 +161,13 @@ describe('Claude Keychain credentials', () => {
         '-T',
         '/opt/test/bin/claude'
       ],
+      ['delete-generic-password', '-s', 'Claude Code-credentials', '-a', user()],
       [
         'add-generic-password',
-        '-U',
         '-s',
         'Claude Code-credentials',
         '-a',
-        process.env.USER || process.env.USERNAME || 'user',
+        user(),
         '-w',
         'credentials-json',
         '-T',
