@@ -53,7 +53,11 @@ export async function retryClaudeOAuthWithLegacyKeychain(input: {
     return abortedClaudeRateLimitResult()
   }
   try {
-    const limits = await fetchClaudeOAuthUsage(legacy.token, input.options?.signal)
+    const limits = await fetchClaudeOAuthUsage(
+      legacy.token,
+      input.options?.signal,
+      input.options?.authPreparation?.provenance ?? 'system'
+    )
     if (input.options?.signal?.aborted) {
       return abortedClaudeRateLimitResult()
     }
@@ -151,7 +155,11 @@ export async function repairClaudeCredentialsThenRetryOAuth(input: {
   if (refreshed.token) {
     recordClaudeUsageAttempt(input.attempts, 'oauth')
     try {
-      const retry = await fetchClaudeOAuthUsage(refreshed.token, input.options?.signal)
+      const retry = await fetchClaudeOAuthUsage(
+        refreshed.token,
+        input.options?.signal,
+        input.options?.authPreparation?.provenance ?? 'system'
+      )
       if (input.options?.signal?.aborted) {
         return abortedClaudeRateLimitResult()
       }

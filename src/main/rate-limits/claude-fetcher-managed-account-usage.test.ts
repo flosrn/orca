@@ -16,6 +16,7 @@ import {
   writeManagedClaudeKeychainCredentials
 } from '../claude-accounts/keychain'
 import { resetClaudeOauthRefreshRuntimeStateForTest } from '../claude-accounts/oauth-refresh'
+import { takeClaudeUsagePollBudget } from './claude-usage-poll-budget'
 
 const { netFetchMock, readFileMock, resolveProxyMock, setProxyMock, appGetPathMock } = vi.hoisted(
   () => ({
@@ -547,5 +548,35 @@ describe('fetchClaudeRateLimits', () => {
     expect(result.session).toMatchObject({ usedPercent: 12 })
     expect(netFetchMock).toHaveBeenCalledTimes(2)
     warn.mockRestore()
+  })
+
+  it('keeps a rotated bearer inside the account budget window', async () => {
+    setPlatform('linux')
+    tempDir = mkdtempSync(join(tmpdir(), 'orca-claude-fetcher-'))
+    appGetPathMock.mockReturnValue(tempDir)
+    const ownedAuthPath = join(tempDir, 'claude-accounts', 'account-1', 'auth')
+    mkdirSync(ownedAuthPath, { recursive: true })
+    writeFileSync(join(ownedAuthPath, '.orca-managed-claude-auth'), 'account-1\n', 'utf-8')
+    writeFileSync(
+      join(ownedAuthPath, '.credentials.json'),
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'rotated-fresh-token',
+          refreshToken: 'live-refresh',
+          expiresAt: Date.now() + 60 * 60 * 1000
+        }
+      }),
+      'utf-8'
+    )
+    // Why: the budget is keyed by account, so exhausting the account window
+    // must defer even a never-seen bearer — a rotation cannot reopen the cap.
+    for (let i = 0; i < 25; i++) {
+      takeClaudeUsagePollBudget('managed:account-1')
+    }
+
+    await expect(
+      fetchManagedAccountUsage({ id: 'account-1', managedAuthPath: ownedAuthPath })
+    ).rejects.toMatchObject({ status: 429 })
+    expect(netFetchMock).not.toHaveBeenCalled()
   })
 })

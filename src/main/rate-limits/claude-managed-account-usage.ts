@@ -111,7 +111,7 @@ export async function fetchInactiveClaudeAccountUsage(
   if (!token) {
     return noClaudeManagedCredentialsResult()
   }
-  const oauthLimits = await fetchClaudeOAuthUsage(token, options.signal)
+  const oauthLimits = await fetchClaudeOAuthUsage(token, options.signal, `managed:${account.id}`)
   if (options.signal?.aborted) {
     return abortedClaudeRateLimitResult()
   }

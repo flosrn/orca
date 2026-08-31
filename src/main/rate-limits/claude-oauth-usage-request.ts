@@ -57,14 +57,16 @@ function mapFableWeeklyWindow(data: OAuthUsageResponse): RateLimitWindow | null 
 
 export async function fetchClaudeOAuthUsage(
   token: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  budgetKey?: string
 ): Promise<ProviderRateLimits> {
   if (signal?.aborted) {
     return abortedClaudeRateLimitResult()
   }
   // Why: the usage endpoint budgets ~28-30 reads per identity-hour; overshooting
   // earns per-token 429s with retry-after up to an hour, so defer locally first.
-  const budget = takeClaudeUsagePollBudget(token)
+  // The key must survive token rotation, or every refresh would reopen the cap.
+  const budget = takeClaudeUsagePollBudget(budgetKey ?? token)
   if (!budget.ok) {
     logClaudeAuthDiagnostic('claude-usage-budget-deferred', { retryAfterMs: budget.retryAfterMs })
     throw new OAuthUsageError(

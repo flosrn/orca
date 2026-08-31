@@ -30,12 +30,11 @@ describe('takeClaudeUsagePollBudget', () => {
     expect(takeClaudeUsagePollBudget('token-a', NOW + HOUR + 500).ok).toBe(true)
   })
 
-  it('budgets identities independently and rotation starts a fresh window', () => {
+  it('budgets keys independently', () => {
     for (let i = 0; i < 25; i++) {
-      takeClaudeUsagePollBudget('token-a', NOW + i * 1000)
+      takeClaudeUsagePollBudget('managed:account-1', NOW + i * 1000)
     }
-    expect(takeClaudeUsagePollBudget('token-a', NOW + 26_000).ok).toBe(false)
-    // Why: a refreshed bearer is a new identity window on the server side too.
-    expect(takeClaudeUsagePollBudget('token-b', NOW + 26_000).ok).toBe(true)
+    expect(takeClaudeUsagePollBudget('managed:account-1', NOW + 26_000).ok).toBe(false)
+    expect(takeClaudeUsagePollBudget('managed:account-2', NOW + 26_000).ok).toBe(true)
   })
 })
