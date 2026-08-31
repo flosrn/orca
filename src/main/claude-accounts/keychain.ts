@@ -1,7 +1,5 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { isAbsolute } from 'node:path'
-import { resolveClaudeCommand } from '../codex-cli/command'
 
 const ACTIVE_CLAUDE_SERVICE = 'Claude Code-credentials'
 const ORCA_CLAUDE_SERVICE = 'Orca Claude Code Managed Credentials'
@@ -134,21 +132,7 @@ async function writeKeychainPassword(
   if (process.platform !== 'darwin') {
     return
   }
-  // Why: writes recreate the item instead of `-U`-updating it. Item ACLs can
-  // only be granted silently at creation — `-U` + `-T` on an existing item
-  // prompts for the keychain password on every write, and `-U` without `-T`
-  // resets the ACL to the writing tool only (claude-code#19456,
-  // claude-swap#279), locking the claude binary out of its scoped credential
-  // after a restart.
-  const acl = ['-T', '/usr/bin/security']
-  const claudeCommand = resolveClaudeCommand()
-  if (isAbsolute(claudeCommand)) {
-    acl.push('-T', claudeCommand)
-  }
-  await execSecurity(['delete-generic-password', '-s', service, '-a', account], {
-    ignoreNotFound: true
-  })
-  await execSecurity(['add-generic-password', '-s', service, '-a', account, '-w', contents, ...acl])
+  await execSecurity(['add-generic-password', '-U', '-s', service, '-a', account, '-w', contents])
 }
 
 async function deleteKeychainPassword(
