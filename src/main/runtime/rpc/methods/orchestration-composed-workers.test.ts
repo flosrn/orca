@@ -159,9 +159,10 @@ describe('orchestration RPC methods', () => {
       expect(db.getDispatchContext(task.id)).toBeDefined()
     })
 
-    it('starts a fresh agent in the coordinator current worktree', async () => {
+    it('starts an argv agent with sub-dispatch instructions when nesting remains available', async () => {
       setup()
       mockCurrentWorkerStart()
+      vi.spyOn(runtime, 'getNestedWorkerMaxDepth').mockReturnValue(2)
       const task = db.createTask({ spec: 'implement worker start' })
 
       const result = (await call('orchestration.workerStart', {
@@ -197,6 +198,23 @@ describe('orchestration RPC methods', () => {
         surfaceOwner: false
       })
       expect(runtime.sendTerminalAgentPrompt).not.toHaveBeenCalled()
+      const agentPrompt = vi.mocked(runtime.createTerminal).mock.calls.at(-1)?.[1]?.agentPrompt
+      expect(agentPrompt).toContain('=== SUB-DISPATCH ===')
+    })
+
+    it('omits sub-dispatch instructions when the argv worker reaches the depth cap', async () => {
+      setup()
+      mockCurrentWorkerStart()
+      const task = db.createTask({ spec: 'work at the nesting limit' })
+
+      await call('orchestration.workerStart', {
+        task: task.id,
+        from: 'term_coord',
+        agent: 'codex'
+      })
+
+      const agentPrompt = vi.mocked(runtime.createTerminal).mock.calls.at(-1)?.[1]?.agentPrompt
+      expect(agentPrompt).not.toContain('=== SUB-DISPATCH ===')
     })
 
     it('embeds the WSL CLI name before the worker pane exists', async () => {

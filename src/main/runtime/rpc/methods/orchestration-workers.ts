@@ -194,6 +194,7 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
               runId: run.id,
               task,
               dispatchId: started.dispatch.id,
+              canDispatchSubWorkers: started.dispatch.depth < runtime.getNestedWorkerMaxDepth(),
               coordinatorHandle: params.from,
               devMode: params.devMode,
               timeoutMs: params.timeoutMs ?? 60_000,
