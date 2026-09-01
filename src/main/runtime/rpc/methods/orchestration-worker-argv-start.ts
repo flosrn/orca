@@ -31,6 +31,7 @@ export async function startArgvWorkerDispatch(args: {
   runId: string
   task: { id: string; spec: string }
   dispatchId: string
+  canDispatchSubWorkers: boolean
   coordinatorHandle: string
   devMode?: boolean
   timeoutMs: number
@@ -55,6 +56,7 @@ export async function startArgvWorkerDispatch(args: {
   const capability = db.mintStartingWorkerCapability({ dispatchId: args.dispatchId })
   const cliCommand = await runtime.getWorktreeOrchestrationCliCommand(args.worktreeId)
   const preamble = buildDispatchPreamble({
+    canDispatchSubWorkers: args.canDispatchSubWorkers,
     taskId: args.task.id,
     dispatchId: args.dispatchId,
     taskSpec: args.task.spec,
