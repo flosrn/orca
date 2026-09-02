@@ -2322,6 +2322,11 @@ const MOBILE_TERMINAL_SURFACE_TIMEOUT_MS = 10_000
 // fallback kill is needed, so keep it short — an unreachable host must not stall the rejection.
 const REJECTED_SPLIT_PTY_STOP_TIMEOUT_MS = 2_000
 const EXPLICIT_TERMINAL_CLOSE_STOP_TIMEOUT_MS = 2_000
+// Why: a stop that misses the first deadline is usually late, not stuck — `ps` under load, a
+// shell still tearing down its jobs — and a second bounded attempt turns it into a confirmed
+// kill instead of an unverifiable one. Measured 2026-09-02: the fire-and-forget follow-up left
+// agent processes alive for hours behind a `ptyKilled: false` receipt.
+const EXPLICIT_TERMINAL_CLOSE_RETRY_TIMEOUT_MS = 3_000
 const MOBILE_TERMINAL_READY_FALLBACK_MS = 1000
 const SSH_PANE_RECOVERY_GRACE_MS = 30_000
 // Why: long enough that a keystroke burst to a proven-dead leaf probes once,
@@ -32018,8 +32023,24 @@ export class OrcaRuntimeService {
             verdict?.status === 'unverifiable' &&
             verdict.reason === SSH_PROVIDER_UNREGISTERED_REASON
           if (!providerAlreadyRetiredPty) {
+            // Why: one more exact, verified attempt under its own deadline before the
+            // fire-and-forget follow-up. The first miss is rarely a process that will not die;
+            // it is a `ps` or a shell teardown that took longer than 2 s.
+            try {
+              stopped = await this.ptyController.stopAndWait(ptyId, {
+                deadlineMs: Date.now() + EXPLICIT_TERMINAL_CLOSE_RETRY_TIMEOUT_MS
+              })
+            } catch (error) {
+              this.markPtyLivenessUnverifiable(
+                ptyId,
+                error instanceof Error ? error.message : String(error)
+              )
+            }
+          }
+          if (!stopped && !providerAlreadyRetiredPty) {
+            const retried = this.getPtyLivenessVerdict(ptyId)
             this.ptyController.kill(ptyId)
-            if (!verdict || verdict.status === 'live') {
+            if (!retried || retried.status === 'live') {
               this.markPtyLivenessUnverifiable(
                 ptyId,
                 'a follow-up stop was issued but its outcome could not be verified'
