@@ -34,7 +34,8 @@ export abstract class RateLimitServiceFullCycleApplication extends RateLimitServ
         kimiResult,
         miniMaxResult
       ],
-      grokResultPromise
+      grokResultPromise,
+      codexBarSnapshotPromise
     } = prepared
     if (signal.aborted) {
       return
@@ -211,5 +212,11 @@ export abstract class RateLimitServiceFullCycleApplication extends RateLimitServ
       ...this.state,
       grok: this.applyStalePolicy(grok, previousState.grok)
     })
+
+    const codexBarSnapshot = await codexBarSnapshotPromise
+    if (signal.aborted) {
+      return
+    }
+    this.applyCodexBarSnapshot(codexBarSnapshot, previousState)
   }
 }
