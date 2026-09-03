@@ -124,6 +124,9 @@ export abstract class RateLimitServiceConfiguration extends RateLimitServiceAcco
       // Why: the cookie lives on the filesystem, not GlobalSettings; surface its presence so the renderer keeps the MiniMax bar across reloads.
       minimaxCookieConfigured: hasMiniMaxSessionCookie(),
       grokAuthConfigured: this.grokAuthConfigured,
+      // Why: absence of the shared binary is the single reason all three CodexBar meters can't
+      // report; the renderer treats it as "unconfigured", not as a failure.
+      codexbarAvailable: this.codexbarAvailable,
       claudeTarget: this.claudeFetchTarget,
       codexTarget: this.codexFetchTarget,
       inactiveClaudeAccounts: this.buildInactiveArray(
