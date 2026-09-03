@@ -1,4 +1,5 @@
 import { RuntimeRpcMobilePairing } from './runtime-rpc-mobile-pairing'
+import { retireLongPollCapacityProbe } from './runtime-rpc-long-poll-capacity'
 
 export class RuntimeRpcShutdown extends RuntimeRpcMobilePairing {
   /** Why: test-only seam — runs one ownership check instead of waiting out the poll interval. */
@@ -20,6 +21,7 @@ export class RuntimeRpcShutdown extends RuntimeRpcMobilePairing {
     const transports = this.activeTransports
     this.activeTransports = []
     this.transports = []
+    retireLongPollCapacityProbe(this.runtime.getRuntimeId())
     this.metadataOwnershipWatch?.stop()
     this.metadataOwnershipWatch = null
     this.mobileSocketWiring = null

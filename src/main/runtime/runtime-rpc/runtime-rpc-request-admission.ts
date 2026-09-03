@@ -5,6 +5,12 @@ import type { RpcRequest, RpcResponse } from '../rpc/core'
 import { errorResponse } from '../rpc/errors'
 import { RuntimeRpcBinaryRouting } from './runtime-rpc-binary-routing'
 import { classifyRuntimeLongPoll, type RuntimeLongPollClass } from './runtime-rpc-long-poll'
+import {
+  describeLongPollRefusal,
+  type LongPollCapacityReport
+} from './runtime-rpc-long-poll-capacity'
+
+const LONG_POLL_REFUSAL_WARN_INTERVAL_MS = 60_000
 
 export class RuntimeRpcRequestAdmission extends RuntimeRpcBinaryRouting {
   // Why: Unix socket dispatch is one-shot and auths via the shared token from the 0o600 metadata file. See §3.1.
@@ -54,18 +60,19 @@ export class RuntimeRpcRequestAdmission extends RuntimeRpcBinaryRouting {
       return null
     }
     if (this.activeLongPolls >= this.longPollCap) {
-      return 'long-poll capacity reached; retry with backoff'
+      return this.refuseLongPoll(longPoll, 'long-poll capacity reached')
     }
     if (
       (longPoll === 'ask' || longPoll === 'browser-host') &&
       this.activeAskLongPolls + this.activeBrowserHostLongPolls >= this.specializedLongPollCap
     ) {
-      return longPoll === 'ask'
-        ? 'orchestration.ask capacity reached; retry with backoff'
-        : 'browser-host capacity reached; retry with backoff'
+      return this.refuseLongPoll(
+        longPoll,
+        longPoll === 'ask' ? 'orchestration.ask capacity reached' : 'browser-host capacity reached'
+      )
     }
     if (longPoll === 'ask' && this.activeAskLongPolls >= this.askLongPollCap) {
-      return 'orchestration.ask capacity reached; retry with backoff'
+      return this.refuseLongPoll(longPoll, 'orchestration.ask capacity reached')
     }
     if (
       longPoll === 'browser-host' &&
@@ -74,9 +81,13 @@ export class RuntimeRpcRequestAdmission extends RuntimeRpcBinaryRouting {
           (this.activeBrowserHostLongPollsByDevice.get(pairedDeviceId) ?? 0) >=
             this.browserHostLongPollCapPerDevice))
     ) {
-      return 'browser-host capacity reached; retry with backoff'
+      return this.refuseLongPoll(longPoll, 'browser-host capacity reached')
     }
     this.activeLongPolls += 1
+    if (this.activeLongPolls > this.peakLongPolls) {
+      this.peakLongPolls = this.activeLongPolls
+      this.peakLongPollsAt = new Date().toISOString()
+    }
     if (longPoll === 'ask') {
       this.activeAskLongPolls += 1
     } else if (longPoll === 'browser-host') {
@@ -89,6 +100,46 @@ export class RuntimeRpcRequestAdmission extends RuntimeRpcBinaryRouting {
       }
     }
     return null
+  }
+
+  // Why: the refusal is answered before any handler runs, so this counter and
+  // the warn are the whole audit trail — nothing downstream will record that
+  // the request existed. The message carries the occupancy that refused it.
+  private refuseLongPoll(longPoll: RuntimeLongPollClass, reason: string): string {
+    const now = new Date()
+    this.longPollRefusals[longPoll] += 1
+    this.lastLongPollRefusalAt = now.toISOString()
+    const report = this.longPollCapacityReport()
+    const nowMs = now.getTime()
+    if (nowMs - this.lastLongPollRefusalWarnMs[longPoll] >= LONG_POLL_REFUSAL_WARN_INTERVAL_MS) {
+      this.lastLongPollRefusalWarnMs[longPoll] = nowMs
+      console.warn(
+        `[runtime] Refused a ${longPoll} long-poll: ${reason}. Held ${report.held}/${report.cap} ` +
+          `(${report.heldByClass.wait} wait, ${report.heldByClass.ask} ask, ` +
+          `${report.heldByClass['browser-host']} browser-host); ` +
+          `${this.longPollRefusals[longPoll]} ${longPoll} refusal(s) since start.`
+      )
+    }
+    return describeLongPollRefusal(reason, report)
+  }
+
+  protected longPollCapacityReport(): LongPollCapacityReport {
+    return {
+      cap: this.longPollCap,
+      held: this.activeLongPolls,
+      heldByClass: {
+        ask: this.activeAskLongPolls,
+        'browser-host': this.activeBrowserHostLongPolls,
+        wait: Math.max(
+          0,
+          this.activeLongPolls - this.activeAskLongPolls - this.activeBrowserHostLongPolls
+        )
+      },
+      peakHeld: this.peakLongPolls,
+      peakHeldAt: this.peakLongPollsAt,
+      refusedByClass: { ...this.longPollRefusals },
+      lastRefusalAt: this.lastLongPollRefusalAt
+    }
   }
 
   protected releaseLongPoll(longPoll: RuntimeLongPollClass | null, pairedDeviceId?: string): void {
