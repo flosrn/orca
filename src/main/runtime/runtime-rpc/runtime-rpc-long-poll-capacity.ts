@@ -40,8 +40,22 @@ export function getLongPollCapacityReport(runtimeId: string): LongPollCapacityRe
 // Why: "capacity reached" alone cannot tell a legitimate worker fleet parking
 // `check --wait` from leaked slots held by reaped processes — the refused
 // client, which is usually the only witness, needs the occupancy that refused
-// it. Prefix and the "retry with backoff" suffix stay intact: recoverability is
-// classified off that fragment.
+// it.
+//
+// This is published content on an existing path, so rule 3 of
+// docs/reference/remote-wire-compatibility.md applies: it grants nothing, it
+// asks whether an old client can still interpret the new content. Every reader
+// of a `runtime_busy` failure was checked, and none of them parses this prose.
+// isBrowserHostAdmissionCapacityError reads `.code` only.
+// isRecoverableRemoteRuntimeConnectionError and isRuntimeRpcQueueOverloadError
+// treat a present code as authoritative and consult their message fragments
+// only for an error carrying no code — and neither list holds this text.
+// Mobile's classifyWorktreeShowResponse does parse prose, but only for
+// `runtime_error`; any other code, this one included, returns 'unknown' before
+// the message is read, and the token it hunts is `selector_not_found`.
+// So the prefix and the "retry with backoff" tail stay for the human or agent
+// reading them, and a future reader that keys on this text has to negotiate it
+// rather than assume it.
 export function describeLongPollRefusal(reason: string, report: LongPollCapacityReport): string {
   const held = report.heldByClass
   return (
