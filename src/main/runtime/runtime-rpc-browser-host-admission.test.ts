@@ -77,7 +77,8 @@ describe('runtime RPC browser-host admission', () => {
           id: 'host-overflow',
           ok: false,
           error: expect.objectContaining({
-            message: 'browser-host capacity reached; retry with backoff'
+            message:
+              'browser-host capacity reached (held 1/4: 0 wait, 0 ask, 1 browser-host); retry with backoff'
           })
         })
       )
@@ -154,7 +155,8 @@ describe('runtime RPC browser-host admission', () => {
           id: 'host-a-overflow',
           ok: false,
           error: expect.objectContaining({
-            message: 'browser-host capacity reached; retry with backoff'
+            message:
+              'browser-host capacity reached (held 4/16: 0 wait, 0 ask, 4 browser-host); retry with backoff'
           })
         })
       )
@@ -239,7 +241,8 @@ describe('runtime RPC browser-host admission', () => {
             id: 'host-b',
             ok: false,
             error: expect.objectContaining({
-              message: 'browser-host capacity reached; retry with backoff'
+              message:
+                'browser-host capacity reached (held 3/4: 0 wait, 2 ask, 1 browser-host); retry with backoff'
             })
           })
         )
