@@ -18,7 +18,8 @@ import {
   BROWSER_HOST_LONG_POLL_SHARE,
   KEEPALIVE_INTERVAL_MS,
   LONG_POLL_CAP,
-  SPECIALIZED_LONG_POLL_SHARE
+  SPECIALIZED_LONG_POLL_SHARE,
+  type RuntimeLongPollClass
 } from './runtime-rpc-long-poll'
 import type {
   MobilePairingOffer,
@@ -89,6 +90,24 @@ export class RuntimeRpcState {
   protected activeAskLongPolls = 0
   protected activeBrowserHostLongPolls = 0
   protected readonly activeBrowserHostLongPollsByDevice = new Map<string, number>()
+  // Why: the only durable evidence a refusal ever happened — see
+  // runtime-rpc-long-poll-capacity. Peak is recorded on the way up so a wave
+  // that saturated and drained before anyone looked still says so.
+  protected peakLongPolls = 0
+  protected peakLongPollsAt: string | null = null
+  protected readonly longPollRefusals: Record<RuntimeLongPollClass, number> = {
+    ask: 0,
+    'browser-host': 0,
+    wait: 0
+  }
+  protected lastLongPollRefusalAt: string | null = null
+  // Why: one warn per class per minute — a saturated runtime refuses on every
+  // poll retry, and an unthrottled line would bury the log it is meant to serve.
+  protected lastLongPollRefusalWarnMs: Record<RuntimeLongPollClass, number> = {
+    ask: 0,
+    'browser-host': 0,
+    wait: 0
+  }
 
   constructor({
     runtime,
