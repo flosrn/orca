@@ -7,7 +7,7 @@ import {
 } from '../../../../shared/usage-percentage-display'
 import type { StatusBarUsageMode } from '../../../../shared/status-bar-usage-mode'
 import { ProviderIcon, clampUsedPercent, getProviderUsageStatusLabel } from './tooltip'
-import { getTightestUsageSection } from './UsageRosterPanel'
+import { getStatusBarUsageSection } from './UsageRosterPanel'
 import { formatRateLimitWindowChipLabel } from '@/lib/window-label-formatter'
 import { formatUsagePercentageLabel } from './usage-percentage-label'
 import { translate } from '@/i18n/i18n'
@@ -84,6 +84,12 @@ function getProviderLetter(provider: ProviderRateLimits['provider']): string {
       return 'R'
     case 'codex':
       return 'X'
+    case 'cursor':
+      return 'U'
+    case 'clinepass':
+      return 'P'
+    case 'qwencloud':
+      return 'Q'
   }
 }
 
@@ -194,10 +200,10 @@ export function ProviderSegment({
     )
   }
 
-  const tightest = getTightestUsageSection(p)
+  const summary = getStatusBarUsageSection(p)
 
   // Fetching with no prior data
-  if (p.status === 'fetching' && !tightest) {
+  if (p.status === 'fetching' && !summary) {
     return (
       <span className="inline-flex items-center gap-1 text-muted-foreground">
         <ProviderIcon provider={provider} />
@@ -216,7 +222,7 @@ export function ProviderSegment({
   }
 
   // Error with no data
-  if (p.status === 'error' && !tightest) {
+  if (p.status === 'error' && !summary) {
     return (
       <span className="inline-flex items-center gap-1 text-muted-foreground">
         <ProviderIcon provider={provider} />
@@ -234,15 +240,15 @@ export function ProviderSegment({
       <ProviderIcon provider={provider} />
       {mode === 'verbose' ? (
         <>
-          {tightest && !compact ? (
-            <MiniBar usedPct={clampUsedPercent(tightest.window.usedPercent)} display={display} />
+          {summary && !compact ? (
+            <MiniBar usedPct={clampUsedPercent(summary.window.usedPercent)} display={display} />
           ) : null}
           <VerboseProviderUsage p={p} display={display} />
         </>
-      ) : tightest ? (
+      ) : summary ? (
         <WindowLabel
-          w={tightest.window}
-          label={tightest.label}
+          w={summary.window}
+          label={summary.label}
           display={display}
           showLabel={!compact}
         />
