@@ -1,6 +1,6 @@
 // Why: this is the original Unix socket / named pipe transport extracted from
 // runtime-rpc.ts. It preserves the exact same behavior: newline-delimited JSON,
-// 30s idle timeout, 1MB max message, 32 max connections, chmod 0o600 on Unix.
+// 30s idle timeout, 1MB max message, chmod 0o600 on Unix.
 // It also owns the keepalive timer and per-connection abort signal so the
 // server-side handler can cancel long-poll dispatches when the client goes
 // away. See design doc §3.1.
@@ -10,7 +10,13 @@ import type { RpcMessageContext, RpcTransport } from './transport'
 
 const MAX_RUNTIME_RPC_MESSAGE_BYTES = 1024 * 1024
 const RUNTIME_RPC_SOCKET_IDLE_TIMEOUT_MS = 30_000
-const MAX_RUNTIME_RPC_CONNECTIONS = 32
+// Why exported: LONG_POLL_CAP is half of this budget, so the two must move
+// together. Measured 2026-09-02 on a ten-worker orchestration wave: with the
+// budget at 32 the derived 16-slot long-poll cap sat saturated for 67 min
+// (every worker parks one `check --wait`), and every request that arrived in
+// that window was refused. 64 keeps the same half-and-half split with 32 slots
+// still reserved for short RPCs.
+export const MAX_RUNTIME_RPC_CONNECTIONS = 64
 const DEFAULT_KEEPALIVE_INTERVAL_MS = 10_000
 
 export type UnixSocketTransportOptions = {
