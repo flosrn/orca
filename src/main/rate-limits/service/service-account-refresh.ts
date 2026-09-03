@@ -29,6 +29,15 @@ export abstract class RateLimitServiceAccountRefresh extends RateLimitServiceIna
     return this.getState()
   }
 
+  async refreshCodexBar(): Promise<RateLimitState> {
+    // Why: one CodexBar batch covers Cursor/ClinePass/Qwen Cloud. Until a
+    // dedicated queue exists, a forced full cycle is the same batch plus the
+    // other providers — still one user click, still one CLI round-trip for
+    // those three because the full cycle already overlaps it.
+    await this.fetchAll({ force: true })
+    return this.getState()
+  }
+
   invalidateMiniMaxCredentialState(): void {
     this.minimaxFetchGeneration += 1
     // Why: saving/forgetting the cookie can race an in-flight fetch; clear the visible snapshot before any old-cookie result returns.
