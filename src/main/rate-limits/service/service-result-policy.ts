@@ -4,8 +4,11 @@ import {
   RATE_LIMITED_STALE_THRESHOLD_MS,
   STALE_THRESHOLD_MS,
   type ActiveRateLimitProvider,
+  type InternalRateLimitState,
   type ProviderRateLimits
 } from './service-types'
+import type { CodexBarUsageSnapshot } from '../codexbar-cli-source'
+import type { CodexBarProvider } from '../codexbar-usage-mapper'
 
 export abstract class RateLimitServiceResultPolicy extends RateLimitServiceFetchControl {
   protected applyStalePolicy(
@@ -92,6 +95,9 @@ export abstract class RateLimitServiceResultPolicy extends RateLimitServiceFetch
       | 'minimax'
       | 'grok'
       | 'antigravity'
+      | 'cursor'
+      | 'clinepass'
+      | 'qwencloud'
   ): ProviderRateLimits {
     if (!current) {
       return {
@@ -108,5 +114,49 @@ export abstract class RateLimitServiceResultPolicy extends RateLimitServiceFetch
       return current
     }
     return { ...current, status: 'fetching' }
+  }
+
+  // Why: mark fetching only once the binary is known present, else hosts without CodexBar get
+  // three chips that never settle.
+  protected withCodexBarFetchingStatus(
+    previous: InternalRateLimitState
+  ): Pick<InternalRateLimitState, 'cursor' | 'clinepass' | 'qwencloud'> {
+    if (!this.codexbarAvailable) {
+      return {
+        cursor: previous.cursor,
+        clinepass: previous.clinepass,
+        qwencloud: previous.qwencloud
+      }
+    }
+    return {
+      cursor: this.withFetchingStatus(previous.cursor, 'cursor'),
+      clinepass: this.withFetchingStatus(previous.clinepass, 'clinepass'),
+      qwencloud: this.withFetchingStatus(previous.qwencloud, 'qwencloud')
+    }
+  }
+
+  protected applyCodexBarSnapshot(
+    snapshot: CodexBarUsageSnapshot,
+    previousState: InternalRateLimitState
+  ): void {
+    this.codexbarAvailable = snapshot.binaryPath !== null
+    const apply = (
+      provider: CodexBarProvider,
+      previous: ProviderRateLimits | null
+    ): ProviderRateLimits | null => {
+      const fresh = snapshot.results[provider]?.limits
+      // Why: no binary means CodexBar was never installed; an error row would invent a failure.
+      if (!fresh) {
+        return null
+      }
+      this.trackActiveFailureStreak(provider, fresh)
+      return this.applyStalePolicy(fresh, previous)
+    }
+    this.updateState({
+      ...this.state,
+      cursor: apply('cursor', previousState.cursor),
+      clinepass: apply('clinepass', previousState.clinepass),
+      qwencloud: apply('qwencloud', previousState.qwencloud)
+    })
   }
 }
