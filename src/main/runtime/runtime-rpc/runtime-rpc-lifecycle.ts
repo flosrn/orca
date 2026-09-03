@@ -18,6 +18,7 @@ import {
   createRuntimeTransportMetadata,
   sweepOrphanedRuntimeSockets
 } from './runtime-rpc-socket-metadata'
+import { publishLongPollCapacityProbe } from './runtime-rpc-long-poll-capacity'
 
 export class RuntimeRpcLifecycle extends RuntimeRpcWebSocketDispatch {
   async start(): Promise<void> {
@@ -108,7 +109,6 @@ export class RuntimeRpcLifecycle extends RuntimeRpcWebSocketDispatch {
     // Why: set in-memory transport state before writing metadata so the bootstrap file has the real endpoint/token pair.
     this.activeTransports = activeTransports
     this.transports = transportsMeta
-
     try {
       this.writeMetadata()
     } catch (error) {
@@ -118,6 +118,11 @@ export class RuntimeRpcLifecycle extends RuntimeRpcWebSocketDispatch {
       await Promise.all(activeTransports.map((t) => t.stop().catch(() => {}))).catch(() => {})
       throw error
     }
+
+    // Why: published once the runtime is discoverable, not in the constructor —
+    // a server that never started holds no slots, and a start that failed its
+    // metadata write must not leave status.get answering for a dead runtime.
+    publishLongPollCapacityProbe(this.runtime.getRuntimeId(), () => this.longPollCapacityReport())
 
     this.metadataOwnershipWatch = watchRuntimeMetadataOwnership({
       userDataPath: this.userDataPath,
