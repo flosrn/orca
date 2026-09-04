@@ -30,7 +30,10 @@ import { isRealHomeCodexHookLaneUsable } from '../codex/codex-real-home-hook-ins
 import { resolveHostCodexSessionSourceHome } from '../codex/codex-session-source-home'
 import { browserManager } from '../browser/browser-manager'
 import { mainProcessState as state } from './main-process-state'
-import { SYSTEM_DEFAULT_ACCOUNT_ID } from '../../shared/managed-account-usage-roster'
+import {
+  SYSTEM_DEFAULT_ACCOUNT_ID,
+  isCoveredByManagedAccount
+} from '../../shared/managed-account-usage-roster'
 
 export function initializeMainProcessAccountServices(): void {
   const store = state.store
@@ -160,7 +163,16 @@ export function initializeMainProcessAccountServices(): void {
             : { kind: 'skip' as const }
         }
       }))
-    if (target.runtime !== 'host' || selection.host === null) {
+    // Why: getSystemCodexHomePath() is the *host* ~/.codex, and a lane the context resolver
+    // below suppresses (identity already covered by a managed account) must not be fetched either.
+    if (
+      target.runtime !== 'host' ||
+      selection.host === null ||
+      isCoveredByManagedAccount(
+        state.codexAccounts?.listAccounts().systemDefault?.email ?? null,
+        settings.codexManagedAccounts
+      )
+    ) {
       return managed
     }
     return [
@@ -181,10 +193,13 @@ export function initializeMainProcessAccountServices(): void {
       // Claude's parked system credential is not safe to refresh while another login is active.
       claudeSystemDefault:
         activeClaudeAccountId === null ? { email: null, measurableWhenInactive: false } : null,
+      // Why: signing the system-default identity in as a managed account leaves ~/.codex on
+      // that same login; publishing both meters one subscription twice under two names.
       codexSystemDefault:
         targets.codex.runtime === 'host' &&
         codexSystemDefault?.hasAuth &&
-        codexSystemDefault.authKind === 'oauth'
+        codexSystemDefault.authKind === 'oauth' &&
+        !isCoveredByManagedAccount(codexSystemDefault.email, settings.codexManagedAccounts)
           ? { email: codexSystemDefault.email, measurableWhenInactive: true }
           : null
     }
