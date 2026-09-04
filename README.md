@@ -93,7 +93,11 @@ Deux contraintes qui restent tiennes :
 - **Les tests du canal restent ciblés** sur `src/main/runtime/orchestration` et
   `src/main/runtime/rpc`, les deux arbres que le patch touche. Le typecheck est
   complet, lui. Si tu customises ailleurs, élargis la liste du job `test` —
-  sinon tu build vert sur du code que rien n'exerce.
+  sinon tu build vert sur du code que rien n'exerce. Le seul filet transverse
+  est le gate renderer (ci-dessous) : il boote l'app construite et refuse
+  la release si un error boundary a tiré. Il attrape ce que les tests
+  unitaires ne peuvent pas voir (ils mockent le store), pas une régression
+  fonctionnelle dans ta branche.
 
 ## Ce que le workflow fait (`.github/workflows/fork-nightly.yml`)
 
@@ -102,7 +106,14 @@ Deux contraintes qui restent tiennes :
    `upstream/main`, avec `git rerere` amorcé depuis `rerere-cache/`. Résultat
    force-pushé sur `feat/argv-worker-start`, puis taggé `fork-*`.
 2. **test** — `pnpm typecheck` + vitest sur `src/main/runtime/orchestration` et
-   `src/main/runtime/rpc`, les deux seuls répertoires que le patch touche.
+   `src/main/runtime/rpc`, les deux seuls répertoires que le patch touche ;
+   puis le **gate renderer** : `gates/renderer-boot-crash-free.spec.ts` (sur
+   cette branche, copié dans `tests/e2e/` au vol) boote l'app construite en
+   mode e2e sous Xvfb, attend la session, et lit `crash-reports.json` — le
+   même fichier qu'en prod. Un boundary qui a tiré = job rouge, pas de build,
+   pas de release. Origine : build `6feef259b9f5`, React #185 dans la barre
+   d'état au premier rendu, invisible pour les tests amont qui mockent le
+   store.
 3. **build-mac** / **build-linux** — zip macOS arm64 **non signé** et `.deb`
    amd64, en parallèle.
 4. **release** — un tag `fork-<AAAAMMJJ>-<HHMM>-<sha12>` sur ce fork, avec les

@@ -339,7 +339,13 @@ jobs:
           git push "$remote" "$sha:refs/tags/$tag"
 
   # ---------------------------------------------------------------------------
-  # 2. Les deux répertoires que le patch touche, et le typecheck complet.
+  # 2. Les deux répertoires que le patch touche, le typecheck complet, et le
+  #    gate renderer : l'app construite doit booter sans qu'un error boundary
+  #    tire. Les suites unitaires mockent le store ; un sélecteur qui alloue
+  #    son snapshot (React #185, build 6feef259b9f5 : barre d'état vide, 4
+  #    crashs/s) ne se voit qu'en app réelle. Le spec appartient au canal,
+  #    pas à la branche perso : il garde ce qu'on livre, quelles que soient
+  #    les branches.
   # ---------------------------------------------------------------------------
   test:
     needs: rebase
@@ -378,6 +384,30 @@ jobs:
           node config/scripts/ensure-native-runtime.mjs --runtime=node
           pnpm exec vitest run --config config/vitest.config.ts \
             src/main/runtime/orchestration src/main/runtime/rpc
+
+      - name: Checkout la branche de pilotage (gate renderer)
+        uses: actions/checkout@v6
+        with:
+          path: pipeline
+          sparse-checkout: gates
+          persist-credentials: false
+      - name: Xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Gate renderer - boot sans crash de boundary
+        run: |
+          cp pipeline/gates/renderer-boot-crash-free.spec.ts tests/e2e/
+          pnpm run ensure:electron-runtime
+          xvfb-run --auto-servernum env ORCA_E2E_FORWARD_APP_LOGS=1 \
+            pnpm exec playwright test tests/e2e/renderer-boot-crash-free.spec.ts \
+              --config tests/playwright.config.ts --project electron-headless --workers=1
+      - name: Traces Playwright du gate
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-traces-gate-renderer
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: ignore
 
   # ---------------------------------------------------------------------------
   # 3a. macOS arm64, NON signé. La signature est refaite sur le Mac de Flo par
