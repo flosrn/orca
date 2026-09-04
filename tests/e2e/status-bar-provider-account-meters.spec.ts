@@ -103,7 +103,9 @@ test('renders one status-bar meter per provider account', async ({ orcaPage }) =
   await expect(secondMeter).toHaveText(/2$/)
 
   // Both accounts' own percentages are on the bar, not the active one twice.
-  const usageTrigger = orcaPage.getByRole('button', { name: 'Usage' })
-  await expect(usageTrigger).toContainText('41%')
-  await expect(usageTrigger).toContainText('87%')
+  // Why anchor on the meters, not the trigger's label: the label and the
+  // percent formatting are localized ("Utilisation", "41 % utilisé").
+  const usageTrigger = orcaPage.locator('button', { has: activeMeter })
+  await expect(usageTrigger).toContainText(/41\s?%/)
+  await expect(usageTrigger).toContainText(/87\s?%/)
 })
