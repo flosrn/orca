@@ -225,7 +225,12 @@ export class OrcaRuntimeWithRefreshPtyWorktreeRecordsWithControllerInventory ext
             controllerIdentity.handle,
             controllerIdentity.incarnationId
           )
-        } else {
+        } else if (
+          !controllerIdentity ||
+          // Why: the persisted surface is gone, so the Dispatch row is the only
+          // remaining record of this re-adopted worker's pane identity.
+          !this.restoreReadoptedWorkerPaneIdentity(pty, controllerIdentity)
+        ) {
           this.restoredOrchestrationAuthorityByPtyId.delete(session.id)
         }
         pty.controllerTitle = session.title?.trim() || null

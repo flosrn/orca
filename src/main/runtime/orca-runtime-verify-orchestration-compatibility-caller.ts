@@ -11,6 +11,7 @@ import type {
 import { createHash } from 'node:crypto'
 import type { RuntimePtyWorktreeRecord } from './runtime-terminal-state-records'
 import { parsePaneKey } from '../../shared/stable-pane-id'
+import { runtimeWorktreeIdsEqual } from './runtime-worktree-path-identity'
 
 export class OrcaRuntimeWithVerifyOrchestrationCompatibilityCaller extends OrcaRuntimeWithSerializeHeadlessTerminalBuffer {
   verifyOrchestrationCompatibilityCaller(
@@ -176,5 +177,38 @@ export class OrcaRuntimeWithVerifyOrchestrationCompatibilityCaller extends OrcaR
         hostScope: Object.freeze({ ...hostScope })
       })
     )
+  }
+
+  // Why: measured 2026-09-04 (flosrn/ax#160, dispatch ctx_66bcf1795f09). The daemon
+  // outlived an Orca quit/relaunch, so the worker agent kept running with its
+  // original ORCA_TERMINAL_HANDLE, but nothing re-materialized its pane: the
+  // persisted surface binding could not restore `pty.paneKey`, so
+  // getOrchestrationDispatchAuthority produced no pane, no attestation could be
+  // verified, and the agent's worker_done was refused "The caller is not the
+  // Dispatch pane." The Dispatch row is the second record of that pane identity,
+  // and the live PTY's controller identity — the env-baked handle plus the
+  // daemon-assigned incarnation, both re-observed from the inventory — proves the
+  // row is this very process. Restoring the pane from it re-binds identity; it
+  // grants no authority on its own, since the caller must still pass launch-token
+  // and hook attestation against that pane.
+  protected restoreReadoptedWorkerPaneIdentity(
+    pty: RuntimePtyWorktreeRecord,
+    identity: { handle: string; incarnationId: string }
+  ): boolean {
+    if (pty.paneKey || !pty.worktreeId) {
+      return false
+    }
+    const surface = this.getOrchestrationDbIfAvailable()?.getReadoptedWorkerDispatchSurface?.({
+      terminalHandle: identity.handle,
+      processIncarnation: `${pty.ptyId}:${identity.incarnationId}`
+    })
+    const pane = surface ? parsePaneKey(surface.paneKey) : null
+    if (!surface || !pane || !runtimeWorktreeIdsEqual(surface.worktreeId, pty.worktreeId)) {
+      return false
+    }
+    pty.tabId = pane.tabId
+    pty.paneKey = surface.paneKey
+    this.rememberRestoredOrchestrationAuthority(pty, identity.handle, identity.incarnationId)
+    return true
   }
 }

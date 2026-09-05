@@ -26,6 +26,44 @@ export function listLegacyWorkerTerminalRecoveryRows(
     .all() as LegacyWorkerTerminalRecoveryRow[]
 }
 
+// Why: the workspace session is only ONE record of a worker pane's identity, and
+// it is the one that goes missing after an app restart that never re-materializes
+// the pane. The Dispatch row is the other: it holds the pane key the worker was
+// bound to, and `process_incarnation` (`<ptyId>:<incarnationId>`) plus the handle
+// baked into the child's env prove the row belongs to THIS live process — the
+// daemon preserves both across a restart. Ambiguity is corruption, not a choice:
+// two rows claiming one physical terminal restore nothing.
+export function getReadoptedWorkerDispatchSurface(
+  this: OrchestrationDb,
+  params: { terminalHandle: string; processIncarnation: string }
+): { dispatchId: string; paneKey: string; worktreeId: string } | undefined {
+  const rows = this.db
+    .prepare(
+      `SELECT dc.id AS dispatch_id, dc.assignee_pane_key, wd.worktree_id
+       FROM dispatch_contexts dc
+       INNER JOIN worker_dispatches wd ON wd.dispatch_id = dc.id
+       WHERE dc.assignee_handle = ? AND dc.process_incarnation = ?
+         AND dc.assignee_pane_key IS NOT NULL
+         AND dc.status IN ('pending', 'dispatched')
+         AND wd.agent_terminal_handle = dc.assignee_handle
+         AND wd.state IN ('starting', 'ready', 'start_unknown')
+         AND wd.worktree_id IS NOT NULL`
+    )
+    .all(params.terminalHandle, params.processIncarnation) as {
+    dispatch_id: string
+    assignee_pane_key: string
+    worktree_id: string
+  }[]
+  const row = rows.length === 1 ? rows[0] : undefined
+  return row
+    ? {
+        dispatchId: row.dispatch_id,
+        paneKey: row.assignee_pane_key,
+        worktreeId: row.worktree_id
+      }
+    : undefined
+}
+
 export function reconcileMissingWorkerTerminal(
   this: OrchestrationDb,
   dispatchId: string,
@@ -93,12 +131,14 @@ export function reconcileMissingWorkerTerminal(
 
 export type WorkerTerminalRecoveryMethods = {
   listLegacyWorkerTerminalRecoveryRows: typeof listLegacyWorkerTerminalRecoveryRows
+  getReadoptedWorkerDispatchSurface: typeof getReadoptedWorkerDispatchSurface
   reconcileMissingWorkerTerminal: typeof reconcileMissingWorkerTerminal
 }
 
 export function attachWorkerTerminalRecovery(ctor: { prototype: object }): void {
   Object.assign(ctor.prototype, {
     listLegacyWorkerTerminalRecoveryRows,
+    getReadoptedWorkerDispatchSurface,
     reconcileMissingWorkerTerminal
   })
 }
