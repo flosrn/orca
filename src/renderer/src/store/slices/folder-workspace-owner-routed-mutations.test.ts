@@ -7,6 +7,7 @@ import {
 } from '../../runtime/runtime-compatibility-test-fixture'
 import { clearRuntimeCompatibilityCacheForTests } from '../../runtime/runtime-rpc-client'
 import { createTestStore } from './store-test-helpers'
+import { folderWorkspaceKey } from '../../../../shared/workspace-scope'
 
 const folderWorkspacesUpdate = vi.fn()
 const folderWorkspacesDelete = vi.fn()
@@ -69,6 +70,29 @@ beforeEach(() => {
 })
 
 describe('folder workspace owner-routed mutations', () => {
+  it('persists manual rank through the shared batch metadata boundary', async () => {
+    const folderWorkspace = makeFolderWorkspace()
+    folderWorkspacesUpdate.mockResolvedValue({ ...folderWorkspace, manualOrder: 9000 })
+    const store = createTestStore()
+    store.setState({
+      projectGroups: [{ ...projectGroup, executionHostId: 'local' }],
+      folderWorkspaces: [folderWorkspace]
+    })
+
+    await store.getState().updateWorktreesMeta([
+      {
+        worktreeId: folderWorkspaceKey(folderWorkspace.id),
+        updates: { manualOrder: 9000 }
+      }
+    ])
+
+    expect(folderWorkspacesUpdate).toHaveBeenCalledWith({
+      folderWorkspaceId: folderWorkspace.id,
+      updates: { manualOrder: 9000 }
+    })
+    expect(store.getState().folderWorkspaces[0]?.manualOrder).toBe(9000)
+  })
+
   it('updates a local folder locally while another runtime is focused', async () => {
     const folderWorkspace = makeFolderWorkspace()
     folderWorkspacesUpdate.mockResolvedValue({ ...folderWorkspace, comment: 'Ready' })
@@ -389,10 +413,12 @@ describe('folder workspace owner-routed mutations', () => {
     const folderWorkspace = makeFolderWorkspace()
     folderWorkspacesDelete.mockResolvedValue(true)
     const store = createTestStore()
+    const shutdownWorktreeBrowsers = vi.fn().mockResolvedValue(undefined)
     store.setState({
       settings: { activeRuntimeEnvironmentId: 'env-focused' } as never,
       projectGroups: [{ ...projectGroup, executionHostId: 'local' }],
-      folderWorkspaces: [folderWorkspace]
+      folderWorkspaces: [folderWorkspace],
+      shutdownWorktreeBrowsers
     })
 
     await expect(store.getState().deleteFolderWorkspace(folderWorkspace.id)).resolves.toBe(true)
@@ -400,6 +426,7 @@ describe('folder workspace owner-routed mutations', () => {
     expect(folderWorkspacesDelete).toHaveBeenCalledWith({
       folderWorkspaceId: folderWorkspace.id
     })
+    expect(shutdownWorktreeBrowsers).toHaveBeenCalledWith(folderWorkspaceKey(folderWorkspace.id))
     expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
   })
 
@@ -412,6 +439,7 @@ describe('folder workspace owner-routed mutations', () => {
     })
     folderWorkspacesDelete.mockResolvedValue(true)
     const store = createTestStore()
+    const shutdownWorktreeBrowsers = vi.fn().mockResolvedValue(undefined)
     store.setState({
       settings: { activeRuntimeEnvironmentId: null } as never,
       activeWorktreeId: `folder:${localFolder.id}`,
@@ -420,7 +448,8 @@ describe('folder workspace owner-routed mutations', () => {
         { ...projectGroup, executionHostId: 'local' },
         { ...projectGroup, executionHostId: 'runtime:env-owner' }
       ],
-      folderWorkspaces: [localFolder, runtimeFolder]
+      folderWorkspaces: [localFolder, runtimeFolder],
+      shutdownWorktreeBrowsers
     })
 
     await expect(store.getState().deleteFolderWorkspace(localFolder.id)).resolves.toBe(true)
@@ -431,6 +460,7 @@ describe('folder workspace owner-routed mutations', () => {
     expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
     // Delete is owner-scoped: the sibling host's row keeps the bare ID alive.
     expect(store.getState().folderWorkspaces).toEqual([runtimeFolder])
+    expect(shutdownWorktreeBrowsers).not.toHaveBeenCalled()
   })
 
   it('deletes a runtime folder through its owner instead of the focused runtime', async () => {

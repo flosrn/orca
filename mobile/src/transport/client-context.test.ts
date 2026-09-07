@@ -396,6 +396,70 @@ describe('useHostClient', () => {
     }
   })
 
+  it('nudges an existing Relay session instead of starting a fresh direct dial', async () => {
+    const relayClient = makeFakeClient('disconnected', 'relay')
+    connectMock.mockReturnValue(relayClient)
+    loadHostsMock.mockResolvedValue([HOST])
+
+    let forceReconnect: ((hostId: string) => Promise<void>) | null = null
+    let renderer: ReactTestRenderer | null = null
+    function Probe(): null {
+      forceReconnect = useForceReconnect()
+      useHostClient(HOST.id)
+      return null
+    }
+
+    try {
+      await act(async () => {
+        renderer = create(createElement(RpcClientProvider, null, createElement(Probe)))
+        await Promise.resolve()
+      })
+
+      await act(async () => {
+        await forceReconnect?.(HOST.id)
+      })
+
+      expect(relayClient.closeMock).not.toHaveBeenCalled()
+      expect(relayClient.notifyForeground).toHaveBeenCalledWith('app-resume')
+      expect(connectMock).toHaveBeenCalledOnce()
+    } finally {
+      act(() => renderer?.unmount())
+    }
+  })
+
+  it('rebuilds a pairing-rejected Relay client so re-pairing credentials are re-read', async () => {
+    const rejectedRelayClient = makeFakeClient('disconnected', 'relay')
+    const replacement = makeFakeClient('connecting', 'tailscale')
+    connectMock.mockReturnValueOnce(rejectedRelayClient).mockReturnValueOnce(replacement)
+    loadHostsMock.mockResolvedValue([HOST])
+
+    let forceReconnect: ((hostId: string) => Promise<void>) | null = null
+    let renderer: ReactTestRenderer | null = null
+    function Probe(): null {
+      forceReconnect = useForceReconnect()
+      useHostClient(HOST.id)
+      return null
+    }
+
+    try {
+      await act(async () => {
+        renderer = create(createElement(RpcClientProvider, null, createElement(Probe)))
+        await Promise.resolve()
+      })
+      act(() => rejectedRelayClient.emitPairingRejected(true))
+
+      await act(async () => {
+        await forceReconnect?.(HOST.id)
+      })
+
+      expect(rejectedRelayClient.closeMock).toHaveBeenCalled()
+      expect(rejectedRelayClient.notifyForeground).not.toHaveBeenCalled()
+      expect(connectMock).toHaveBeenCalledTimes(2)
+    } finally {
+      act(() => renderer?.unmount())
+    }
+  })
+
   it('does not open a client after the host is closed during an in-flight lookup', async () => {
     let resolveHosts: ((hosts: (typeof HOST)[]) => void) | null = null
     const hostLookup = new Promise<(typeof HOST)[]>((resolve) => {

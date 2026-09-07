@@ -4,6 +4,7 @@ import type { DispatchCapabilityMethods } from './dispatch-context/dispatch-capa
 import type { DispatchCompletionMethods } from './dispatch-context/dispatch-completion'
 import type { DispatchContextStoreMethods } from './dispatch-context/dispatch-context-store'
 import type { DispatchLookupMethods } from './dispatch-context/dispatch-lookup'
+import type { DispatchDepthMethods } from './dispatch-depth'
 import type { WorkerReportSettlementMethods } from './dispatch-context/worker-report-settlement'
 import type { FederatedDispatchStoreMethods } from './federation/federated-dispatch-store'
 import type { FederationRelayAckMethods } from './federation/federation-relay-ack'
@@ -47,6 +48,7 @@ import type { TaskStoreMethods } from './tasks/task-store'
 import type { TaskStatusTransitionMethods } from './tasks/task-status-transition'
 import type { FederatedWorkerStartReconcileMethods } from './worker-dispatch/federated-worker-start-reconcile'
 import type { WorkerDispatchAbandonMethods } from './worker-dispatch/worker-dispatch-abandon'
+import type { WorkerDispatchArgvAuthorityMethods } from './worker-dispatch/worker-dispatch-argv-authority'
 import type { WorkerDispatchAuthorityMethods } from './worker-dispatch/worker-dispatch-authority'
 import type { WorkerDispatchOutcomeMethods } from './worker-dispatch/worker-dispatch-outcome'
 import type { WorkerDispatchStageMethods } from './worker-dispatch/worker-dispatch-stage'
@@ -92,6 +94,7 @@ export type OrchestrationDbMethods = CreateTablesMethods &
   WorkerDispatchStartMethods &
   WorkerDispatchStageMethods &
   WorkerDispatchAuthorityMethods &
+  WorkerDispatchArgvAuthorityMethods &
   WorkerDispatchOutcomeMethods &
   FederatedWorkerStartReconcileMethods &
   WorkerTerminalRecoveryMethods &
@@ -114,6 +117,7 @@ export type OrchestrationDbMethods = CreateTablesMethods &
   DispatchContextStoreMethods &
   DispatchCapabilityMethods &
   DispatchLookupMethods &
+  DispatchDepthMethods &
   DispatchCompletionMethods &
   WorkerReportSettlementMethods &
   DecisionGateStoreMethods &

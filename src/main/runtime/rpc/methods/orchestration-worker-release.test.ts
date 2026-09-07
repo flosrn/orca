@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -47,12 +48,19 @@ describe('orchestration worker release', () => {
     vi.spyOn(runtime, 'getTerminalProcessIncarnation').mockImplementation((handle) =>
       handle === 'term_worker' || handle === 'term_reminted' ? 'runtime_test:term_worker:1' : null
     )
+    // Why: the argv worker-start path pre-allocates the handle and hands the
+    // spawn a launch token; the pane's authority must echo that token's hash
+    // or the bind guard (rightly) refuses the pane. Pinning the pre-allocated
+    // handle keeps every 'term_worker'-keyed fixture in this file valid.
+    let workerLaunchTokenHash: string | null = null
+    vi.spyOn(runtime, 'createPreAllocatedTerminalHandle').mockReturnValue('term_worker')
     vi.spyOn(runtime, 'getOrchestrationDispatchAuthority').mockImplementation((handle) =>
       handle === 'term_worker' || handle === 'term_reminted'
         ? ({
             terminalHandle: handle,
             paneKey: workerPaneKey,
             processIncarnation: 'runtime_test:term_worker:1',
+            ...(workerLaunchTokenHash ? { launchTokenHash: workerLaunchTokenHash } : {}),
             hostScope: { kind: 'local', hostId: 'local' }
           } as never)
         : null
@@ -64,10 +72,11 @@ describe('orchestration worker release', () => {
     vi.spyOn(runtime, 'showManagedTerminalWorkspace').mockResolvedValue({
       id: 'repo::worktree'
     } as never)
-    vi.spyOn(runtime, 'createTerminal').mockResolvedValue({
-      handle: 'term_worker',
-      worktreeId: 'repo::worktree',
-      title: 'worker'
+    vi.spyOn(runtime, 'createTerminal').mockImplementation(async (_selector, opts) => {
+      workerLaunchTokenHash = opts?.launchToken
+        ? createHash('sha256').update(opts.launchToken).digest('hex')
+        : null
+      return { handle: 'term_worker', worktreeId: 'repo::worktree', title: 'worker' } as never
     })
     vi.spyOn(runtime, 'waitForTerminal').mockResolvedValue({
       handle: 'term_worker',
@@ -77,6 +86,7 @@ describe('orchestration worker release', () => {
       exitCode: null
     })
     vi.spyOn(runtime, 'getTerminalOrchestrationCliCommand').mockReturnValue('orca')
+    vi.spyOn(runtime, 'getWorktreeOrchestrationCliCommand').mockResolvedValue('orca')
     vi.spyOn(runtime, 'sendTerminalAgentPrompt').mockResolvedValue({
       handle: 'term_worker',
       accepted: true,
@@ -587,6 +597,7 @@ describe('orchestration worker release', () => {
       handle: 'term_worker',
       status: 'running',
       tail: ['first line', `capability dcap_${'a'.repeat(24)} leaked`, 'last line'],
+      draft: `send --dispatch-capability dcap_${'b'.repeat(24)}`,
       truncated: false,
       nextCursor: '3'
     })
@@ -596,19 +607,24 @@ describe('orchestration worker release', () => {
     const page1 = (await call('orchestration.workerRead', {
       dispatch: dispatchId,
       limit: 2
-    })) as { archived?: boolean; terminal: { tail: string[] }; cursor: string | null }
-    expect(page1.archived).toBe(true)
+    })) as {
+      archived?: boolean
+      terminal: { tail: string[]; draft?: string }
+      cursor: string | null
+    }
     expect(page1.terminal.tail).toEqual([
       'first line',
       'capability [dispatch capability redacted] leaked'
     ])
+    expect(page1.terminal.draft).toBe('send --dispatch-capability [dispatch capability redacted]')
     expect(page1.cursor).not.toBeNull()
 
     const page2 = (await call('orchestration.workerRead', {
       dispatch: dispatchId,
       cursor: page1.cursor as string
-    })) as { terminal: { tail: string[] }; cursor: string | null }
+    })) as { terminal: { tail: string[]; draft?: string }; cursor: string | null }
     expect(page2.terminal.tail).toEqual(['last line'])
+    expect(page2.terminal.draft).toBeUndefined()
     expect(page2.cursor).toBeNull()
     // The live terminal is never consulted after release.
     expect(runtime.readTerminal).not.toHaveBeenCalled()

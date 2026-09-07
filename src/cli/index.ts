@@ -8,6 +8,7 @@ import {
   specPaths,
   validateCommandAndFlags
 } from './args'
+import { readOrcaCliVersion } from './cli-version'
 import { dispatch } from './dispatch'
 import {
   assertEnvironmentSelectorResolvable,
@@ -18,6 +19,7 @@ import { reportCliError } from './format'
 import { printHelp } from './help'
 import type { RuntimeClient } from './runtime-client'
 import { COMMAND_SPECS } from './specs'
+import { resolveOrchestrationCliExecutable } from './runtime/orchestration-recovery-command'
 
 export { COMMAND_SPECS } from './specs'
 export { buildCurrentWorktreeSelector, normalizeWorktreeSelector } from './selectors'
@@ -58,6 +60,17 @@ export async function main(
   argv = process.argv.slice(2),
   cwd = resolveInvocationCwd()
 ): Promise<void> {
+  // Why: version audits use the bundled launcher; Electron intercepts direct binary version flags.
+  if (argv.length === 1 && (argv[0] === '--version' || argv[0] === '-v')) {
+    const version = readOrcaCliVersion()
+    if (!version) {
+      process.stderr.write('Could not determine the Orca version for this build.\n')
+      process.exitCode = 1
+      return
+    }
+    process.stdout.write(`${version}\n`)
+    return
+  }
   if (argv[0] === 'agent-teams-tmux') {
     await runAgentTeamsTmuxShim(argv.slice(1))
     return
@@ -149,7 +162,9 @@ export async function main(
           undefined,
           undefined,
           remotePairingCode,
-          remoteEnvironment
+          remoteEnvironment,
+          resolveOrchestrationCliExecutable(),
+          argv
         )
         return client
       },
