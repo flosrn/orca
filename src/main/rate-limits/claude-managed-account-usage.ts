@@ -5,6 +5,7 @@ import {
   refreshClaudeOauthCredentialsOutcome,
   type ClaudeOauthRefreshFailure
 } from '../claude-accounts/oauth-refresh'
+import { logClaudeAuthDiagnostic } from './claude-auth-diagnostics-log'
 import {
   readClaudeManagedCredentialsJson,
   resolveClaudeManagedCredentialsLocation,
@@ -98,6 +99,10 @@ export async function fetchInactiveClaudeAccountUsage(
       credentialsJson = refreshed
       token = parseClaudeOAuthCredentialsJson(refreshed, 'credentials-file').token
     } else if (isOauthTokenExpired(credentialsJson)) {
+      logClaudeAuthDiagnostic('claude-inactive-usage-skipped', {
+        accountId: account.id,
+        status: failure?.status ?? null
+      })
       return staleClaudeManagedCredentialsResult(credentialsJson, failure)
     }
     // Why: within the refresh buffer the stored bearer is still valid; use it.
@@ -106,7 +111,7 @@ export async function fetchInactiveClaudeAccountUsage(
   if (!token) {
     return noClaudeManagedCredentialsResult()
   }
-  const oauthLimits = await fetchClaudeOAuthUsage(token, options.signal)
+  const oauthLimits = await fetchClaudeOAuthUsage(token, options.signal, `managed:${account.id}`)
   if (options.signal?.aborted) {
     return abortedClaudeRateLimitResult()
   }

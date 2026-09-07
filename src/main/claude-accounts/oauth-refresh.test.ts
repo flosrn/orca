@@ -123,6 +123,16 @@ describe('applyRefreshedToken', () => {
     expect(parseClaudeOauthBlob(updated!)!.scopes).toEqual(['user:inference', 'user:profile'])
   })
 
+  it('keeps stored scopes when the response scope lacks user:inference', () => {
+    // Why: the claude CLI rejects a stored login without user:inference in scopes.
+    const updated = applyRefreshedToken(
+      credentials(),
+      { access_token: 'b', scope: 'user:profile user:sessions:claude_code' },
+      NOW
+    )
+    expect(parseClaudeOauthBlob(updated!)!.scopes).toEqual(['user:inference', 'user:profile'])
+  })
+
   it('returns null when the response lacks an access token', () => {
     expect(applyRefreshedToken(credentials(), {}, NOW)).toBeNull()
     expect(applyRefreshedToken('not json', { access_token: 'b' }, NOW)).toBeNull()
