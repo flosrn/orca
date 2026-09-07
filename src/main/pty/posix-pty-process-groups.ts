@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { recordSelfInitiatedTreeKill } from '../crash-reporting/self-initiated-tree-kill-log'
 
 const PROCESS_TABLE_TIMEOUT_MS = 1_000
 // Why: the whole-host read runs only after the TTY-scoped one failed, and it is the last thing
@@ -198,7 +199,15 @@ export function forceKillPosixPtyProcessGroups(
       if (!isProcessAlreadyGone(error) && firstError === undefined) {
         firstError = error
       }
+      continue
     }
+    // Outside the try: this catch is the ESRCH contract, and a throw from the
+    // breadcrumb path would be rethrown as a failed kill.
+    recordSelfInitiatedTreeKill({
+      pid: pgid,
+      site: 'posix-pty-process-group-sweep',
+      scope: 'posix-process-group'
+    })
   }
   if (firstError !== undefined) {
     throw firstError

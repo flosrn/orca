@@ -2322,6 +2322,12 @@ export class SshRelaySession {
     if (!shouldContinue()) {
       return
     }
+    // Why immediately before the read: a pane's binding is written by several writers, and the
+    // renderer's debounced layout publish lands long after the spawn commit that leased the pty —
+    // so a predecessor that was still bound at spawn time never gets marked by a spawn-side
+    // trigger. Re-deriving from each pane's CURRENT binding here is what actually bounds this set,
+    // and it repairs stores that already accumulated these rows.
+    this.store.reconcileSshRemotePtyLeasesForTarget(this.targetId)
     // Why not `state !== 'expired'`: that state covers both a superseded sibling (re-adopting it is
     // the 2 -> 19 -> 20 fan-out) and an orphan whose reattach merely lost contact. Only the first
     // carries a retirement mark, and only it has to be skipped.
@@ -2900,6 +2906,12 @@ export class SshRelaySession {
     )
     clearProviderPtyState(appPtyId)
     deletePtyOwnership(appPtyId)
+    // Deliberately does NOT call runtime.onPtyExit: pty.attach answers not-found both when it
+    // verified the pid is dead and when its session map simply has no such id (no liveness check on
+    // that path at all) — which is every id after a relay restart, since ids carry a per-start
+    // `ptyIdMintEpoch`. This branch may release the id, but certifying a death from that union
+    // would orphan a live remote shell (docs/reference/ssh-execution-boundary.md). The renderer
+    // gets code -1, which every reader treats as unverified loss.
     this.store.markSshRemotePtyLease(this.targetId, ptyId, 'expired')
     const win = this.getMainWindow()
     if (win && !win.isDestroyed()) {

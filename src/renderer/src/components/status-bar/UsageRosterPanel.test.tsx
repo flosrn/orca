@@ -93,23 +93,27 @@ describe('UsageRow', () => {
     const markup = renderToStaticMarkup(
       <TooltipProvider>
         <UsageRosterPanel
-          providers={[
+          segments={[
             {
-              ...signedOutCodex,
-              session: {
-                usedPercent: 25,
-                windowMinutes: 300,
-                resetsAt: sessionReset,
-                resetDescription: null
+              key: 'codex',
+              limits: {
+                ...signedOutCodex,
+                session: {
+                  usedPercent: 25,
+                  windowMinutes: 300,
+                  resetsAt: sessionReset,
+                  resetDescription: null
+                },
+                weekly: {
+                  usedPercent: 10,
+                  windowMinutes: 10_080,
+                  resetsAt: weeklyReset,
+                  resetDescription: null
+                },
+                status: 'ok',
+                error: null
               },
-              weekly: {
-                usedPercent: 10,
-                windowMinutes: 10_080,
-                resetsAt: weeklyReset,
-                resetDescription: null
-              },
-              status: 'ok',
-              error: null
+              badge: null
             }
           ]}
           display="used"
@@ -171,6 +175,7 @@ describe('UsageRow', () => {
     expect(markup).not.toContain('Resets in')
   })
 
+  // Fable is a separate 7d pool; the subscription weekly owns the pill even when Fable is hotter.
   it('uses the same compact selection for Claude subscription windows', () => {
     const markup = renderToStaticMarkup(
       <UsageRow
@@ -208,10 +213,11 @@ describe('UsageRow', () => {
 
     expect(markup.match(/data-usage-window=/g)).toHaveLength(1)
     expect(markup).not.toContain('data-usage-bar')
-    expect(markup).toContain('Fable')
-    expect(markup).toContain('75%')
+    expect(markup).toContain('wk')
+    expect(markup).toContain('60%')
+    expect(markup).not.toContain('Fable')
     expect(markup).not.toContain('25%')
-    expect(markup).not.toContain('60%')
+    expect(markup).not.toContain('75%')
   })
 
   it('renders every window below the header in verbose mode', () => {
@@ -275,7 +281,7 @@ describe('UsageRosterPanel density picker', () => {
       root.render(
         <TooltipProvider>
           <UsageRosterPanel
-            providers={[]}
+            segments={[]}
             display="used"
             statusBarUsageMode={statusBarUsageMode}
             onStatusBarUsageModeChange={onStatusBarUsageModeChange}

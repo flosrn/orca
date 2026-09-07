@@ -7,6 +7,7 @@ export type RateLimitSlice = {
   fetchRateLimits: () => Promise<void>
   refreshRateLimits: () => Promise<void>
   refreshGrokRateLimits: () => Promise<void>
+  refreshCodexBar: () => Promise<void>
   refreshClaudeRateLimitsForTarget: (target: RateLimitRuntimeTarget) => Promise<void>
   refreshCodexRateLimitsForTarget: (target: RateLimitRuntimeTarget) => Promise<void>
   consumeCodexRateLimitResetCredit: () => Promise<void>
@@ -25,6 +26,10 @@ export const createRateLimitSlice: StateCreator<AppState, [], [], RateLimitSlice
     antigravity: null,
     minimax: null,
     grok: null,
+    cursor: null,
+    clinepass: null,
+    qwencloud: null,
+    codexbarAvailable: false,
     minimaxCookieConfigured: false,
     grokAuthConfigured: false,
     claudeTarget: { runtime: 'host', wslDistro: null },
@@ -57,6 +62,15 @@ export const createRateLimitSlice: StateCreator<AppState, [], [], RateLimitSlice
       set({ rateLimits: state })
     } catch (error) {
       console.error('Failed to refresh Grok usage:', error)
+    }
+  },
+
+  refreshCodexBar: async () => {
+    try {
+      const state = await window.api.rateLimits.refreshCodexBar()
+      set({ rateLimits: state })
+    } catch (error) {
+      console.error('Failed to refresh CodexBar usage:', error)
     }
   },
 

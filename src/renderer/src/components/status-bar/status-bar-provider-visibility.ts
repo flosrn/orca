@@ -17,6 +17,9 @@ export type UsageProviderSettings = Pick<
   // Why: MiniMax/Grok sign-in live on disk, not in settings; main sets these each poll.
   minimaxCookieConfigured: boolean
   grokAuthConfigured: boolean
+  // Why: the three codexbar-metered providers share one durable signal — the
+  // presence of the codexbar binary. There is no per-provider credential.
+  codexbarAvailable: boolean
 }
 
 type UsageProviderSnapshots = {
@@ -28,6 +31,11 @@ type UsageProviderSnapshots = {
   antigravity: ProviderRateLimits | null | undefined
   minimax: ProviderRateLimits | null | undefined
   grok: ProviderRateLimits | null | undefined
+  // Why: optional — with no codexbar binary main never emits these keys, and
+  // callers that predate them stay valid.
+  cursor?: ProviderRateLimits | null | undefined
+  clinepass?: ProviderRateLimits | null | undefined
+  qwencloud?: ProviderRateLimits | null | undefined
 }
 
 type UsageProviderId = ProviderRateLimits['provider']
@@ -77,7 +85,8 @@ export function hasUsageProviderSettings(
     // Antigravity's durable signal requires geminiCliOAuthEnabled, so it is
     // already covered by the gemini term above.
     settings?.minimaxCookieConfigured === true ||
-    settings?.grokAuthConfigured === true
+    settings?.grokAuthConfigured === true ||
+    settings?.codexbarAvailable === true
   )
 }
 
@@ -111,6 +120,9 @@ export function hasUsageProviderSettingsForProvider(
   }
   if (providerId === 'grok') {
     return settings.grokAuthConfigured === true
+  }
+  if (providerId === 'cursor' || providerId === 'clinepass' || providerId === 'qwencloud') {
+    return settings.codexbarAvailable === true
   }
   return false
 }
@@ -157,6 +169,13 @@ export function isUsageEmptyState(
   const antigravitySnapshotPending =
     hasUsageProviderSettingsForProvider('antigravity', settings) &&
     isProviderSnapshotPending(providers.antigravity)
+  // Why: with no codexbar binary these snapshots stay null forever, so an
+  // unguarded pending check would pin the CTA off permanently.
+  const codexBarSnapshotsPending =
+    settings.codexbarAvailable === true &&
+    (isProviderSnapshotPending(providers.cursor) ||
+      isProviderSnapshotPending(providers.clinepass) ||
+      isProviderSnapshotPending(providers.qwencloud))
   if (
     isProviderSnapshotPending(providers.claude) ||
     isProviderSnapshotPending(providers.codex) ||
@@ -165,7 +184,8 @@ export function isUsageEmptyState(
     isProviderSnapshotPending(providers.kimi) ||
     antigravitySnapshotPending ||
     isProviderSnapshotPending(providers.minimax) ||
-    isProviderSnapshotPending(providers.grok)
+    isProviderSnapshotPending(providers.grok) ||
+    codexBarSnapshotsPending
   ) {
     return false
   }
@@ -178,6 +198,9 @@ export function isUsageEmptyState(
     !isProviderConfigured(providers.kimi) &&
     !isProviderConfigured(providers.antigravity) &&
     !isProviderConfigured(providers.minimax) &&
-    !isProviderConfigured(providers.grok)
+    !isProviderConfigured(providers.grok) &&
+    !isProviderConfigured(providers.cursor) &&
+    !isProviderConfigured(providers.clinepass) &&
+    !isProviderConfigured(providers.qwencloud)
   )
 }

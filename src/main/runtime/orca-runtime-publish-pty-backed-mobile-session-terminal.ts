@@ -87,6 +87,7 @@ export class OrcaRuntimeWithPublishPtyBackedMobileSessionTerminal extends OrcaRu
       parentTabId: args.tabId,
       leafId: args.leafId,
       ptyId: pty.ptyId,
+      incarnationId: pty.incarnationId,
       title,
       ...(pty.launchAgent ? { launchAgent: pty.launchAgent } : {}),
       ...(args.startupCwd ? { startupCwd: args.startupCwd } : {}),

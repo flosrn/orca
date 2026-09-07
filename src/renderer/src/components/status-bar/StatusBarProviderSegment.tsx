@@ -7,10 +7,11 @@ import {
 } from '../../../../shared/usage-percentage-display'
 import type { StatusBarUsageMode } from '../../../../shared/status-bar-usage-mode'
 import { ProviderIcon, clampUsedPercent, getProviderUsageStatusLabel } from './tooltip'
-import { getTightestUsageSection } from './UsageRosterPanel'
+import { getStatusBarUsageSection } from './UsageRosterPanel'
 import { formatRateLimitWindowChipLabel } from '@/lib/window-label-formatter'
 import { formatUsagePercentageLabel } from './usage-percentage-label'
 import { translate } from '@/i18n/i18n'
+import type { UsageAccountBadge } from './usage-account-segments'
 
 function MiniBar({
   usedPct,
@@ -84,6 +85,12 @@ function getProviderLetter(provider: ProviderRateLimits['provider']): string {
       return 'R'
     case 'codex':
       return 'X'
+    case 'cursor':
+      return 'U'
+    case 'clinepass':
+      return 'P'
+    case 'qwencloud':
+      return 'Q'
   }
 }
 
@@ -170,37 +177,70 @@ function VerboseProviderUsage({
   )
 }
 
+function ProviderAccountMark({
+  provider,
+  badge
+}: {
+  provider: ProviderRateLimits['provider']
+  badge: UsageAccountBadge | null
+}): React.JSX.Element {
+  if (!badge) {
+    return <ProviderIcon provider={provider} />
+  }
+  return (
+    <span
+      className="inline-flex items-center gap-1"
+      title={badge.email ?? undefined}
+      aria-label={badge.email ?? `${provider} ${badge.ordinal}`}
+    >
+      <ProviderIcon provider={provider} />
+      <span
+        className={
+          badge.isActive
+            ? 'text-[10px] font-semibold leading-none tabular-nums text-foreground/90'
+            : 'text-[10px] font-medium leading-none tabular-nums text-muted-foreground/60'
+        }
+      >
+        {badge.ordinal}
+      </span>
+    </span>
+  )
+}
+
 export function ProviderSegment({
   p,
   compact,
   display,
-  mode = 'verbose'
+  mode = 'verbose',
+  badge = null
 }: {
   p: ProviderRateLimits | null
   compact: boolean
   display: UsagePercentageDisplay
   mode?: StatusBarUsageMode
+  badge?: UsageAccountBadge | null
 }): React.JSX.Element {
   const provider = p?.provider ?? 'claude'
+  const mark = <ProviderAccountMark provider={provider} badge={badge} />
   const statusLabel = p ? getProviderUsageStatusLabel(p) : ''
 
   // Idle / initial load
   if (!p || p.status === 'idle') {
     return (
       <span className="inline-flex items-center gap-1 text-muted-foreground">
-        <ProviderIcon provider={provider} />
+        {mark}
         <span className="animate-pulse">···</span>
       </span>
     )
   }
 
-  const tightest = getTightestUsageSection(p)
+  const summary = getStatusBarUsageSection(p)
 
   // Fetching with no prior data
-  if (p.status === 'fetching' && !tightest) {
+  if (p.status === 'fetching' && !summary) {
     return (
       <span className="inline-flex items-center gap-1 text-muted-foreground">
-        <ProviderIcon provider={provider} />
+        {mark}
         <span className="animate-pulse">···</span>
       </span>
     )
@@ -209,17 +249,15 @@ export function ProviderSegment({
   // Unavailable (CLI not installed)
   if (p.status === 'unavailable') {
     return (
-      <span className="inline-flex items-center gap-1 text-muted-foreground/50">
-        <ProviderIcon provider={provider} /> --
-      </span>
+      <span className="inline-flex items-center gap-1 text-muted-foreground/50">{mark} --</span>
     )
   }
 
   // Error with no data
-  if (p.status === 'error' && !tightest) {
+  if (p.status === 'error' && !summary) {
     return (
       <span className="inline-flex items-center gap-1 text-muted-foreground">
-        <ProviderIcon provider={provider} />
+        {mark}
         <AlertTriangle size={11} className="text-muted-foreground/80" />
         {!compact && <span className="text-[11px] font-medium">{statusLabel}</span>}
       </span>
@@ -231,18 +269,18 @@ export function ProviderSegment({
 
   return (
     <span className="inline-flex items-center gap-1.5">
-      <ProviderIcon provider={provider} />
+      {mark}
       {mode === 'verbose' ? (
         <>
-          {tightest && !compact ? (
-            <MiniBar usedPct={clampUsedPercent(tightest.window.usedPercent)} display={display} />
+          {summary && !compact ? (
+            <MiniBar usedPct={clampUsedPercent(summary.window.usedPercent)} display={display} />
           ) : null}
           <VerboseProviderUsage p={p} display={display} />
         </>
-      ) : tightest ? (
+      ) : summary ? (
         <WindowLabel
-          w={tightest.window}
-          label={tightest.label}
+          w={summary.window}
+          label={summary.label}
           display={display}
           showLabel={!compact}
         />

@@ -16,6 +16,7 @@ import { getProviderDisplayName } from './usage-error-copy'
 import { formatPlanLabel, usageTextColorClass } from './usage-roster-formatting'
 import { getUsageRosterRowState, type UsageRosterRowState } from './usage-roster-row-state'
 import type { StatusBarUsageMode } from '../../../../shared/status-bar-usage-mode'
+import type { UsageAccountBadge, UsageBarSegment } from './usage-account-segments'
 
 type ProviderId = ProviderRateLimits['provider']
 export type UsageSection = { label: string; window: RateLimitWindow }
@@ -54,19 +55,29 @@ function shortLabel(
     : formatWindowLabel(section.window.windowMinutes)
 }
 
-export function getTightestUsageSection(p: ProviderRateLimits): UsageSection | null {
+/**
+ * The single window the bar pill and the compact row summarize.
+ *
+ * Why weekly first: the 5h session window churns constantly and is the one a user trips by
+ * accident, so it kept stealing the pill from the weekly pool — the quota that actually
+ * decides whether the day's work can continue. Providers with no weekly window (Grok's
+ * monthly, Gemini's per-model buckets) fall back to the highest-used window so the pill
+ * still reports the binding constraint rather than nothing.
+ */
+export function getStatusBarUsageSection(p: ProviderRateLimits): UsageSection | null {
   const sections = usedSections(p)
   if (sections.length === 0) {
     return null
   }
-  // Why: the footer promises one quiet summary per provider; choose urgency by
-  // consumption even when the user displays the complementary “% left” value.
-  const tightest = sections.reduce((current, candidate) =>
-    clampUsedPercent(candidate.window.usedPercent) > clampUsedPercent(current.window.usedPercent)
-      ? candidate
-      : current
-  )
-  return { ...tightest, label: shortLabel(p, tightest, true) }
+  // Identity, not label: `shortLabel` renders both weekly pools as 7d text.
+  const chosen =
+    sections.find((s) => s.window === p.weekly) ??
+    sections.reduce((current, candidate) =>
+      clampUsedPercent(candidate.window.usedPercent) > clampUsedPercent(current.window.usedPercent)
+        ? candidate
+        : current
+    )
+  return { ...chosen, label: shortLabel(p, chosen, true) }
 }
 
 // The soonest-resetting window summarizes the agent's next reset in one line.
@@ -116,7 +127,8 @@ export function UsageRow({
   state,
   showSignInAction,
   now,
-  mode = 'verbose'
+  mode = 'verbose',
+  account = null
 }: {
   p: ProviderRateLimits
   display: UsagePercentageDisplay
@@ -124,13 +136,20 @@ export function UsageRow({
   showSignInAction: boolean
   now: number
   mode?: StatusBarUsageMode
+  account?: UsageAccountBadge | null
 }): React.JSX.Element {
   const sections = usedSections(p)
   const hasUsage = sections.length > 0
   const name = getProviderDisplayName(p.provider)
+  const accountLabel = account
+    ? (account.email ??
+      translate('auto.components.status.bar.UsageRosterPanel.accountOrdinal', 'account {{n}}', {
+        n: String(account.ordinal)
+      }))
+    : null
   const plan = formatPlanLabel(p.planType)
   const reset = hasUsage ? soonestResetLabel(sections, now) : null
-  const tightest = mode === 'compact' ? getTightestUsageSection(p) : null
+  const summary = mode === 'compact' ? getStatusBarUsageSection(p) : null
 
   return (
     <div data-usage-mode={mode} className="flex min-w-0 flex-1 flex-col gap-1">
@@ -140,6 +159,18 @@ export function UsageRow({
         </span>
         <span className="min-w-0 shrink truncate text-[13px] font-medium text-foreground">
           {name}
+          {accountLabel ? (
+            <span
+              className={
+                account?.isActive
+                  ? 'font-normal text-foreground/80'
+                  : 'font-normal text-muted-foreground'
+              }
+            >
+              {' · '}
+              {accountLabel}
+            </span>
+          ) : null}
           {plan ? <span className="font-normal text-muted-foreground"> · {plan}</span> : null}
         </span>
         {!hasUsage ? (
@@ -153,11 +184,11 @@ export function UsageRow({
               </span>
             ) : null}
           </>
-        ) : tightest ? (
+        ) : summary ? (
           <span className="ml-auto">
             <UsageMetric
-              section={tightest}
-              label={tightest.label}
+              section={summary}
+              label={summary.label}
               display={display}
               showBar={false}
             />
@@ -182,13 +213,9 @@ export function UsageRow({
   )
 }
 
-/**
- * Consolidated "Usage" popover — one row per agent (icon · name · reset ·
- * per-window bars), opened from the status-bar roster pill. Deep per-agent
- * actions route to Settings via the callbacks.
- */
+/** Consolidated Usage popover, keyed by account lane rather than provider. */
 export function UsageRosterPanel({
-  providers,
+  segments,
   display,
   statusBarUsageMode,
   onStatusBarUsageModeChange,
@@ -201,7 +228,7 @@ export function UsageRosterPanel({
   onUsageDetails,
   renderRow
 }: {
-  providers: ProviderRateLimits[]
+  segments: UsageBarSegment[]
   display: UsagePercentageDisplay
   statusBarUsageMode: StatusBarUsageMode
   onStatusBarUsageModeChange: (mode: StatusBarUsageMode) => void
@@ -212,20 +239,29 @@ export function UsageRosterPanel({
   canSignIn: (provider: ProviderId) => boolean
   onManageAccounts: () => void
   onUsageDetails: () => void
-  // Lets the host wrap a provider's row in a richer control (e.g. the
-  // Claude/Codex account-switch drill-in submenu); return null to use the
-  // default clickable row.
-  renderRow?: (p: ProviderRateLimits, row: React.ReactNode) => React.ReactNode
+  // Lets the host wrap an account lane in a richer control.
+  renderRow?: (segment: UsageBarSegment, row: React.ReactNode) => React.ReactNode
 }): React.JSX.Element {
   // Why: one boundary-scheduled clock keeps every open row current without per-provider timers.
   const now = useResetCountdownClock(
-    providers.flatMap((provider) =>
-      usedSections(provider).map((section) => section.window.resetsAt)
+    segments.flatMap((segment) =>
+      usedSections(segment.limits).map((section) => section.window.resetsAt)
     )
   )
-  // Worst-first so the agent nearest a limit sits on top.
-  const sorted = [...providers].sort(
-    (a, b) => providerMaxUsed(usedSections(b)) - providerMaxUsed(usedSections(a))
+  const worstByProvider = new Map<string, number>()
+  for (const segment of segments) {
+    const used = providerMaxUsed(usedSections(segment.limits))
+    const seen = worstByProvider.get(segment.limits.provider)
+    if (seen === undefined || used > seen) {
+      worstByProvider.set(segment.limits.provider, used)
+    }
+  }
+  const sorted = [...segments].sort(
+    (a, b) =>
+      (worstByProvider.get(b.limits.provider) ?? 0) -
+        (worstByProvider.get(a.limits.provider) ?? 0) ||
+      a.limits.provider.localeCompare(b.limits.provider) ||
+      (a.badge?.ordinal ?? 0) - (b.badge?.ordinal ?? 0)
   )
 
   return (
@@ -286,7 +322,8 @@ export function UsageRosterPanel({
         />
       </div>
       <div className="border-t border-border/70" />
-      {sorted.map((p) => {
+      {sorted.map((segment) => {
+        const p = segment.limits
         const state = getUsageRosterRowState(p, usedSections(p).length > 0)
         const showSignInAction = state.kind === 'sign-in' && canSignIn(p.provider)
         const rowNode = (
@@ -297,12 +334,13 @@ export function UsageRosterPanel({
             showSignInAction={showSignInAction}
             now={now}
             mode={statusBarUsageMode}
+            account={segment.badge}
           />
         )
         if (showSignInAction) {
           return (
             <DropdownMenuItem
-              key={p.provider}
+              key={segment.key}
               onSelect={() => onSignIn(p.provider)}
               className="w-full cursor-pointer rounded-none px-3.5 py-2.5"
             >
@@ -310,13 +348,13 @@ export function UsageRosterPanel({
             </DropdownMenuItem>
           )
         }
-        const custom = renderRow?.(p, rowNode)
+        const custom = renderRow?.(segment, rowNode)
         if (custom) {
-          return <React.Fragment key={p.provider}>{custom}</React.Fragment>
+          return <React.Fragment key={segment.key}>{custom}</React.Fragment>
         }
         return (
           <DropdownMenuItem
-            key={p.provider}
+            key={segment.key}
             onSelect={() => onOpenProvider(p.provider)}
             className="w-full cursor-pointer rounded-none px-3.5 py-2.5"
           >

@@ -1,9 +1,13 @@
 import type { RpcRequest } from '../rpc/core'
+import { MAX_RUNTIME_RPC_CONNECTIONS } from '../rpc/unix-socket-transport'
 
 export const KEEPALIVE_INTERVAL_MS = 10_000
 
-// Why: cap long-polls at half the 32-slot connection budget so they can't starve short RPCs; overflow → runtime_busy. See §7 risk #2.
-export const LONG_POLL_CAP = 16
+// Why: cap long-polls at half the connection budget so they can't starve short
+// RPCs; overflow → runtime_busy. Derived, not literal: a hardcoded 16 stayed
+// behind when the budget doubled, and a wave of workers that each park one
+// `check --wait` fills the cap long before the sockets run out. See §7 risk #2.
+export const LONG_POLL_CAP = MAX_RUNTIME_RPC_CONNECTIONS / 2
 
 // Why: orchestration.ask blocks on a human/agent reply for minutes, an order of
 // magnitude longer than terminal.wait or check --wait, so a fleet of asking

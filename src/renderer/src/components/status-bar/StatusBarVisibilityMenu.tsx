@@ -134,6 +134,36 @@ export function StatusBarVisibilityMenu({
           </DropdownMenuCheckboxItem>
         )}
         <DropdownMenuCheckboxItem
+          checked={statusBarItems.includes('cursor')}
+          onCheckedChange={() => {
+            recordFeatureInteraction('usage-tracking')
+            toggleStatusBarItem('cursor')
+          }}
+        >
+          <AgentIcon agent="cursor" size={14} />
+          {translate('auto.components.status.bar.StatusBar.cursorUsageMenu', 'Cursor Usage')}
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuCheckboxItem
+          checked={statusBarItems.includes('clinepass')}
+          onCheckedChange={() => {
+            recordFeatureInteraction('usage-tracking')
+            toggleStatusBarItem('clinepass')
+          }}
+        >
+          <AgentIcon agent="cline" size={14} />
+          {translate('auto.components.status.bar.StatusBar.clinePassUsageMenu', 'ClinePass Usage')}
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuCheckboxItem
+          checked={statusBarItems.includes('qwencloud')}
+          onCheckedChange={() => {
+            recordFeatureInteraction('usage-tracking')
+            toggleStatusBarItem('qwencloud')
+          }}
+        >
+          <AgentIcon agent="qwen-code" size={14} />
+          {translate('auto.components.status.bar.StatusBar.qwenCloudUsageMenu', 'Qwen Cloud Usage')}
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuCheckboxItem
           checked={statusBarItems.includes('ssh')}
           onCheckedChange={() => {
             recordFeatureInteraction('ssh')

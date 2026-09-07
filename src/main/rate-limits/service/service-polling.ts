@@ -78,12 +78,21 @@ export abstract class RateLimitServicePolling extends RateLimitServiceFetchQueue
       kimi: this.state.kimi,
       minimax: this.state.minimax,
       grok: this.state.grok,
-      antigravity: this.state.antigravity
+      antigravity: this.state.antigravity,
+      cursor: this.state.cursor,
+      clinepass: this.state.clinepass,
+      qwencloud: this.state.qwencloud
     }
-    return Object.entries(byProvider).map(([provider, limits]) => ({
-      provider: provider as ActiveRateLimitProvider,
-      limits
-    }))
+    return Object.entries(byProvider)
+      .map(([provider, limits]) => ({
+        provider: provider as ActiveRateLimitProvider,
+        limits
+      }))
+      .filter(
+        ({ provider }) =>
+          this.codexbarAvailable ||
+          (provider !== 'cursor' && provider !== 'clinepass' && provider !== 'qwencloud')
+      )
   }
 
   protected getActiveWindowRefreshPlan(now: number): ActiveWindowRefreshPlan {

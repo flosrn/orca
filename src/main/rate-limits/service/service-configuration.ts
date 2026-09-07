@@ -12,6 +12,8 @@ import {
   type GeminiCliOAuthEnabledResolver,
   type InactiveCodexAccountInfo,
   type InactiveClaudeAccountInfo,
+  type ManagedAccountContextResolver,
+  type NormalizedCodexAccountSelectionTarget,
   type RateLimitState,
   normalizeCodexAccountSelectionTarget,
   normalizeClaudeAccountSelectionTarget,
@@ -60,10 +62,16 @@ export abstract class RateLimitServiceConfiguration extends RateLimitServiceAcco
     this.inactiveClaudeAccountsGeneration += 1
   }
 
-  setInactiveCodexAccountsResolver(resolver: () => InactiveCodexAccountInfo[]): void {
+  setInactiveCodexAccountsResolver(
+    resolver: (target: NormalizedCodexAccountSelectionTarget) => InactiveCodexAccountInfo[]
+  ): void {
     this.inactiveCodexAccountsResolver = resolver
     this.inactiveCodexAccountsGeneration += 1
     this.pruneInactiveCodexState()
+  }
+
+  setManagedAccountContextResolver(resolver: ManagedAccountContextResolver): void {
+    this.managedAccountContextResolver = resolver
   }
   attach(mainWindow: BrowserWindow): void {
     this.detachWindowListeners?.()
@@ -95,6 +103,7 @@ export abstract class RateLimitServiceConfiguration extends RateLimitServiceAcco
   }
 
   start(options: { fetchImmediately?: boolean } = {}): void {
+    this.stopped = false
     if (options.fetchImmediately !== false) {
       void this.fetchAll()
     } else {
@@ -104,6 +113,7 @@ export abstract class RateLimitServiceConfiguration extends RateLimitServiceAcco
   }
 
   stop(): void {
+    this.stopped = true
     this.abortActiveFetchCycle()
     this.clearQueuedFetches()
     this.inactiveClaudeFetching.clear()
@@ -124,8 +134,15 @@ export abstract class RateLimitServiceConfiguration extends RateLimitServiceAcco
       // Why: the cookie lives on the filesystem, not GlobalSettings; surface its presence so the renderer keeps the MiniMax bar across reloads.
       minimaxCookieConfigured: hasMiniMaxSessionCookie(),
       grokAuthConfigured: this.grokAuthConfigured,
+      // Why: absence of the shared binary is the single reason all three CodexBar meters can't
+      // report; the renderer treats it as "unconfigured", not as a failure.
+      codexbarAvailable: this.codexbarAvailable,
       claudeTarget: this.claudeFetchTarget,
       codexTarget: this.codexFetchTarget,
+      ...this.managedAccountContextResolver?.({
+        claude: this.claudeFetchTarget,
+        codex: this.codexFetchTarget
+      }),
       inactiveClaudeAccounts: this.buildInactiveArray(
         this.inactiveClaudeCache,
         this.inactiveClaudeFetching

@@ -5,6 +5,7 @@ import { fetchGrokRateLimits } from '../grok-fetcher'
 import { readGrokAuthSession } from '../grok-auth'
 import { fetchMiniMaxRateLimits } from '../minimax-fetcher'
 import { fetchOpenCodeGoRateLimits } from '../opencode-go-usage-fetcher'
+import { fetchCodexBarUsage, type CodexBarUsageSnapshot } from '../codexbar-cli-source'
 import { RateLimitServiceFetchPolicy } from './service-fetch-policy'
 import type {
   ClaudeRuntimeAuthPreparation,
@@ -41,6 +42,9 @@ export type FetchAllCyclePrepared = {
   grokResultPromise: Promise<
     { status: 'fulfilled'; value: ProviderRateLimits } | { status: 'rejected'; reason: unknown }
   >
+  // Why: one batch reads all three CodexBar providers in parallel; started here so its CLI
+  // round trips overlap the HTTP fetches instead of adding to the cycle's latency.
+  codexBarSnapshotPromise: Promise<CodexBarUsageSnapshot>
 }
 
 export abstract class RateLimitServiceFullCyclePreparation extends RateLimitServiceFetchPolicy {
@@ -119,7 +123,8 @@ export abstract class RateLimitServiceFullCyclePreparation extends RateLimitServ
       minimax: miniMaxConfigChanged
         ? this.withFetchingStatus(null, 'minimax')
         : this.withFetchingStatus(previousState.minimax, 'minimax'),
-      grok: this.withFetchingStatus(previousState.grok, 'grok')
+      grok: this.withFetchingStatus(previousState.grok, 'grok'),
+      ...this.withCodexBarFetchingStatus(previousState)
     })
 
     const missingWslCodexHome =
@@ -131,6 +136,10 @@ export abstract class RateLimitServiceFullCyclePreparation extends RateLimitServ
       (value) => ({ status: 'fulfilled', value }) as const,
       (reason) => ({ status: 'rejected', reason }) as const
     )
+    const codexBarSnapshotPromise = fetchCodexBarUsage({ signal }).catch(() => ({
+      binaryPath: null,
+      results: {}
+    }))
 
     // Why: skip automated Claude fetches while a Retry-After window is open or a live session feed is fresher than the OAuth poll would be.
     const claudeFetchGated =
@@ -198,7 +207,8 @@ export abstract class RateLimitServiceFullCyclePreparation extends RateLimitServ
         kimiResult,
         miniMaxResult
       ],
-      grokResultPromise
+      grokResultPromise,
+      codexBarSnapshotPromise
     }
   }
 }
