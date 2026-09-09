@@ -16,6 +16,8 @@ import type { WorkspaceSessionState } from '../../shared/workspace-session-state
 import type { RuntimeStore } from './runtime-store-contract'
 import { SSH_PANE_RECOVERY_GRACE_MS } from './orca-runtime-core'
 import { findTerminalTabIdForLeaf } from './workspace-session-terminal-membership-authority'
+import { isDispatchSessionProvenSuperseded } from './dispatch-obsolete-session-restore'
+import { makePaneKey } from '../../shared/stable-pane-id'
 
 export class OrcaRuntimeWithReconcileHeadlessMobileSessionBrowserTabs extends OrcaRuntimeWithHydrateHeadlessMobileSessionTabsFromWorkspaceSession {
   // Why: keep an existing snapshot's browser tabs in sync with the live bridge
@@ -212,7 +214,24 @@ export class OrcaRuntimeWithReconcileHeadlessMobileSessionBrowserTabs extends Or
     worktreeId: string,
     tab: RuntimeMobileSessionTerminalTab
   ): boolean {
-    return this.getRecentExpiredSshLease(worktreeId, tab.parentTabId, tab.leafId) !== null
+    if (this.getRecentExpiredSshLease(worktreeId, tab.parentTabId, tab.leafId) === null) {
+      return false
+    }
+    const paneKey = makePaneKey(tab.parentTabId, tab.leafId)
+    const handle = this.getTerminalHandleForPaneKey(paneKey)
+    // No handle: cannot prove supersession; recover without expectedHandle is terminal_not_found.
+    if (!handle) {
+      return true
+    }
+    const db = this.getOrchestrationDbIfAvailable()
+    if (!db) {
+      return true
+    }
+    try {
+      return !isDispatchSessionProvenSuperseded(db, handle, paneKey)
+    } catch {
+      return false
+    }
   }
 
   // Why: serve-* (local serve) and ssh:<conn>@@<relay> (SSH relay) ids are minted

@@ -13,6 +13,7 @@ import {
   readTerminalTail
 } from './terminal-tail-read'
 import { getTerminalState } from './terminal-wait-results'
+import { refuseObsoleteDispatchSessionRestore } from './dispatch-obsolete-session-restore'
 
 export class OrcaRuntimeWithResolveTerminalPane extends OrcaRuntimeWithGetTerminalInteractiveWait {
   resolveTerminalPane(paneKey: string, expectedWorktreeId?: string): RuntimeTerminalResolvePane {
@@ -111,6 +112,15 @@ export class OrcaRuntimeWithResolveTerminalPane extends OrcaRuntimeWithGetTermin
     if (liveness?.status === 'unverifiable' || liveness?.status === 'live') {
       throw new Error('terminal_not_recoverable')
     }
+    // Why: a same-task replacement already exists (`abandonWorkerDispatch` calls this
+    // `stale`). Relaunching would resurrect the obsolete session beside it. Keyed on
+    // expectedHandle + paneKey, never worktree — distinct workers sharing a tree stay
+    // restorable. A different-task replacement is not proven and is allowed.
+    refuseObsoleteDispatchSessionRestore(
+      this.getOrchestrationDbIfAvailable(),
+      expectedHandle,
+      paneKey
+    )
     // Why: disconnected PTYs can reissue handles during graph cleanup; only a connected replacement satisfies the pane CAS.
     const recovery = this.createTerminal(`id:${expectedWorktreeId}`, {
       tabId: parsed.tabId,
