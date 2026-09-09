@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { OrchestrationDb } from './orchestration/db'
+import { OrchestrationDb } from './orchestration/db'
 import type { OrcaRuntimeService } from './orca-runtime'
 import {
   HEADLESS_LEAF_ID,
