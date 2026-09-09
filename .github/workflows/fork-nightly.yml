@@ -19,6 +19,12 @@ on:
         description: Builder même si ni upstream ni le patch n'ont bougé
         type: boolean
         default: false
+      source_ref:
+        description: >-
+          Builder CE ref de CE dépôt tel quel (branche, tag ou sha) : aucun
+          rebase, aucun push de la branche de la PR upstream. Vide = nightly.
+        type: string
+        default: ''
 
 # Lecture par défaut ; les deux jobs qui écrivent (push de `fork-channel`,
 # création de la release) demandent `contents: write` pour eux seuls.
@@ -56,17 +62,146 @@ jobs:
     permissions:
       contents: read
     outputs:
-      should_build: ${{ steps.plan.outputs.should_build }}
-      sha: ${{ steps.rebase.outputs.sha }}
-      tag: ${{ steps.rebase.outputs.tag }}
-      version: ${{ steps.rebase.outputs.version }}
+      # Un run n'emprunte QU'UN des deux chemins, et les sorties d'une étape
+      # sautée sont vides : `||` choisit donc le chemin qui a tourné, sans
+      # qu'aucun job d'aval ait à savoir lequel c'était.
+      should_build: ${{ steps.manual.outputs.should_build || steps.plan.outputs.should_build }}
+      sha: ${{ steps.manual.outputs.sha || steps.rebase.outputs.sha }}
+      tag: ${{ steps.manual.outputs.tag || steps.rebase.outputs.tag }}
+      version: ${{ steps.manual.outputs.version || steps.rebase.outputs.version }}
+      identity: ${{ steps.manual.outputs.identity || steps.plan.outputs.identity }}
       upstream_sha: ${{ steps.plan.outputs.upstream_sha }}
       patch_sha: ${{ steps.plan.outputs.patch_sha }}
-      identity: ${{ steps.plan.outputs.identity }}
       custom_sha: ${{ steps.plan.outputs.custom_sha }}
+      mode: ${{ steps.manual.outputs.active == 'true' && 'manual' || 'nightly' }}
+      source_ref: ${{ steps.manual.outputs.source_ref }}
     steps:
+      # ---------------------------------------------------------------------
+      # Chemin manuel : builder un ref de CE dépôt TEL QUEL.
+      #
+      # Pourquoi il existe. La nightly FABRIQUE sa source — elle rejoue le
+      # patch sur upstream, empile les customs, et force-push `PATCH_BRANCH`,
+      # qui est la branche de la PR upstream #16425. Quand la source voulue
+      # est déjà intégrée dans une branche perso, ce travail n'est pas
+      # seulement inutile : il est interdit, parce qu'il republierait la
+      # branche liée à la PR pour livrer quelque chose qui n'a rien à y faire.
+      #
+      # Ce chemin ne rejoue rien et ne pousse AUCUNE branche. Il fige le ref
+      # demandé en un sha exact, une seule fois, et pose un tag immuable sur
+      # CE sha. Tout l'aval (tests, mac, linux, release) consomme le tag et
+      # jamais le ref : si la branche bouge pendant le run, le build ne bouge
+      # pas. Les gates sont les mêmes — un build manuel n'achète aucune
+      # dispense.
+      - name: Chemin manuel - figer le ref source demandé
+        id: manual
+        if: github.event_name == 'workflow_dispatch' && inputs.source_ref != ''
+        env:
+          # Le tag pointe sur un commit DÉJÀ dans ce dépôt, donc aucun objet
+          # n'est poussé — mais ce job est `contents: read` et ne peut pas
+          # créer de ref avec GITHUB_TOKEN. On réutilise le PAT de la nightly,
+          # passé par l'environnement : il n'apparaît dans aucune commande.
+          GH_TOKEN: ${{ secrets.FORK_PUSH_TOKEN }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            {
+              echo "### Secret manquant — impossible de poser le tag de build"
+              echo
+              echo '```bash'
+              echo "gh secret set FORK_PUSH_TOKEN --repo $GITHUB_REPOSITORY"
+              echo '```'
+            } >>"$GITHUB_STEP_SUMMARY"
+            echo "::error::FORK_PUSH_TOKEN absent — gh secret set FORK_PUSH_TOKEN --repo $GITHUB_REPOSITORY"
+            exit 1
+          fi
+
+          # Validation bornée : un NOM de ref simple, et rien d'autre. L'API
+          # interrogée plus bas ne connaît que $GITHUB_REPOSITORY — elle ne
+          # peut pas aller chercher upstream — et cette garde ferme le reste :
+          # pas d'URL, pas de `owner/repo:ref`, pas de révision calculée
+          # (`~`, `^`, `..`) dont le résultat dépendrait du moment de lecture.
+          if ! printf '%s' "$SOURCE_REF" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$'; then
+            echo "::error::source_ref refusé : « $SOURCE_REF » n'est pas un nom de ref simple de ce dépôt"
+            exit 1
+          fi
+          if printf '%s' "$SOURCE_REF" | grep -q '\.\.'; then
+            echo "::error::source_ref refusé : « $SOURCE_REF » contient '..'"
+            exit 1
+          fi
+
+          # UNE seule résolution, dans CE dépôt. `commits/{ref}` accepte une
+          # branche, un tag ou un sha et rend le sha exact. Après cette ligne
+          # personne ne relit le ref : c'est ce qui tue la course « la branche
+          # avance pendant que le build tourne ».
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$SOURCE_REF" --jq .sha)"
+          # Un sha complet, exactement 40 hexa, et rien d'autre. Un préfixe
+          # suivi de n'importe quoi laisserait passer une réponse tronquée ou
+          # un `null` mis en forme, et ce sha part ensuite dans un tag et dans
+          # le checkout de tous les jobs d'aval.
+          if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::« $SOURCE_REF » ne résout pas en commit de $GITHUB_REPOSITORY (reçu : « $sha »)"
+            exit 1
+          fi
+          echo "source_ref « $SOURCE_REF » figé sur $sha"
+
+          # La version est lue à CE sha, pas sur une branche : c'est elle que
+          # electron-builder inscrira dans l'artefact.
+          version="$(gh api "repos/$GITHUB_REPOSITORY/contents/package.json?ref=$sha" \
+            -H 'Accept: application/vnd.github.raw' --jq .version)"
+          # `--jq` sur un champ absent imprime la CHAÎNE `null` : un simple
+          # `test -n` la prendrait pour une version valide et on taggerait une
+          # release nommée d'après un trou.
+          if [ -z "$version" ] || [ "$version" = "null" ]; then
+            echo "::error::package.json de $sha n'a pas de version lisible"
+            exit 1
+          fi
+
+          # Même forme de tag que la nightly : update.sh et versions.yml n'ont
+          # qu'un `kind` à connaître, et surtout pas deux conventions.
+          tag="fork-$(date -u +%Y%m%d-%H%M)-${sha:0:12}"
+          if existing="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq .object.sha 2>/dev/null)"; then
+            # Idempotent si c'est le MÊME sha (relance d'un run) ; sinon on
+            # refuse d'écraser un tag que des artefacts référencent peut-être.
+            if [ "$existing" != "$sha" ]; then
+              echo "::error::le tag $tag existe déjà sur $existing — attends une minute et relance"
+              exit 1
+            fi
+            echo "Tag $tag déjà posé sur ce sha — réutilisé."
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f "ref=refs/tags/$tag" -f "sha=$sha" --silent
+            echo "Tag $tag créé sur $sha."
+          fi
+
+          # `manual-` n'est pas hexadécimal, et la garde de fraîcheur de la
+          # nightly ne lit une identité que dans `[0-9a-f+]` : elle ne
+          # reconnaîtra pas celle-ci et rebuildera la nuit suivante. C'est le
+          # bon sens de l'erreur — un run manuel ne doit JAMAIS faire sauter
+          # une nightly. Le coût est un build nocturne de plus, une fois.
+          {
+            echo "active=true"
+            echo "should_build=true"
+            echo "sha=$sha"
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "identity=manual-${sha:0:12}"
+            echo "source_ref=$SOURCE_REF"
+          } >>"$GITHUB_OUTPUT"
+          {
+            echo "### Chemin manuel — source figée"
+            echo
+            echo "- ref demandé : \`$SOURCE_REF\`"
+            echo "- sha figé : \`$sha\`"
+            echo "- tag immuable : \`$tag\`"
+            echo "- version : \`$version\`"
+            echo
+            echo "Aucun rebase, aucun push de \`$PATCH_BRANCH\`."
+          } >>"$GITHUB_STEP_SUMMARY"
+
       - name: Checkout la branche de pilotage (cache rerere)
         uses: actions/checkout@v6
+        if: steps.manual.outputs.active != 'true'
         with:
           path: pipeline
           # Ce checkout ne pousse rien ; ne pas laisser traîner son credential.
@@ -74,6 +209,7 @@ jobs:
 
       - name: Checkout la branche patch
         uses: actions/checkout@v6
+        if: steps.manual.outputs.active != 'true'
         with:
           path: src
           ref: ${{ env.PATCH_BRANCH }}
@@ -89,6 +225,7 @@ jobs:
       # ajoute un tag qui ne dit rien de neuf.
       - name: Y a-t-il quelque chose de neuf
         id: plan
+        if: steps.manual.outputs.active != 'true'
         working-directory: src
         env:
           GH_TOKEN: ${{ github.token }}
@@ -189,7 +326,7 @@ jobs:
 
       - name: Rejouer le patch, puis les personnalisations
         id: rebase
-        if: steps.plan.outputs.should_build == 'true'
+        if: steps.manual.outputs.active != 'true' && steps.plan.outputs.should_build == 'true'
         working-directory: src
         env:
           UPSTREAM_SHA: ${{ steps.plan.outputs.upstream_sha }}
@@ -619,6 +756,8 @@ jobs:
           IDENTITY: ${{ needs.rebase.outputs.identity }}
           UPSTREAM_SHA: ${{ needs.rebase.outputs.upstream_sha }}
           PATCH_SHA: ${{ needs.rebase.outputs.patch_sha }}
+          MODE: ${{ needs.rebase.outputs.mode }}
+          SOURCE_REF: ${{ needs.rebase.outputs.source_ref }}
         run: |
           set -euo pipefail
           cd assets
@@ -634,6 +773,21 @@ jobs:
 
           # Hors du répertoire d'assets : tout ce qui traîne dedans finirait
           # attaché à la release.
+          #
+          # Rien n'est indenté sous le `if` : ces heredocs sont déjà à la
+          # colonne 0 du script une fois le bloc YAML dépouillé, et un
+          # terminateur décalé ne fermerait plus rien.
+          if [ "$MODE" = "manual" ]; then
+          cat >"$RUNNER_TEMP/notes.md" <<EOF
+          Build **manuel** du canal fork : le ref \`$SOURCE_REF\` de ce dépôt,
+          buildé tel quel. Pas de rebase, et la branche de la PR upstream
+          (\`stablyai/orca#16425\`) n'a pas été touchée.
+
+          - source : \`$SOURCE_REF\` figé sur \`$SHA\`
+          - version electron-builder : \`$VERSION\`
+          - source-identity: \`$IDENTITY\`
+          EOF
+          else
           cat >"$RUNNER_TEMP/notes.md" <<EOF
           Build automatique du canal fork — le patch \`worker-start\` (PR upstream
           stablyai/orca#16425) rejoué sur \`upstream/main\` du jour.
@@ -643,6 +797,13 @@ jobs:
           - résultat : \`$SHA\` (branche \`fork-channel\`)
           - version electron-builder : \`$VERSION\`
           - source-identity: \`$IDENTITY\`
+          EOF
+          fi
+
+          # Les sommes et le mode d'emploi d'installation ne dépendent pas du
+          # chemin : un artefact manuel se vérifie et s'installe exactement
+          # comme un artefact nocturne.
+          cat >>"$RUNNER_TEMP/notes.md" <<EOF
 
           | artefact | sha256 |
           | --- | --- |

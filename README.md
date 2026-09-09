@@ -99,6 +99,56 @@ Deux contraintes qui restent tiennes :
   unitaires ne peuvent pas voir (ils mockent le store), pas une régression
   fonctionnelle dans ta branche.
 
+## Builder un ref tel quel, sans rebase (`source_ref`)
+
+Le chemin nocturne **fabrique** sa source : il rejoue le patch sur
+`upstream/main`, empile `$CUSTOM_BRANCH`, et force-push
+`feat/argv-worker-start`. C'est ce qu'on veut chaque nuit, et c'est exactement
+ce qu'on ne veut pas quand la source voulue **existe déjà** — une branche perso
+dans laquelle le patch et tes commits sont intégrés et testés. Là, rejouer ne
+sert à rien, et republier la branche de la PR #16425 pour livrer un binaire
+serait un effet de bord sur une branche que des relecteurs upstream lisent.
+
+Dispatch en donnant le ref à builder :
+
+```bash
+gh workflow run fork-nightly.yml --repo flosrn/orca --ref fork-pipeline \
+  -f source_ref=<sha>
+```
+
+**Donne un SHA, pas un nom de branche.** Une branche est acceptée, mais seul un
+SHA rend le build indépendant d'un push qui arriverait pendant le run.
+
+Ce que le run fait alors, et rien d'autre :
+
+1. il résout `source_ref` **une seule fois**, dans ce dépôt, en un SHA exact ;
+2. il pose un tag immuable `fork-<UTC>-<sha12>` sur **ce** SHA ;
+3. il enchaîne les jobs habituels — `test`, `build-mac`, `build-linux`,
+   `release` — qui consomment le **tag**, jamais le ref.
+
+Ce qu'il ne fait pas : aucun rebase, aucun `cherry-pick`, aucun fetch d'upstream,
+aucun push de `feat/argv-worker-start` ni de `fork-channel`. Les gates sont les
+mêmes : un build manuel n'achète aucune dispense, et la release porte le même
+fichier `SHA256SUMS`.
+
+Trois choses à savoir :
+
+- **`source_ref` ne peut désigner qu'un ref de CE dépôt.** L'API interrogée ne
+  connaît que `flosrn/orca`, et une garde n'accepte qu'un nom de ref simple :
+  pas d'URL, pas de `owner/repo:ref`, et pas de révision calculée (`main~3`,
+  `HEAD^`, `..`) dont le résultat dépendrait du moment de la lecture.
+- **`FORK_PUSH_TOKEN` est requis** ici aussi, pour créer le tag. Absent, le run
+  s'arrête net avec la commande à lancer, avant tout build.
+- **Un run manuel ne fait jamais sauter une nightly.** Son identité est écrite
+  `manual-<sha12>`, volontairement non hexadécimale : la garde de fraîcheur du
+  chemin nocturne ne sait pas la lire, donc elle rebuildera la nuit suivante au
+  lieu de conclure « rien n'a bougé ». Le coût est un build nocturne de plus,
+  une fois ; l'inverse — une nightly qui saute parce qu'un run manuel a publié —
+  serait un canal qui ignore silencieusement upstream.
+
+`force` ne sert à rien avec `source_ref` : un dispatch explicite est déjà la
+décision de builder.
+
 ## Ce que le workflow fait (`.github/workflows/fork-nightly.yml`)
 
 1. **rebase** — `git cherry-pick` des commits de `feat/argv-worker-start` (la
