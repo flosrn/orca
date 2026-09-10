@@ -22,7 +22,7 @@ on:
       source_ref:
         description: >-
           Builder CE ref de CE dépôt tel quel (branche, tag ou sha) : aucun
-          rebase, aucun push de la branche de la PR upstream. Vide = nightly.
+          rebase, aucun push de la branche patch. Vide = nightly.
         type: string
         default: ''
 
@@ -38,9 +38,19 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # La branche de la PR upstream #16425. Elle ne reçoit QUE la plage du patch,
-  # jamais une personnalisation — et une garde le vérifie commit par commit.
-  PATCH_BRANCH: feat/argv-worker-start
+  # La branche patch. Par défaut `feat/argv-worker-start`, la branche de la PR
+  # upstream #16425 : elle ne reçoit QUE la plage du patch, jamais une
+  # personnalisation — et une garde le vérifie commit par commit.
+  #
+  # CONTRAT DE PAIRE : `PATCH_BRANCH` et `CUSTOM_BRANCH` doivent partager LA
+  # MÊME BASE amont. Le sélecteur de customs est `patch...custom` par patch-id :
+  # avancer `CUSTOM_BRANCH` sur un portage vers une base plus récente en
+  # laissant `PATCH_BRANCH` sur l'ancienne ferait entrer la churn amont de la
+  # nouvelle base dans la sélection, et rejouerait le patch en double. Les deux
+  # variables bougent donc ENSEMBLE, et une `PATCH_BRANCH` réglée sur une
+  # branche propre au fork a l'effet voulu de plus : la nuit n'écrit alors plus
+  # jamais la branche de la PR upstream.
+  PATCH_BRANCH: ${{ vars.PATCH_BRANCH || 'feat/argv-worker-start' }}
   # Branche perso, empilée sur le patch. C'est elle que le canal build.
   # Vide = canal nu (patch seul). Réglable SANS commit :
   # Settings > Secrets and variables > Actions > Variables > CUSTOM_BRANCH.
@@ -67,12 +77,18 @@ jobs:
       # qu'aucun job d'aval ait à savoir lequel c'était.
       should_build: ${{ steps.manual.outputs.should_build || steps.plan.outputs.should_build }}
       sha: ${{ steps.manual.outputs.sha || steps.rebase.outputs.sha }}
-      tag: ${{ steps.manual.outputs.tag || steps.rebase.outputs.tag }}
+      tag: ${{ steps.manual_tag.outputs.tag || steps.rebase.outputs.tag }}
       version: ${{ steps.manual.outputs.version || steps.rebase.outputs.version }}
       identity: ${{ steps.manual.outputs.identity || steps.plan.outputs.identity }}
       upstream_sha: ${{ steps.plan.outputs.upstream_sha }}
       patch_sha: ${{ steps.plan.outputs.patch_sha }}
       custom_sha: ${{ steps.plan.outputs.custom_sha }}
+      # `incorporated` = la source buildée porte les commits de CUSTOM_BRANCH ;
+      # `bare` = canal nu assumé (aucune CUSTOM_BRANCH, ou branche sans commit
+      # propre). L'aval s'en sert pour exiger les gates perso : un `bare` qui
+      # serait en fait une source amputée ne sort pas d'ici — la garde de
+      # composition échoue avant, sur le chemin manuel comme la nuit.
+      custom_state: ${{ steps.guard.outputs.custom_state || steps.plan.outputs.custom_state }}
       mode: ${{ steps.manual.outputs.active == 'true' && 'manual' || 'nightly' }}
       source_ref: ${{ steps.manual.outputs.source_ref }}
     steps:
@@ -81,10 +97,11 @@ jobs:
       #
       # Pourquoi il existe. La nightly FABRIQUE sa source — elle rejoue le
       # patch sur upstream, empile les customs, et force-push `PATCH_BRANCH`,
-      # qui est la branche de la PR upstream #16425. Quand la source voulue
-      # est déjà intégrée dans une branche perso, ce travail n'est pas
-      # seulement inutile : il est interdit, parce qu'il republierait la
-      # branche liée à la PR pour livrer quelque chose qui n'a rien à y faire.
+      # qui par défaut est la branche de la PR upstream #16425. Quand la source
+      # voulue est déjà intégrée dans une branche perso, ce travail n'est pas
+      # seulement inutile : il est interdit tant que `PATCH_BRANCH` est cette
+      # branche, parce qu'il la republierait pour livrer quelque chose qui n'a
+      # rien à y faire.
       #
       # Ce chemin ne rejoue rien et ne pousse AUCUNE branche. Il fige le ref
       # demandé en un sha exact, une seule fois, et pose un tag immuable sur
@@ -157,6 +174,189 @@ jobs:
             exit 1
           fi
 
+          # Le tag N'EST PAS posé ici. Il l'est après la garde de composition,
+          # une étape plus bas : tout l'aval consomme le tag, donc le poser
+          # avant la garde publierait un ref immuable pour une source qu'on
+          # s'apprête à refuser.
+          {
+            echo "active=true"
+            echo "should_build=true"
+            echo "sha=$sha"
+            echo "version=$version"
+            echo "source_ref=$SOURCE_REF"
+          } >>"$GITHUB_OUTPUT"
+
+          # `manual-` n'est pas hexadécimal, et la garde de fraîcheur de la
+          # nightly ne lit une identité que dans `[0-9a-f+]` : elle ne
+          # reconnaîtra pas celle-ci et rebuildera la nuit suivante. C'est le
+          # bon sens de l'erreur — un run manuel ne doit JAMAIS faire sauter
+          # une nightly. Le coût est un build nocturne de plus, une fois.
+          echo "identity=manual-${sha:0:12}" >>"$GITHUB_OUTPUT"
+
+      # Le chemin manuel prend la source TELLE QUELLE. C'est sa raison d'être,
+      # et c'est aussi ce qui a publié une fois un binaire ne contenant que le
+      # patch `argv-worker-start` : la source demandée n'embarquait aucune des
+      # personnalisations (les compteurs de quota, entre autres), et rien dans
+      # le run ne l'a dit. `CUSTOM_BRANCH` était réglée, le canal l'a ignorée
+      # en silence. Cette garde ferme ça, et rien d'autre : elle ne rejoue
+      # aucun commit, ne pousse aucune branche, et ne touche pas la sémantique
+      # « ce sha, tel quel » — elle refuse juste de tagger une source amputée.
+      - name: Chemin manuel - checkout de la source figée
+        uses: actions/checkout@v6
+        if: steps.manual.outputs.active == 'true'
+        with:
+          path: src
+          # Le SHA figé, jamais le ref : la garde vérifie CE QUI SERA BUILDÉ.
+          ref: ${{ steps.manual.outputs.sha }}
+          # La garde compare des patch-ids de part et d'autre d'une merge-base :
+          # un historique tronqué la rate.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Chemin manuel - garde de composition
+        id: guard
+        if: steps.manual.outputs.active == 'true'
+        working-directory: src
+        env:
+          # Lecture seule : un fetch de deux branches de CE dépôt.
+          GH_TOKEN: ${{ github.token }}
+          BUILD_SHA: ${{ steps.manual.outputs.sha }}
+          SOURCE_REF: ${{ steps.manual.outputs.source_ref }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CUSTOM_BRANCH:-}" ]; then
+            # Canal nu assumé : il n'y a aucune personnalisation à exiger.
+            echo "custom_state=bare" >>"$GITHUB_OUTPUT"
+            echo "Aucune CUSTOM_BRANCH réglée — canal nu, rien à vérifier."
+            exit 0
+          fi
+          if [ "$CUSTOM_BRANCH" = "$PATCH_BRANCH" ]; then
+            echo "::error::CUSTOM_BRANCH == PATCH_BRANCH : réglage invalide"
+            exit 1
+          fi
+
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --quiet "$remote" \
+            "+refs/heads/$PATCH_BRANCH:refs/guard/patch" \
+            "+refs/heads/$CUSTOM_BRANCH:refs/guard/custom"
+          patch_head="$(git rev-parse refs/guard/patch)"
+          custom_sha="$(git rev-parse refs/guard/custom)"
+
+          # MÊME sélection que la nightly : les commits propres à la branche
+          # perso, par patch-id (`--cherry-pick --right-only`), pas par ancêtre
+          # commun. Ta branche peut être basée sur un patch périmé ; les commits
+          # du patch qu'elle porte encore sont reconnus et écartés.
+          mapfile -t custom_commits < <(
+            git rev-list --reverse --no-merges --cherry-pick --right-only \
+              "$patch_head...$custom_sha"
+          )
+          if [ "${#custom_commits[@]}" -eq 0 ]; then
+            # Une branche perso encore vide n'est pas une erreur — même
+            # tolérance que la nightly.
+            echo "custom_state=bare" >>"$GITHUB_OUTPUT"
+            echo "$CUSTOM_BRANCH n'a aucun commit propre — canal nu."
+            exit 0
+          fi
+
+          # UN seul signal : le PATCH-ID. `git cherry <source> <perso> <patch>`
+          # marque `-` un commit dont un équivalent par patch-id est déjà dans
+          # la source, `+` un commit absent. C'est ce qui rend la garde
+          # indifférente au chemin — rebase, cherry-pick, branche
+          # d'intégration : le sha change, le patch-id non. Une ascendance de
+          # sha (`merge-base`, `--contains`) refuserait au contraire toute
+          # source rebasée, c'est-à-dire le cas normal.
+          #
+          # Et rien d'autre. Reconnaître un commit au SUJET, ou à n'importe
+          # quel signal approchant, rouvrirait exactement le contournement
+          # silencieux qu'on ferme ici : deux commits peuvent porter le même
+          # sujet et n'avoir aucun contenu en commun. La garde refuse par
+          # défaut, et le refus est actionnable.
+          #
+          # Conséquence à connaître : un commit perso RÉADAPTÉ pour une base
+          # majeure (conflit résolu à la main, API amont renommée) a un
+          # patch-id différent, et la garde le déclare absent — correctement,
+          # parce qu'elle ne peut pas savoir que le portage est fidèle. Le
+          # réglage n'est pas de relâcher la garde : c'est de faire pointer
+          # `CUSTOM_BRANCH` sur la branche qui porte VRAIMENT tes
+          # personnalisations pour cette base. Une `CUSTOM_BRANCH` restée sur
+          # l'état d'avant le portage est la dérive à corriger, pas un faux
+          # positif de la garde.
+          selected=" ${custom_commits[*]} "
+          missing=()
+          while read -r mark commit; do
+            case "$selected" in
+              *" $commit "*) ;;
+              *) continue ;;
+            esac
+            if [ "$mark" = "+" ]; then
+              missing+=("$commit")
+            fi
+          done < <(git cherry "$BUILD_SHA" "$custom_sha" "$patch_head")
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            {
+              echo "### Source refusée — ${#missing[@]} personnalisation(s) absente(s)"
+              echo
+              echo "\`source_ref\` = \`$SOURCE_REF\` (\`$BUILD_SHA\`) ne contient pas"
+              echo "tout \`$CUSTOM_BRANCH\` (\`${custom_sha:0:12}\`, ${#custom_commits[@]} commit(s) propre(s))."
+              echo "Publier ça livrerait un binaire sans ces changements — c'est"
+              echo "exactement la panne que cette garde existe pour empêcher."
+              echo
+              echo "Absents (aucun équivalent par patch-id dans la source) :"
+              echo '```'
+              for commit in "${missing[@]}"; do
+                git log -1 --format='%H %s' "$commit"
+              done
+              echo '```'
+              echo
+              echo "Trois sorties, selon ce qui est vrai :"
+              echo
+              echo '```bash'
+              echo "# 1. la source devait contenir tes customs : build la branche qui les porte"
+              echo "gh workflow run fork-nightly.yml --repo $GITHUB_REPOSITORY --ref fork-pipeline \\"
+              echo "  -f source_ref=\$(git rev-parse $CUSTOM_BRANCH)"
+              echo
+              echo "# 2. tes customs ont été RÉADAPTÉES sur une base majeure (patch-id différent) :"
+              echo "#    fais pointer CUSTOM_BRANCH sur la branche qui les porte pour cette base,"
+              echo "#    puis relance — la garde compare alors la source à ce qu'elle contient."
+              echo "gh variable set CUSTOM_BRANCH --repo $GITHUB_REPOSITORY --body <branche-portée>"
+              echo
+              echo "# 3. ou laisser la nightly fabriquer la source (elle empile $CUSTOM_BRANCH) :"
+              echo "gh workflow run fork-nightly.yml --repo $GITHUB_REPOSITORY --ref fork-pipeline -f force=true"
+              echo '```'
+              echo
+              echo "Assumer un canal nu se règle explicitement, pas par omission :"
+              echo "\`gh variable delete CUSTOM_BRANCH --repo $GITHUB_REPOSITORY\`."
+            } >>"$GITHUB_STEP_SUMMARY"
+            echo "::error::source refusée : ${#missing[@]}/${#custom_commits[@]} commit(s) de $CUSTOM_BRANCH absent(s) de $SOURCE_REF — aucun tag posé"
+            exit 1
+          fi
+
+          echo "custom_state=incorporated" >>"$GITHUB_OUTPUT"
+          echo "Composition OK : ${#custom_commits[@]} commit(s) de $CUSTOM_BRANCH présent(s) dans $BUILD_SHA."
+          {
+            echo "### Composition vérifiée"
+            echo
+            echo "- source : \`$SOURCE_REF\` (\`${BUILD_SHA:0:12}\`)"
+            echo "- \`$CUSTOM_BRANCH\` : \`${custom_sha:0:12}\`, ${#custom_commits[@]} commit(s) propre(s), tous présents par patch-id"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Chemin manuel - poser le tag de build
+        id: manual_tag
+        if: steps.manual.outputs.active == 'true'
+        env:
+          # Le tag pointe sur un commit DÉJÀ dans ce dépôt, donc aucun objet
+          # n'est poussé — mais ce job est `contents: read` et ne peut pas
+          # créer de ref avec GITHUB_TOKEN. On réutilise le PAT de la nightly,
+          # passé par l'environnement : il n'apparaît dans aucune commande.
+          GH_TOKEN: ${{ secrets.FORK_PUSH_TOKEN }}
+          SHA: ${{ steps.manual.outputs.sha }}
+          VERSION: ${{ steps.manual.outputs.version }}
+          SOURCE_REF: ${{ steps.manual.outputs.source_ref }}
+          CUSTOM_STATE: ${{ steps.guard.outputs.custom_state }}
+        run: |
+          set -euo pipefail
+          sha="$SHA"
           # Même forme de tag que la nightly : update.sh et versions.yml n'ont
           # qu'un `kind` à connaître, et surtout pas deux conventions.
           tag="fork-$(date -u +%Y%m%d-%H%M)-${sha:0:12}"
@@ -173,28 +373,15 @@ jobs:
               -f "ref=refs/tags/$tag" -f "sha=$sha" --silent
             echo "Tag $tag créé sur $sha."
           fi
-
-          # `manual-` n'est pas hexadécimal, et la garde de fraîcheur de la
-          # nightly ne lit une identité que dans `[0-9a-f+]` : elle ne
-          # reconnaîtra pas celle-ci et rebuildera la nuit suivante. C'est le
-          # bon sens de l'erreur — un run manuel ne doit JAMAIS faire sauter
-          # une nightly. Le coût est un build nocturne de plus, une fois.
-          {
-            echo "active=true"
-            echo "should_build=true"
-            echo "sha=$sha"
-            echo "tag=$tag"
-            echo "version=$version"
-            echo "identity=manual-${sha:0:12}"
-            echo "source_ref=$SOURCE_REF"
-          } >>"$GITHUB_OUTPUT"
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
           {
             echo "### Chemin manuel — source figée"
             echo
             echo "- ref demandé : \`$SOURCE_REF\`"
             echo "- sha figé : \`$sha\`"
             echo "- tag immuable : \`$tag\`"
-            echo "- version : \`$version\`"
+            echo "- version : \`$VERSION\`"
+            echo "- personnalisations : \`$CUSTOM_STATE\`"
             echo
             echo "Aucun rebase, aucun push de \`$PATCH_BRANCH\`."
           } >>"$GITHUB_STEP_SUMMARY"
@@ -295,6 +482,15 @@ jobs:
             echo "patch_sha=$patch_sha"
             echo "custom_sha=$custom_sha"
             echo "identity=$identity"
+            # La nuit, la source est FABRIQUÉE : le job de rebase empile
+            # littéralement ces commits, donc `custom_sha` non vide vaut preuve
+            # d'incorporation. Sur le chemin manuel, la source est donnée et
+            # c'est la garde de composition qui répond à la même question.
+            if [ -n "$custom_sha" ]; then
+              echo "custom_state=incorporated"
+            else
+              echo "custom_state=bare"
+            fi
           } >>"$GITHUB_OUTPUT"
 
           if [ "$FORCED" = "true" ]; then
@@ -395,7 +591,7 @@ jobs:
           # --- étage 1 : le patch, et RIEN de plus ---------------------------
           # Pas de merge, pas de squash, pas d'ajout — la surface du patch est
           # gelée et cette plage est ce qui le garantit. Ce SHA, et lui seul,
-          # part sur la branche de la PR upstream.
+          # part sur `PATCH_BRANCH`.
           base="$(git merge-base "$UPSTREAM_SHA" "$patch_head")"
           mapfile -t patch_commits < <(git rev-list --reverse "$base..$patch_head")
           echo "Base commune : $base"
@@ -409,7 +605,7 @@ jobs:
           replay patch "${patch_commits[@]}"
           patch_sha="$(git rev-parse HEAD)"
 
-          # Garde : la branche de la PR ne doit JAMAIS porter autre chose que le
+          # Garde : la branche patch ne doit JAMAIS porter autre chose que le
           # patch. Le compte est exact — un commit qui fuirait ferait dépasser.
           # Il peut être inférieur : un commit rendu vide par upstream est sauté.
           got="$(git rev-list --count "$UPSTREAM_SHA..$patch_sha")"
@@ -537,6 +733,55 @@ jobs:
           xvfb-run --auto-servernum env ORCA_E2E_FORWARD_APP_LOGS=1 \
             pnpm exec playwright test tests/e2e/renderer-boot-crash-free.spec.ts \
               --config tests/playwright.config.ts --project electron-headless --workers=1
+
+      # Le gate ci-dessus ne prouve que « ça boote ». C'est précisément ce qui
+      # a laissé publier un binaire vert et amputé : sans les compteurs de
+      # quota, l'app boote parfaitement. Ce gate-ci exécute les specs que la
+      # source doit porter pour que les compteurs perso comptent comme livrés.
+      # Ils appartiennent à la SOURCE, pas au canal : un spec de canal qui
+      # réimplémenterait l'attente dériverait de l'app. `custom_state` décide
+      # s'il s'applique — un canal nu assumé n'a aucun compteur perso à porter.
+      - name: Gate perso - les compteurs de quota sont dans la source
+        if: needs.rebase.outputs.custom_state == 'incorporated'
+        run: |
+          set -euo pipefail
+          specs=()
+          while read -r spec _rest; do
+            case "${spec:-}" in
+              ''|'#'*) continue ;;
+            esac
+            specs+=("$spec")
+          done <pipeline/gates/custom-meter-specs.txt
+          if [ "${#specs[@]}" -eq 0 ]; then
+            echo "::error::pipeline/gates/custom-meter-specs.txt ne liste aucun spec — le gate perso ne garderait rien"
+            exit 1
+          fi
+          absent=()
+          for spec in "${specs[@]}"; do
+            if [ ! -f "$spec" ]; then
+              absent+=("$spec")
+            fi
+          done
+          if [ "${#absent[@]}" -gt 0 ]; then
+            {
+              echo "### Source refusée — le spec des compteurs perso n'est pas dedans"
+              echo
+              echo "\`custom_state\` = \`incorporated\`, donc la source est censée porter"
+              echo "les personnalisations. Ces specs sont absents de l'arbre buildé :"
+              echo '```'
+              for spec in "${absent[@]}"; do
+                echo "$spec"
+              done
+              echo '```'
+              echo "Soit la source n'est pas celle que tu crois, soit la liste de"
+              echo "\`gates/custom-meter-specs.txt\` a vieilli (spec renommé)."
+            } >>"$GITHUB_STEP_SUMMARY"
+            echo "::error::spec(s) perso absent(s) de la source : $(echo "${absent[*]}")"
+            exit 1
+          fi
+          xvfb-run --auto-servernum env ORCA_E2E_FORWARD_APP_LOGS=1 \
+            pnpm exec playwright test "${specs[@]}" \
+              --config tests/playwright.config.ts --project electron-headless --workers=1
       - name: Traces Playwright du gate
         if: failure()
         uses: actions/upload-artifact@v7
@@ -557,6 +802,13 @@ jobs:
     timeout-minutes: 90
     env:
       NODE_OPTIONS: --max-old-space-size=4096
+      # La provenance inscrite dans l'artefact. `afterPack` d'electron-builder
+      # écrit `Resources/orca-local-build.json` avec ce commit, et retombe
+      # sinon sur `GITHUB_SHA` — qui vaut ici le sha de `fork-pipeline`, la
+      # branche du WORKFLOW. Un artefact prétendait donc être buildé depuis un
+      # commit de README. On inscrit le sha de la source réellement buildée,
+      # celui que le tag porte.
+      ORCA_BUILD_COMMIT: ${{ needs.rebase.outputs.sha }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -639,6 +891,37 @@ jobs:
             exit 1
           fi
           echo "OK: pas d'app-update.yml. $(du -h "$zip")"
+      - name: L'artefact dit de quelle source il vient
+        env:
+          EXPECTED_SHA: ${{ needs.rebase.outputs.sha }}
+        run: |
+          set -euo pipefail
+          zip="dist/orca-macos-arm64.zip"
+          # Le chemin exact dépend de `productName` ; on cherche le manifeste
+          # où qu'il soit dans le bundle plutôt que de figer `Orca.app/`. `awk`
+          # et non `grep | head` : sous `set -euo pipefail`, un manifeste
+          # absent ferait sortir l'étape sur le code 1 de grep (ou un SIGPIPE
+          # de head) AVANT le diagnostic juste en dessous.
+          entry="$(unzip -Z1 "$zip" | awk '/\/Contents\/Resources\/orca-local-build\.json$/ && !found { print; found=1 }')"
+          if [ -z "$entry" ]; then
+            echo "::error::orca-local-build.json absent de $zip — l'artefact ne dit pas de quelle source il vient"
+            exit 1
+          fi
+          commit="$(unzip -p "$zip" "$entry" | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>console.log(JSON.parse(s).commit??""))')"
+          if [ "$commit" != "$EXPECTED_SHA" ]; then
+            {
+              echo "### Provenance de l'artefact incorrecte"
+              echo
+              echo "- attendu (source buildée, taggée) : \`$EXPECTED_SHA\`"
+              echo "- inscrit dans \`$entry\` : \`$commit\`"
+              echo
+              echo "\`ORCA_BUILD_COMMIT\` n'a pas atteint \`afterPack\` : sans lui la"
+              echo "config retombe sur \`GITHUB_SHA\`, le sha de \`fork-pipeline\`."
+            } >>"$GITHUB_STEP_SUMMARY"
+            echo "::error::provenance : l'artefact annonce « $commit » au lieu de $EXPECTED_SHA"
+            exit 1
+          fi
+          echo "OK: l'artefact s'annonce buildé depuis $commit."
       - uses: actions/upload-artifact@v7
         with:
           name: mac-arm64
@@ -758,6 +1041,11 @@ jobs:
           PATCH_SHA: ${{ needs.rebase.outputs.patch_sha }}
           MODE: ${{ needs.rebase.outputs.mode }}
           SOURCE_REF: ${{ needs.rebase.outputs.source_ref }}
+          # `incorporated` / `bare` : lire une release et savoir si elle porte
+          # les personnalisations. La release amputée du 1c642148c488 ne le
+          # disait nulle part.
+          CUSTOM_STATE: ${{ needs.rebase.outputs.custom_state }}
+          CUSTOM_BRANCH_NAME: ${{ env.CUSTOM_BRANCH }}
         run: |
           set -euo pipefail
           cd assets
@@ -780,20 +1068,22 @@ jobs:
           if [ "$MODE" = "manual" ]; then
           cat >"$RUNNER_TEMP/notes.md" <<EOF
           Build **manuel** du canal fork : le ref \`$SOURCE_REF\` de ce dépôt,
-          buildé tel quel. Pas de rebase, et la branche de la PR upstream
-          (\`stablyai/orca#16425\`) n'a pas été touchée.
+          buildé tel quel. Pas de rebase, et la branche patch n'a pas été
+          touchée.
 
           - source : \`$SOURCE_REF\` figé sur \`$SHA\`
+          - personnalisations : \`$CUSTOM_STATE\` (\`${CUSTOM_BRANCH_NAME:-aucune}\`)
           - version electron-builder : \`$VERSION\`
           - source-identity: \`$IDENTITY\`
           EOF
           else
           cat >"$RUNNER_TEMP/notes.md" <<EOF
-          Build automatique du canal fork — le patch \`worker-start\` (PR upstream
-          stablyai/orca#16425) rejoué sur \`upstream/main\` du jour.
+          Build automatique du canal fork — la branche patch rejouée sur
+          \`upstream/main\` du jour, puis les personnalisations empilées.
 
           - upstream : \`$UPSTREAM_SHA\`
           - patch : \`$PATCH_SHA\`
+          - personnalisations : \`$CUSTOM_STATE\` (\`${CUSTOM_BRANCH_NAME:-aucune}\`)
           - résultat : \`$SHA\` (branche \`fork-channel\`)
           - version electron-builder : \`$VERSION\`
           - source-identity: \`$IDENTITY\`

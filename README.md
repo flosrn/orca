@@ -28,20 +28,25 @@ ce dépôt est. Un visiteur ne prend pas ce fork pour une copie d'Orca.
 | --- | --- | --- |
 | `fork-pipeline` (défaut) | ce README, le workflow, le cache `rerere` | un humain |
 | `main` | miroir d'`upstream/main`, jamais modifié | `gh repo sync` |
-| `feat/argv-worker-start` | **la source de vérité** — head de la PR upstream #16425, rebasée sur `upstream/main` chaque nuit | un humain pour le contenu, **la CI pour la base** |
+| `$PATCH_BRANCH` (défaut `feat/argv-worker-start`) | **la source de vérité** — par défaut le head de la PR upstream #16425, rebasé sur `upstream/main` chaque nuit. Réglable sur une branche propre au fork (variable `PATCH_BRANCH`), et la nuit n'écrit alors plus la branche de la PR | un humain pour le contenu, **la CI pour la base** |
 | tags `fork-*` | le SHA exact buildé et publié, immuable | **la CI seule** |
 | `$CUSTOM_BRANCH` (au choix) | **tes personnalisations**, empilées sur le patch. Buildée et publiée, **jamais poussée nulle part** | **toi seul** |
 
-**La surface du patch est gelée, pas sa base.** La CI ne change jamais ce que le
-patch fait : elle rejoue exactement la plage
-`merge-base(upstream/main, patch)..patch` — les commits existants, rien de plus —
-et force-push le résultat. C'est la topologie qu'ADR 0026 §Decision nomme
-(« patch commits only, rebased onto upstream tags »), et c'est la seule qui
-garde la base de la PR #16425 à jour. Une branche parallèle laisserait la
-branche que les relecteurs upstream lisent rassir sur une base morte.
+`PATCH_BRANCH` et `CUSTOM_BRANCH` doivent partager **la même base amont** : la
+sélection des customs est `patch...custom` par patch-id, donc une `CUSTOM_BRANCH`
+portée sur une base plus récente que le patch ferait entrer la churn amont dans
+tes commits et rejouerait le patch en double. Les deux variables bougent
+ensemble, en un geste :
 
-Conséquence assumée : la PR upstream enregistre un force-push par nuit. C'est le
-prix d'une PR dont la base est vivante ; ça n'ajoute aucun commit au diff.
+```bash
+gh variable set PATCH_BRANCH  --repo flosrn/orca --body fork-patch-v1.4.199
+gh variable set CUSTOM_BRANCH --repo flosrn/orca --body feat/fork-1.4.199
+```
+
+**La surface du patch est gelée, pas sa base.** La CI rejoue la plage
+`merge-base(upstream/main, patch)..patch`, puis force-push `$PATCH_BRANCH`.
+Avec `PATCH_BRANCH=fork-patch-v1.4.199`, seule cette branche du fork bouge :
+la branche liée à la PR upstream reste inchangée.
 
 Le tag existe en plus de la branche parce qu'une branche bouge : la release doit
 pointer un SHA immuable, celui qui a été testé et buildé.
@@ -54,7 +59,7 @@ le canal est nu : le patch seul, comportement d'origine.
 
 ```
 upstream/main
-  └── feat/argv-worker-start      ← gelée, PR #16425, force-pushée par la CI
+  └── $PATCH_BRANCH              ← patch seul, force-pushé par la CI
         └── <ta branche>          ← tes commits. La CI les LIT, ne les écrit pas.
 ```
 
@@ -72,11 +77,11 @@ Ce qui garantit que ça ne remonte jamais, et qui n'est pas de la discipline :
 - **La CI ne pousse ta branche nulle part.** Elle la lit, rejoue tes commits sur
   le patch du jour, et le résultat ne vit que dans le tag immuable de la release.
   Ta copie locale ne divergera donc jamais d'un force-push nocturne.
-- **`feat/argv-worker-start` ne reçoit QUE la plage du patch.** Une garde compte
+- **`$PATCH_BRANCH` ne reçoit QUE la plage du patch.** Une garde compte
   les commits poussés sur cette branche et échoue si le compte dépasse la plage
   attendue — une fuite arrête le run avant tout push.
-- **La variable refuse `CUSTOM_BRANCH == PATCH_BRANCH`**, le seul réglage qui
-  ferait atterrir tes commits dans la PR.
+- **La variable refuse `CUSTOM_BRANCH == PATCH_BRANCH`**, pour ne jamais
+  réécrire la branche de personnalisations comme une branche patch.
 - **Aucune URL vers upstream côté push.** Le remote d'écriture est construit
   depuis `$GITHUB_REPOSITORY` ; le remote `upstream` ne sert qu'au `fetch`.
 
@@ -102,12 +107,12 @@ Deux contraintes qui restent tiennes :
 ## Builder un ref tel quel, sans rebase (`source_ref`)
 
 Le chemin nocturne **fabrique** sa source : il rejoue le patch sur
-`upstream/main`, empile `$CUSTOM_BRANCH`, et force-push
-`feat/argv-worker-start`. C'est ce qu'on veut chaque nuit, et c'est exactement
-ce qu'on ne veut pas quand la source voulue **existe déjà** — une branche perso
-dans laquelle le patch et tes commits sont intégrés et testés. Là, rejouer ne
-sert à rien, et republier la branche de la PR #16425 pour livrer un binaire
-serait un effet de bord sur une branche que des relecteurs upstream lisent.
+`upstream/main`, empile `$CUSTOM_BRANCH`, et force-push `$PATCH_BRANCH`. C'est
+ce qu'on veut chaque nuit, et c'est exactement ce qu'on ne veut pas quand la
+source voulue **existe déjà** — une branche perso dans laquelle le patch et tes
+commits sont intégrés et testés. Là, rejouer ne sert à rien, et republier la
+branche de la PR #16425 pour livrer un binaire serait un effet de bord sur une
+branche que des relecteurs upstream lisent.
 
 Dispatch en donnant le ref à builder :
 
@@ -122,14 +127,33 @@ SHA rend le build indépendant d'un push qui arriverait pendant le run.
 Ce que le run fait alors, et rien d'autre :
 
 1. il résout `source_ref` **une seule fois**, dans ce dépôt, en un SHA exact ;
-2. il pose un tag immuable `fork-<UTC>-<sha12>` sur **ce** SHA ;
-3. il enchaîne les jobs habituels — `test`, `build-mac`, `build-linux`,
+2. il vérifie que ce SHA porte tes personnalisations (ci-dessous) ;
+3. il pose un tag immuable `fork-<UTC>-<sha12>` sur **ce** SHA ;
+4. il enchaîne les jobs habituels — `test`, `build-mac`, `build-linux`,
    `release` — qui consomment le **tag**, jamais le ref.
 
 Ce qu'il ne fait pas : aucun rebase, aucun `cherry-pick`, aucun fetch d'upstream,
-aucun push de `feat/argv-worker-start` ni de `fork-channel`. Les gates sont les
-mêmes : un build manuel n'achète aucune dispense, et la release porte le même
-fichier `SHA256SUMS`.
+aucun push de `$PATCH_BRANCH` ni de `fork-channel`. Les gates sont les mêmes :
+un build manuel n'achète aucune dispense, et la release porte le même fichier
+`SHA256SUMS`.
+
+### La garde de composition
+
+Tant que `CUSTOM_BRANCH` est réglée, un `source_ref` qui ne porte pas ses
+commits est **refusé avant le tag** : pas de tag, pas de build, pas de release.
+La comparaison est faite par patch-id (`git cherry`), donc une source rebasée
+ou cherry-pickée passe — les SHA changent, les patch-ids non.
+
+Elle refuse aussi un portage **réadapté** (conflit résolu à la main : le
+patch-id change), et c'est voulu — la CI ne peut pas savoir qu'un portage est
+fidèle. Le réglage est alors de faire pointer la paire `PATCH_BRANCH` /
+`CUSTOM_BRANCH` sur les branches de la nouvelle base ; le résumé du run
+imprime la commande. Assumer un canal nu se dit explicitement :
+`gh variable delete CUSTOM_BRANCH --repo flosrn/orca`.
+
+Chaque release porte la ligne `personnalisations : incorporated | bare`, et le
+zip macOS porte dans `Contents/Resources/orca-local-build.json` le SHA de la
+source réellement buildée — une étape du build le vérifie.
 
 Trois choses à savoir :
 
@@ -151,10 +175,10 @@ décision de builder.
 
 ## Ce que le workflow fait (`.github/workflows/fork-nightly.yml`)
 
-1. **rebase** — `git cherry-pick` des commits de `feat/argv-worker-start` (la
-   plage `merge-base(upstream/main, patch)..patch`, rien de plus) sur
+1. **rebase** — `git cherry-pick` des commits de `$PATCH_BRANCH` (la plage
+   `merge-base(upstream/main, patch)..patch`, rien de plus) sur
    `upstream/main`, avec `git rerere` amorcé depuis `rerere-cache/`. Résultat
-   force-pushé sur `feat/argv-worker-start`, puis taggé `fork-*`.
+   force-pushé sur `$PATCH_BRANCH`, puis taggé `fork-*`.
 2. **test** — `pnpm typecheck` + vitest sur `src/main/runtime/orchestration` et
    `src/main/runtime/rpc`, les deux seuls répertoires que le patch touche ;
    puis le **gate renderer** : `gates/renderer-boot-crash-free.spec.ts` (sur
@@ -164,6 +188,13 @@ décision de builder.
    pas de release. Origine : build `6feef259b9f5`, React #185 dans la barre
    d'état au premier rendu, invisible pour les tests amont qui mockent le
    store.
+
+   Puis le **gate perso**, quand le build est censé porter tes
+   personnalisations : les specs listés dans `gates/custom-meter-specs.txt`
+   doivent exister **dans la source** et passer. Booter ne suffit pas — une
+   app privée de ses compteurs de quota boote très bien, et c'est comme ça
+   qu'un build amputé est parti vert. Tu customises ailleurs que les
+   compteurs : ajoute ton spec à cette liste.
 3. **build-mac** / **build-linux** — zip macOS arm64 **non signé** et `.deb`
    amd64, en parallèle.
 4. **release** — un tag `fork-<AAAAMMJJ>-<HHMM>-<sha12>` sur ce fork, avec les

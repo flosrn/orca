@@ -1,0 +1,13 @@
+# Specs de la SOURCE que le job `test` exige quand `custom_state=incorporated`,
+# c'est-à-dire quand le build est censé porter les personnalisations.
+#
+# Pourquoi ici et pas dans `gates/` en dur : ces specs vivent dans la source,
+# où ils sont maintenus avec le code qu'ils gardent. Le canal ne fait que dire
+# LESQUELS sont contractuels — un spec réécrit côté canal dériverait de l'app.
+#
+# Un spec absent de l'arbre buildé = source refusée. C'est le filet qui a
+# manqué le jour où un build « patch seul » est parti vert : l'app bootait,
+# et plus un seul compteur de quota n'était là.
+#
+# Une ligne = un chemin, relatif à la racine du dépôt. `#` = commentaire.
+tests/e2e/status-bar-provider-account-meters.spec.ts
