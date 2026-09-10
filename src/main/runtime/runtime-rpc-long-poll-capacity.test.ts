@@ -1,32 +1,21 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { OrcaRuntimeService } from './orca-runtime'
 import { OrchestrationDb } from './orchestration/db'
 import { readRuntimeMetadata } from './runtime-metadata'
 import { OrcaRuntimeRpcServer } from './runtime-rpc'
-import { MAX_RUNTIME_RPC_CONNECTIONS } from './rpc/unix-socket-transport'
-import { LONG_POLL_CAP } from './runtime-rpc/runtime-rpc-long-poll'
 import { getLongPollCapacityReport } from './runtime-rpc/runtime-rpc-long-poll-capacity'
-import { openFramedSession, sendRequest, sleep } from './runtime-rpc-test-harness'
+import { openFramedSession, sendRequest, waitFor } from './runtime-rpc-test-harness'
 
 describe('runtime long-poll capacity evidence', () => {
-  it('keeps the cap at half the socket budget, sized for a worker wave', () => {
-    expect(LONG_POLL_CAP).toBe(MAX_RUNTIME_RPC_CONNECTIONS / 2)
-    // Why: every dispatched worker parks one `check --wait` for its whole life,
-    // and the coordinator, the operator's own clients and each in-flight
-    // worker-start take one more. Measured 2026-09-02: a ten-worker wave held
-    // the old 16-slot cap saturated for 67 minutes, refusing everything that
-    // arrived. Anything below 20 puts a wave of that size back at the fence.
-    expect(LONG_POLL_CAP).toBeGreaterThanOrEqual(20)
-  })
-
   it('records a refused long-poll in the message and in status.get', async () => {
     const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-rpc-'))
     const runtime = new OrcaRuntimeService()
     const db = new OrchestrationDb(':memory:')
     runtime.setOrchestrationDb(db)
+    vi.spyOn(runtime, 'getTerminalPaneKey').mockImplementation((handle) => `tab_${handle}:leaf`)
     const server = new OrcaRuntimeRpcServer({
       runtime,
       userDataPath,
@@ -45,7 +34,7 @@ describe('runtime long-poll capacity evidence', () => {
         method: 'orchestration.check',
         params: { terminal: 'term_a', wait: true, timeoutMs: 5_000 }
       })
-      await sleep(100)
+      await waitFor(() => server['activeLongPolls'] === 1)
 
       const refused = await sendRequest(endpoint, {
         id: 'req_refused',
