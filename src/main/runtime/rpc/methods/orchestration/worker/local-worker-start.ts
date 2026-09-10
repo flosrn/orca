@@ -1,4 +1,3 @@
-import { TUI_AGENT_CONFIG } from '../../../../../../shared/tui-agent-config'
 import type { OrcaRuntimeService } from '../../../../orca-runtime'
 import type { OrchestrationDb } from '../../../../orchestration/db'
 import type { RunRow, TaskRow } from '../../../../orchestration/types'
@@ -21,18 +20,11 @@ import { failWorkerStartWithReceipt } from './worker-start-receipt'
 import { parseTaskDeps } from './task-deps-argument'
 import { assertExplicitWorkerTerminalUsable } from './explicit-worker-terminal-validation'
 import { recordCreatedWorkerTerminalCustody } from './created-worker-terminal-custody'
-import { startArgvWorkerDispatch } from './worker-argv-start'
+import { startArgvWorkerIfApplicable } from './worker-argv-start'
 import { tearDownFailedWorkerStart } from './failed-worker-start-teardown'
 import { requireWorkerAuthority, type WorkerEffect } from './worker-topology'
 import { prepareLocalWorkerStart } from './worker-start-validation'
 import { deliverAndSettleWorkerStartReadiness } from './worker-start-readiness-settlement'
-
-type WorkerStartMutation = {
-  callerFingerprint: string
-  requestId: string
-  method: string
-  payloadHash: string
-}
 
 export async function startLocalWorker(args: {
   params: WorkerStartInput
@@ -41,7 +33,12 @@ export async function startLocalWorker(args: {
   run: RunRow
   coordinatorPane: string | null
   existingTask?: TaskRow
-  orchestrationMutation?: WorkerStartMutation
+  orchestrationMutation?: {
+    callerFingerprint: string
+    requestId: string
+    method: string
+    payloadHash: string
+  }
   /** Settings-driven; the executing host still gets to refuse below. */
   mode: WorkerStartModeReceipt
 }): Promise<unknown> {
@@ -128,42 +125,26 @@ export async function startLocalWorker(args: {
   try {
     // Why: an argv agent's brief travels in its launch command, so its whole start is a
     // different flow — capability minted before the terminal exists, authority bound at
-    // createTerminal resolution, ready with no paste and no submission window. Only a fresh
-    // terminal in an existing worktree takes it: an explicit --terminal is the caller's own
-    // pane, a structured session injects over its own channel, and a worktree this start
-    // creates comes up with its agent terminal already attached.
-    if (
-      agent &&
-      !params.terminal &&
-      resolvedWorktree &&
-      mode.mode !== 'structured' &&
-      TUI_AGENT_CONFIG[agent].promptInjectionMode === 'argv'
-    ) {
-      db.recordWorkerStage({
-        dispatchId: started.dispatch.id,
-        stage: 'terminal_creating',
-        worktreeId: resolvedWorktree.id,
-        effects
-      })
-      const argvResult = await startArgvWorkerDispatch({
-        runtime,
-        db,
-        runId: run.id,
-        task,
-        dispatchId: started.dispatch.id,
-        coordinatorHandle: params.from,
-        devMode: params.devMode,
-        timeoutMs: params.timeoutMs ?? 60_000,
-        agent,
-        launchPreferences: launch.preferences,
-        launchReceipt: launch.receipt,
-        worktreeId: resolvedWorktree.id,
-        effects,
-        setupReceipt: EXISTING_WORKTREE_SETUP,
-        onStage: (stage) => {
-          failedStage = stage
-        }
-      })
+    // createTerminal resolution, ready with no paste and no submission window. The entry
+    // point returns null when the ordinary placement path below owns this start.
+    const argvResult = await startArgvWorkerIfApplicable({
+      agent,
+      mode,
+      runtime,
+      db,
+      runId: run.id,
+      task,
+      dispatch: started.dispatch,
+      params,
+      launch,
+      worktreeId: resolvedWorktree?.id,
+      effects,
+      setupReceipt: EXISTING_WORKTREE_SETUP,
+      onStage: (stage) => {
+        failedStage = stage
+      }
+    })
+    if (argvResult) {
       return { ...argvResult, mode }
     }
     placed = await placeWorkerAgent({

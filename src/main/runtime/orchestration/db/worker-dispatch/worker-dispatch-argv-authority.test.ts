@@ -17,7 +17,12 @@ describe('argv worker authority: mint before spawn, bind after', () => {
 
   function startDispatch() {
     db = new OrchestrationDb(':memory:')
-    const task = db.createTask({ spec: 'argv worker' })
+    const run = db.createRun({
+      objective: 'argv worker',
+      coordinatorHandle: 'term_coord',
+      coordinatorPaneKey: 'tab_coord:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    })
+    const task = db.createTask({ spec: 'argv worker', runId: run.id })
     const started = db.createStartingWorkerDispatch({
       taskId: task.id,
       startOptions: {},
@@ -27,7 +32,7 @@ describe('argv worker authority: mint before spawn, bind after', () => {
       creator: { kind: 'system' },
       maxDepth: NESTED_WORKER_MAX_DEPTH_DEFAULT
     })
-    return { d: db, dispatchId: started.dispatch.id }
+    return { d: db, dispatchId: started.dispatch.id, runId: run.id }
   }
 
   function bindParams(dispatchId: string, overrides?: { launchTokenHash?: string }) {
@@ -167,13 +172,13 @@ describe('argv worker authority: mint before spawn, bind after', () => {
   })
 
   it('refuses to bind a pane that already carries another active dispatch', () => {
-    const { d, dispatchId } = startDispatch()
+    const { d, dispatchId, runId } = startDispatch()
     d.commitDispatchLaunchTokenHash(dispatchId, TOKEN_HASH)
     d.mintStartingWorkerCapability({ dispatchId })
     d.bindStartingWorkerAuthority(bindParams(dispatchId))
     d.markWorkerDispatchReady(dispatchId)
 
-    const rival = d.createTask({ spec: 'rival argv worker' })
+    const rival = d.createTask({ spec: 'rival argv worker', runId })
     const second = d.createStartingWorkerDispatch({
       taskId: rival.id,
       startOptions: {},

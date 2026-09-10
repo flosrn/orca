@@ -520,7 +520,7 @@ describe('orchestration federated worker output', () => {
     expect(workerRuntime.closeTerminal).not.toHaveBeenCalled()
 
     workerReleaseUnavailable = false
-    const replayedUnknown = await homeDispatcher.dispatch({
+    const retriedAfterReconnect = await homeDispatcher.dispatch({
       id: 'rpc_remote_release_unavailable_replay',
       authToken: 'coordinator-token',
       orchestrationContractVersion: ORCHESTRATION_CONTRACT_VERSION,
@@ -528,25 +528,12 @@ describe('orchestration federated worker output', () => {
       method: 'orchestration.workerRelease',
       params: { dispatch: dispatchId }
     })
-    expect(replayedUnknown).toMatchObject({
-      ok: true,
-      result: { state: 'release_unknown', mutation: { replayed: true } }
-    })
-    expect(workerRuntime.closeTerminal).not.toHaveBeenCalled()
-
-    const released = await homeDispatcher.dispatch({
-      id: 'rpc_remote_release',
-      authToken: 'coordinator-token',
-      orchestrationContractVersion: ORCHESTRATION_CONTRACT_VERSION,
-      orchestrationRequestId: 'remote_release_after_reconnect',
-      method: 'orchestration.workerRelease',
-      params: { dispatch: dispatchId }
-    })
-    expect(released).toMatchObject({
+    expect(retriedAfterReconnect).toMatchObject({
       ok: true,
       result: {
         state: 'released',
         processAction: 'closed_agent_terminal',
+        mutation: { replayed: false },
         archive: { source: 'terminal', status: 'captured' },
         remoteOutput: {
           terminal: { tail: ['remote output'] },

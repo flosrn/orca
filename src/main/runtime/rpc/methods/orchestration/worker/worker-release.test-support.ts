@@ -29,6 +29,8 @@ export type OrchestrationWorkerReleaseHarness = {
   readonly db: OrchestrationDb
   readonly runtime: OrcaRuntimeService
   readonly activeRunId: string
+  /** Hash of the launch token the argv start handed the spawned pane; null before the spawn. */
+  readonly workerLaunchTokenHash: string | null
   readonly inspectProcessLiveness: ReturnType<typeof vi.fn>
 }
 
@@ -39,6 +41,7 @@ export function createOrchestrationWorkerReleaseHarness(): OrchestrationWorkerRe
   let ctx: RpcContext
   let activeRunId: string
   let inspectProcessLiveness: ReturnType<typeof vi.fn>
+  let workerLaunchTokenHash: string | null = null
 
   const coordinatorPaneKey = 'tab_coord:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
   const workerPaneKey = 'tab_worker:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
@@ -68,7 +71,7 @@ export function createOrchestrationWorkerReleaseHarness(): OrchestrationWorkerRe
     // spawn a launch token; the pane's authority must echo that token's hash
     // or the bind guard (rightly) refuses the pane. Pinning the pre-allocated
     // handle keeps every 'term_worker'-keyed fixture in this file valid.
-    let workerLaunchTokenHash: string | null = null
+    workerLaunchTokenHash = null
     vi.spyOn(runtime, 'createPreAllocatedTerminalHandle').mockReturnValue('term_worker')
     vi.spyOn(runtime, 'getOrchestrationDispatchAuthority').mockImplementation((handle) =>
       handle === 'term_worker' || handle === 'term_reminted'
@@ -204,6 +207,9 @@ export function createOrchestrationWorkerReleaseHarness(): OrchestrationWorkerRe
     },
     get activeRunId() {
       return activeRunId
+    },
+    get workerLaunchTokenHash() {
+      return workerLaunchTokenHash
     },
     get inspectProcessLiveness() {
       return inspectProcessLiveness

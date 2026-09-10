@@ -11,6 +11,7 @@
  *   missing rather than merely unadvertised.
  */
 
+import { createHash } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setStructuredAgentSessionHost } from '../../../native-chat/agent-session-wire/structured-agent-session-registry'
 import { OrcaRuntimeService } from '../../orca-runtime'
@@ -115,6 +116,7 @@ describe('a worker cannot tell which mode it is running in', () => {
     // registry is exactly what is under test; stubbed only for the PTY handles that have no runtime.
     const realPaneKey = runtime.getTerminalPaneKey.bind(runtime)
     const realIncarnation = runtime.getTerminalProcessIncarnation.bind(runtime)
+    const realAuthority = runtime.getOrchestrationDispatchAuthority.bind(runtime)
     vi.spyOn(runtime, 'getTerminalPaneKey').mockImplementation((handle) =>
       handle === 'term_coord' ? coordinatorPaneKey : (realPaneKey(handle) ?? `tab_worker:${handle}`)
     )
@@ -140,6 +142,27 @@ describe('a worker cannot tell which mode it is running in', () => {
       exitCode: null
     })
     vi.spyOn(runtime, 'getTerminalOrchestrationCliCommand').mockReturnValue('orca')
+    vi.spyOn(runtime, 'getWorktreeOrchestrationCliCommand').mockResolvedValue('orca')
+    let workerLaunchTokenHash: string | null = null
+    vi.spyOn(runtime, 'createPreAllocatedTerminalHandle').mockReturnValue(TERMINAL_HANDLE)
+    vi.spyOn(runtime, 'createTerminal').mockImplementation(async (_selector, opts) => {
+      workerLaunchTokenHash = opts?.launchToken
+        ? createHash('sha256').update(opts.launchToken).digest('hex')
+        : null
+      return { handle: TERMINAL_HANDLE, worktreeId: WORKTREE, title: 'worker' } as never
+    })
+    vi.spyOn(runtime, 'getOrchestrationDispatchAuthority').mockImplementation((handle) => {
+      if (handle === TERMINAL_HANDLE && workerLaunchTokenHash) {
+        return {
+          terminalHandle: handle,
+          paneKey: `tab_worker:${handle}`,
+          processIncarnation: 'runtime_test:worker:1',
+          launchTokenHash: workerLaunchTokenHash,
+          hostScope: { kind: 'local', hostId: 'local' }
+        } as never
+      }
+      return realAuthority(handle)
+    })
     vi.spyOn(runtime, 'sendTerminalAgentPrompt').mockResolvedValue({
       handle: TERMINAL_HANDLE,
       accepted: true,
@@ -202,7 +225,10 @@ describe('a worker cannot tell which mode it is running in', () => {
     expect(structured.mode.mode).toBe('structured')
     expect(terminal.mode.mode).toBe('terminal')
     const structuredPreamble = structuredPreambles[0] as string
-    const terminalPreamble = vi.mocked(runtime.sendTerminalAgentPrompt).mock.calls[0]?.[1] as string
+    const terminalPreamble = vi.mocked(runtime.createTerminal).mock.calls.find((call) => {
+      const opts = call[1] as { agentPrompt?: string } | undefined
+      return typeof opts?.agentPrompt === 'string'
+    })?.[1]?.agentPrompt as string
     expect(normalizePreamble(structuredPreamble, STRUCTURED_HANDLE, structured.dispatchId)).toBe(
       normalizePreamble(terminalPreamble, TERMINAL_HANDLE, terminal.dispatchId)
     )
@@ -226,9 +252,8 @@ describe('a worker cannot tell which mode it is running in', () => {
 
     expect(result).toMatchObject({ state: 'ready' })
     expect(showTerminal).not.toHaveBeenCalled()
-    expect(vi.mocked(runtime.sendTerminalAgentPrompt).mock.calls[0]?.[1]).toContain(
-      '=== SUB-DISPATCH ==='
-    )
+    const subDispatchPrompt = vi.mocked(runtime.createTerminal).mock.calls.at(-1)?.[1]?.agentPrompt
+    expect(subDispatchPrompt).toContain('=== SUB-DISPATCH ===')
   })
 
   it('refuses an unavailable output source without disclosing the mode', async () => {

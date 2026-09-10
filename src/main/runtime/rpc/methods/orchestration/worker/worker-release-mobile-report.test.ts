@@ -18,6 +18,9 @@ it.each(['local', 'ssh'])(
               terminalHandle: handle,
               paneKey: h.workerPaneKey,
               processIncarnation: 'runtime_test:term_worker:1',
+              // The argv start binds the pane only if it echoes the launch token it was spawned
+              // with; read it at call time, since the spawn happens after this mock is installed.
+              ...(h.workerLaunchTokenHash ? { launchTokenHash: h.workerLaunchTokenHash } : {}),
               hostScope: { kind: 'ssh', targetId: 'ssh-1' }
             } as never)
           : null
@@ -120,7 +123,8 @@ it('the report is reachable from a mobile-scoped device token', async () => {
 // Round-1 regression (#19337 review): a phone key landing inside the worker's boot wait used to
 // find no `owned` row, report `changed: 0`, and still arm the client's 30 s gate — so the real
 // takeover was suppressed and `worker-release` closed the pane. #19608 writes custody at terminal
-// creation, so the boot-wait key itself takes the pane.
+// creation, so the boot-wait key itself takes the pane. The agent is one that receives its brief
+// after startup: an argv agent has no boot wait to land inside, its brief riding the launch argv.
 it('a phone report during the boot wait takes the pane and fences the later release', async () => {
   const gate = h.deferred<unknown>()
   vi.spyOn(h.runtime, 'waitForTerminal').mockReturnValue(gate.promise as never)
@@ -128,7 +132,7 @@ it('a phone report during the boot wait takes the pane and fences the later rele
   const start = h.call('orchestration.workerStart', {
     task: task.id,
     from: 'term_coord',
-    agent: 'codex'
+    agent: 'aider'
   })
   await vi.waitFor(() => expect(h.runtime.waitForTerminal).toHaveBeenCalled())
   const dispatchId = (

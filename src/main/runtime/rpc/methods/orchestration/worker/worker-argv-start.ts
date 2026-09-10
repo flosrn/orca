@@ -2,20 +2,20 @@ import { createHash, randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { TuiAgent } from '../../../../../../shared/tui-agent'
 import type { AgentLaunchPreferences } from '../../../../../../shared/agent-session-host-authority'
+import { TUI_AGENT_CONFIG } from '../../../../../../shared/tui-agent-config'
 import { buildDispatchPreamble } from '../../../../orchestration/preamble'
 import type { OrchestrationDb } from '../../../../orchestration/db'
 import type { OrcaRuntimeService } from '../../../../orca-runtime'
+import type { WorkerStartModeReceipt } from '../../orchestration-worker-start-mode'
 import {
   monitorWorkerSetup,
   requireWorkerAuthority,
   type WorkerEffect,
   type WorkerSetupReceipt
 } from './worker-topology'
-import {
-  persistGatedSetupSpawnFailure,
-  persistWorkerReadinessStage
-} from './worker-setup-gate'
+import { persistGatedSetupSpawnFailure, persistWorkerReadinessStage } from './worker-setup-gate'
 import type { OrchestrationWorkerLaunchReceipt } from './worker-launch-preferences'
+import type { WorkerStartInput } from './worker-start-schema'
 
 // Why: agents whose promptInjectionMode is 'argv' start the first turn WITH
 // the process — the dispatch preamble travels in the launch command, so
@@ -31,6 +31,7 @@ export async function startArgvWorkerDispatch(args: {
   runId: string
   task: { id: string; spec: string }
   dispatchId: string
+  dispatchDepth: number
   coordinatorHandle: string
   devMode?: boolean
   timeoutMs: number
@@ -55,6 +56,7 @@ export async function startArgvWorkerDispatch(args: {
   const capability = db.mintStartingWorkerCapability({ dispatchId: args.dispatchId })
   const cliCommand = await runtime.getWorktreeOrchestrationCliCommand(args.worktreeId)
   const preamble = buildDispatchPreamble({
+    canDispatchSubWorkers: args.dispatchDepth < runtime.getNestedWorkerMaxDepth(),
     taskId: args.task.id,
     dispatchId: args.dispatchId,
     taskSpec: args.task.spec,
@@ -101,12 +103,23 @@ export async function startArgvWorkerDispatch(args: {
       `Worker terminal adopted handle ${terminal.handle} instead of the pre-allocated ${preAllocatedHandle}.`
     )
   }
+  const boundAuthority = await requireWorkerAuthorityAfterSpawn(runtime, terminal.handle)
+  // Why: the pane exists now, so its custody row has to exist now too — a keystroke into the
+  // booting pane must find an `owned` row to flip, and a start that dies between spawn and bind
+  // must leave a pane `worker-release` can close. The bind below finds the row already there.
+  db.recordCreatedWorkerTerminalCustody({
+    dispatchId: args.dispatchId,
+    handle: terminal.handle,
+    paneKey: boundAuthority.paneKey,
+    processIncarnation: boundAuthority.processIncarnation,
+    worktreeId: args.worktreeId,
+    hostScope: boundAuthority.hostScope ?? null
+  })
   if (persistGatedSetupSpawnFailure(setupStage)) {
     args.onStage('setup_start')
     throw new Error('Setup terminal failed to start before the gated agent launch.')
   }
   persistWorkerReadinessStage(setupStage)
-  const boundAuthority = await requireWorkerAuthorityAfterSpawn(runtime, terminal.handle)
   db.bindStartingWorkerAuthority({
     dispatchId: args.dispatchId,
     handle: terminal.handle,
@@ -222,4 +235,62 @@ function monitorArgvStartupBlocked(args: {
       args.runtime.notifyMessageArrived(message.to_handle, message.type)
     })
     .catch(() => undefined)
+}
+
+// Why: one place decides whether a start takes the argv path, so the caller does not have to
+// know which agents carry their brief in argv. Only a terminal this start creates in an
+// existing worktree qualifies: an explicit `--terminal` is the caller's own pane, a structured
+// session injects over its own channel, and a worktree this start creates comes up with its
+// agent terminal already attached — those keep the ordinary placement path, so this returns
+// null for them.
+export async function startArgvWorkerIfApplicable(args: {
+  agent: TuiAgent | undefined
+  mode: WorkerStartModeReceipt
+  runtime: OrcaRuntimeService
+  db: OrchestrationDb
+  runId: string
+  task: { id: string; spec: string }
+  dispatch: { id: string; depth: number }
+  params: Pick<WorkerStartInput, 'from' | 'terminal' | 'devMode' | 'timeoutMs'>
+  launch: { preferences?: AgentLaunchPreferences; receipt: OrchestrationWorkerLaunchReceipt }
+  /** Absent when this start creates the worktree, which brings its own agent terminal. */
+  worktreeId: string | undefined
+  effects: WorkerEffect[]
+  setupReceipt: WorkerSetupReceipt
+  onStage: (stage: string) => void
+}): Promise<Record<string, unknown> | null> {
+  const worktreeId = args.worktreeId
+  if (
+    !args.agent ||
+    args.params.terminal ||
+    !worktreeId ||
+    args.mode.mode === 'structured' ||
+    TUI_AGENT_CONFIG[args.agent].promptInjectionMode !== 'argv'
+  ) {
+    return null
+  }
+  args.db.recordWorkerStage({
+    dispatchId: args.dispatch.id,
+    stage: 'terminal_creating',
+    worktreeId,
+    effects: args.effects
+  })
+  return await startArgvWorkerDispatch({
+    runtime: args.runtime,
+    db: args.db,
+    runId: args.runId,
+    task: args.task,
+    dispatchId: args.dispatch.id,
+    dispatchDepth: args.dispatch.depth,
+    coordinatorHandle: args.params.from,
+    devMode: args.params.devMode,
+    timeoutMs: args.params.timeoutMs ?? 60_000,
+    agent: args.agent,
+    launchPreferences: args.launch.preferences,
+    launchReceipt: args.launch.receipt,
+    worktreeId,
+    effects: args.effects,
+    setupReceipt: args.setupReceipt,
+    onStage: args.onStage
+  })
 }

@@ -54,7 +54,9 @@ describe('worker terminal custody is recorded at terminal creation', () => {
     const start = h.call('orchestration.workerStart', {
       task: task.id,
       from: 'term_coord',
-      ...(options.terminal ? { terminal: options.terminal } : { agent: 'codex' })
+      // Why: an agent that takes its brief after startup, so the start really sits in the boot
+      // wait this helper holds open. An argv agent never waits — see its own case below.
+      ...(options.terminal ? { terminal: options.terminal } : { agent: 'aider' })
     })
     await vi.waitFor(() => expect(h.runtime.waitForTerminal).toHaveBeenCalled())
     return { dispatchId: startingDispatchId(), taskId: task.id, start, finish }
@@ -162,7 +164,7 @@ describe('worker terminal custody is recorded at terminal creation', () => {
     const receipt = (await h.call('orchestration.workerStart', {
       task: task.id,
       from: 'term_coord',
-      agent: 'codex'
+      agent: 'aider'
     })) as { state: string; dispatchId: string; nextCommands?: string[] }
 
     expect(receipt).toMatchObject({ state: 'outcome_unknown' })
@@ -172,6 +174,41 @@ describe('worker terminal custody is recorded at terminal creation', () => {
     expect(h.db.getWorkerTerminalResourceByOwner(receipt.dispatchId)).toMatchObject({
       ownership_state: 'owned'
     })
+  })
+
+  // Why: an argv agent's brief rides its launch command, so its start has no boot wait to write
+  // custody before — the window that matters is between the spawn and the authority bind. A pane
+  // that cannot be bound is still a pane this start created, and must stay releasable.
+  it('owns the pane an argv start spawned even when the authority bind refuses it', async () => {
+    h.setup()
+    // The pane answers without the launch token it was spawned with, so the bind guard refuses it.
+    vi.mocked(h.runtime.getOrchestrationDispatchAuthority).mockImplementation((handle) =>
+      handle === 'term_worker'
+        ? ({
+            terminalHandle: handle,
+            paneKey: h.workerPaneKey,
+            processIncarnation: 'runtime_test:term_worker:1',
+            hostScope: { kind: 'local', hostId: 'local' }
+          } as never)
+        : null
+    )
+    const task = h.db.createTask({ spec: 'argv bind refusal', runId: h.activeRunId })
+
+    const receipt = (await h.call('orchestration.workerStart', {
+      task: task.id,
+      from: 'term_coord',
+      agent: 'codex'
+    })) as { state: string; dispatchId: string }
+
+    expect(receipt.state).toBe('failed')
+    expect(h.db.getWorkerTerminalResourceByOwner(receipt.dispatchId)).toMatchObject({
+      ownership_state: 'owned',
+      terminal_handle: 'term_worker'
+    })
+    await expect(
+      h.call('orchestration.workerRelease', { dispatch: receipt.dispatchId })
+    ).resolves.toMatchObject({ state: 'released', processAction: 'closed_agent_terminal' })
+    expect(h.runtime.closeTerminal).toHaveBeenCalledWith('term_worker')
   })
 
   it('promises no cleanup for a reused terminal whose start died', async () => {
