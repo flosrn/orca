@@ -63,7 +63,11 @@ export async function fetchActiveClaudeRateLimits(
   if (plan.steps.some((step) => step.source === 'oauth') && oauthCredentials.token) {
     recordClaudeUsageAttempt(attempts, 'oauth')
     try {
-      const oauthLimits = await fetchClaudeOAuthUsage(oauthCredentials.token, options?.signal)
+      const oauthLimits = await fetchClaudeOAuthUsage(
+        oauthCredentials.token,
+        options?.signal,
+        options?.authPreparation?.provenance ?? 'system'
+      )
       if (options?.signal?.aborted) {
         return abortedClaudeRateLimitResult()
       }

@@ -1,8 +1,11 @@
 import type { ProviderRateLimits } from '../../shared/rate-limit-types'
 import {
+  isOauthTokenExpired,
   isOauthTokenExpiring,
-  refreshClaudeOauthCredentials
+  refreshClaudeOauthCredentialsOutcome,
+  type ClaudeOauthRefreshFailure
 } from '../claude-accounts/oauth-refresh'
+import { logClaudeAuthDiagnostic } from './claude-auth-diagnostics-log'
 import {
   readClaudeManagedCredentialsJson,
   resolveClaudeManagedCredentialsLocation,
@@ -16,7 +19,9 @@ import type { ClaudeManagedAccountUsageOptions } from './claude-usage-fetch-opti
 import {
   abortedClaudeRateLimitResult,
   canSupplementClaudeOAuthUsage,
+  makeClaudeUsageResult,
   mergeClaudeUsageWindows,
+  metadataForClaudeUsageAttempt,
   warnClaudeUsageFetchFailure
 } from './claude-usage-result'
 
@@ -29,6 +34,37 @@ function noClaudeManagedCredentialsResult(): ProviderRateLimits {
     error: 'No credentials',
     status: 'error'
   }
+}
+
+// Why: a hard-expired bearer is a guaranteed 401 that feeds per-token
+// throttling; report the refresh failure instead of replaying it.
+function staleClaudeManagedCredentialsResult(
+  credentialsJson: string,
+  failure: ClaudeOauthRefreshFailure | null
+): ProviderRateLimits {
+  const oauthCredentials = parseClaudeOAuthCredentialsJson(credentialsJson, 'credentials-file')
+  const rateLimited = failure?.status === 429
+  const rejected = failure?.status === 400 || failure?.status === 401
+  const retryAfterMs = failure?.retryAfterMs
+  return makeClaudeUsageResult(
+    'error',
+    rateLimited
+      ? 'Claude token refresh is rate limited right now.'
+      : rejected || !oauthCredentials.hasRefreshableCredentials
+        ? 'Claude token refresh was rejected. Re-authenticate this account.'
+        : (failure?.message ?? 'Claude token refresh failed.'),
+    metadataForClaudeUsageAttempt({
+      attemptedSources: ['oauth'],
+      oauthCredentials,
+      source: 'oauth',
+      failureKind: rateLimited
+        ? 'rate-limited'
+        : rejected || !oauthCredentials.hasRefreshableCredentials
+          ? 'stale-token'
+          : 'network',
+      retryAtMs: retryAfterMs ? Date.now() + retryAfterMs : undefined
+    })
+  )
 }
 
 export async function fetchInactiveClaudeAccountUsage(
@@ -49,7 +85,8 @@ export async function fetchInactiveClaudeAccountUsage(
 
   let token = parseClaudeOAuthCredentialsJson(credentialsJson, 'credentials-file').token
   if (isOauthTokenExpiring(credentialsJson)) {
-    const refreshed = await refreshClaudeOauthCredentials(credentialsJson)
+    const { credentialsJson: refreshed, failure } =
+      await refreshClaudeOauthCredentialsOutcome(credentialsJson)
     if (options.signal?.aborted) {
       return abortedClaudeRateLimitResult()
     }
@@ -61,13 +98,20 @@ export async function fetchInactiveClaudeAccountUsage(
       }
       credentialsJson = refreshed
       token = parseClaudeOAuthCredentialsJson(refreshed, 'credentials-file').token
+    } else if (isOauthTokenExpired(credentialsJson)) {
+      logClaudeAuthDiagnostic('claude-inactive-usage-skipped', {
+        accountId: account.id,
+        status: failure?.status ?? null
+      })
+      return staleClaudeManagedCredentialsResult(credentialsJson, failure)
     }
+    // Why: within the refresh buffer the stored bearer is still valid; use it.
   }
 
   if (!token) {
     return noClaudeManagedCredentialsResult()
   }
-  const oauthLimits = await fetchClaudeOAuthUsage(token, options.signal)
+  const oauthLimits = await fetchClaudeOAuthUsage(token, options.signal, `managed:${account.id}`)
   if (options.signal?.aborted) {
     return abortedClaudeRateLimitResult()
   }

@@ -9,6 +9,7 @@ import {
   writeActiveClaudeKeychainCredentials,
   writeManagedClaudeKeychainCredentials
 } from '../claude-accounts/keychain'
+import { resetClaudeUsagePollBudgetForTest } from './claude-usage-poll-budget'
 
 /** Electron/fs mocks each claude-fetcher test file declares via its own `vi.mock` factories. */
 export type ClaudeFetcherHoistedMocks = {
@@ -38,6 +39,7 @@ export function restorePlatform(): void {
 export function primeClaudeFetcherMocks(mocks: ClaudeFetcherHoistedMocks): void {
   setPlatform('darwin')
   vi.clearAllMocks()
+  resetClaudeUsagePollBudgetForTest()
   mocks.readFileMock.mockRejectedValue(new Error('missing file'))
   vi.mocked(readActiveClaudeKeychainCredentials).mockResolvedValue(null)
   vi.mocked(readActiveClaudeKeychainCredentialsStrict).mockResolvedValue(null)
