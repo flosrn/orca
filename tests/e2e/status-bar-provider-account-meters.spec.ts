@@ -13,11 +13,12 @@ test('renders one status-bar meter per provider account', async ({ orcaPage }) =
   await waitForSessionReady(orcaPage)
 
   await orcaPage.evaluate(
-    ({ activeEmail, secondEmail }) => {
+    async ({ activeEmail, secondEmail }) => {
       const store = window.__store
       if (!store) {
         throw new Error('window.__store is not available')
       }
+      await store.getState().ensureDetectedAgents()
       const previous = store.getState()
       if (!previous.settings) {
         throw new Error('settings are not hydrated yet')
@@ -28,8 +29,8 @@ test('renders one status-bar meter per provider account', async ({ orcaPage }) =
         resetDescription: null
       }
       store.setState({
-        // Why: CLI detection gating hides the Claude meter when no claude binary is on PATH.
-        detectedAgentIds: null,
+        // Finish discovery before injecting the fixture; CI has no Claude CLI.
+        detectedAgentIds: ['claude'],
         statusBarItems: ['claude'],
         settings: {
           ...previous.settings,
