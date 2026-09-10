@@ -23,7 +23,7 @@ export async function createOAuthUsageError(res: Response): Promise<OAuthUsageEr
   )
 }
 
-function parseRetryAfterMs(header: string | null): number | null {
+export function parseRetryAfterMs(header: string | null): number | null {
   if (!header) {
     return null
   }
