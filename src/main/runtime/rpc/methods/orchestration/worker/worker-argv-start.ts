@@ -2,19 +2,18 @@ import { createHash, randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { TuiAgent } from '../../../../../../shared/tui-agent'
 import type { AgentLaunchPreferences } from '../../../../../../shared/agent-session-host-authority'
+import { TUI_AGENT_CONFIG } from '../../../../../../shared/tui-agent-config'
 import { buildDispatchPreamble } from '../../../../orchestration/preamble'
 import type { OrchestrationDb } from '../../../../orchestration/db'
 import type { OrcaRuntimeService } from '../../../../orca-runtime'
 import {
+  createExistingWorktreeWorkerTerminal,
   monitorWorkerSetup,
   requireWorkerAuthority,
   type WorkerEffect,
   type WorkerSetupReceipt
 } from './worker-topology'
-import {
-  persistGatedSetupSpawnFailure,
-  persistWorkerReadinessStage
-} from './worker-setup-gate'
+import { persistGatedSetupSpawnFailure, persistWorkerReadinessStage } from './worker-setup-gate'
 import type { OrchestrationWorkerLaunchReceipt } from './worker-launch-preferences'
 
 // Why: agents whose promptInjectionMode is 'argv' start the first turn WITH
@@ -31,6 +30,7 @@ export async function startArgvWorkerDispatch(args: {
   runId: string
   task: { id: string; spec: string }
   dispatchId: string
+  dispatchDepth: number
   coordinatorHandle: string
   devMode?: boolean
   timeoutMs: number
@@ -55,6 +55,7 @@ export async function startArgvWorkerDispatch(args: {
   const capability = db.mintStartingWorkerCapability({ dispatchId: args.dispatchId })
   const cliCommand = await runtime.getWorktreeOrchestrationCliCommand(args.worktreeId)
   const preamble = buildDispatchPreamble({
+    canDispatchSubWorkers: args.dispatchDepth < runtime.getNestedWorkerMaxDepth(),
     taskId: args.task.id,
     dispatchId: args.dispatchId,
     taskSpec: args.task.spec,
@@ -222,4 +223,61 @@ function monitorArgvStartupBlocked(args: {
       args.runtime.notifyMessageArrived(message.to_handle, message.type)
     })
     .catch(() => undefined)
+}
+
+export async function startArgvOrExistingWorktreeTerminal(args: {
+  agent: TuiAgent | undefined
+  runtime: OrcaRuntimeService
+  db: OrchestrationDb
+  runId: string
+  task: { id: string; spec: string }
+  dispatch: { id: string; depth: number }
+  params: { from: string; devMode?: boolean; timeoutMs?: number }
+  launch: { preferences?: AgentLaunchPreferences; receipt: OrchestrationWorkerLaunchReceipt }
+  worktreeId: string
+  effects: WorkerEffect[]
+  setupReceipt: WorkerSetupReceipt
+  onStage: (stage: string) => void
+}): Promise<
+  | { kind: 'argv'; result: Record<string, unknown> }
+  | { kind: 'terminal'; handle: string; warning?: string }
+> {
+  args.db.recordWorkerStage({
+    dispatchId: args.dispatch.id,
+    stage: 'terminal_creating',
+    worktreeId: args.worktreeId,
+    effects: args.effects
+  })
+  if (args.agent && TUI_AGENT_CONFIG[args.agent].promptInjectionMode === 'argv') {
+    return {
+      kind: 'argv',
+      result: await startArgvWorkerDispatch({
+        runtime: args.runtime,
+        db: args.db,
+        runId: args.runId,
+        task: args.task,
+        dispatchId: args.dispatch.id,
+        dispatchDepth: args.dispatch.depth,
+        coordinatorHandle: args.params.from,
+        devMode: args.params.devMode,
+        timeoutMs: args.params.timeoutMs ?? 60_000,
+        agent: args.agent,
+        launchPreferences: args.launch.preferences,
+        launchReceipt: args.launch.receipt,
+        worktreeId: args.worktreeId,
+        effects: args.effects,
+        setupReceipt: args.setupReceipt,
+        onStage: args.onStage
+      })
+    }
+  }
+  const terminal = await createExistingWorktreeWorkerTerminal({
+    runtime: args.runtime,
+    worktreeId: args.worktreeId,
+    agent: args.agent as TuiAgent,
+    launchPreferences: args.launch.preferences,
+    taskId: args.task.id,
+    effects: args.effects
+  })
+  return { kind: 'terminal', handle: terminal.handle, warning: terminal.warning }
 }

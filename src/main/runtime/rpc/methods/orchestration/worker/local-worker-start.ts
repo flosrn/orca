@@ -1,5 +1,4 @@
 import type { TuiAgent } from '../../../../../../shared/tui-agent'
-import { TUI_AGENT_CONFIG } from '../../../../../../shared/tui-agent-config'
 import type { OrcaRuntimeService } from '../../../../orca-runtime'
 import type { OrchestrationDb } from '../../../../orchestration/db'
 import type { RunRow, TaskRow } from '../../../../orchestration/types'
@@ -20,10 +19,9 @@ import { failWorkerStartWithReceipt } from './worker-start-receipt'
 import { parseTaskDeps } from './task-deps-argument'
 import { assertExplicitWorkerTerminalUsable } from './explicit-worker-terminal-validation'
 import { deliverWorkerDispatchPreamble } from './deliver-worker-dispatch-preamble'
-import { startArgvWorkerDispatch } from './worker-argv-start'
+import { startArgvOrExistingWorktreeTerminal } from './worker-argv-start'
 import { tearDownFailedWorkerStart } from './failed-worker-start-teardown'
 import {
-  createExistingWorktreeWorkerTerminal,
   createStructuredWorkerSessionForWorktree,
   createWorkerWorktree,
   monitorWorkerSetup,
@@ -33,13 +31,6 @@ import {
 } from './worker-topology'
 import { prepareLocalWorkerStart } from './worker-start-validation'
 
-type WorkerStartMutation = {
-  callerFingerprint: string
-  requestId: string
-  method: string
-  payloadHash: string
-}
-
 export async function startLocalWorker(args: {
   params: WorkerStartInput
   runtime: OrcaRuntimeService
@@ -47,7 +38,12 @@ export async function startLocalWorker(args: {
   run: RunRow
   coordinatorPane: string | null
   existingTask?: TaskRow
-  orchestrationMutation?: WorkerStartMutation
+  orchestrationMutation?: {
+    callerFingerprint: string
+    requestId: string
+    method: string
+    payloadHash: string
+  }
   /** Settings-driven; the executing host still gets to refuse below. */
   mode: WorkerStartModeReceipt
 }): Promise<unknown> {
@@ -175,44 +171,27 @@ export async function startLocalWorker(args: {
       })
       terminalHandle = structuredSession.identity.handle
     } else if (!terminalHandle) {
-      db.recordWorkerStage({
-        dispatchId: started.dispatch.id,
-        stage: 'terminal_creating',
-        worktreeId: resolvedWorktree!.id,
-        effects
-      })
-      if (agent && TUI_AGENT_CONFIG[agent].promptInjectionMode === 'argv') {
-        const argvResult = await startArgvWorkerDispatch({
-          runtime,
-          db,
-          runId: run.id,
-          task,
-          dispatchId: started.dispatch.id,
-          coordinatorHandle: params.from,
-          devMode: params.devMode,
-          timeoutMs: params.timeoutMs ?? 60_000,
-          agent,
-          launchPreferences: launch.preferences,
-          launchReceipt: launch.receipt,
-          worktreeId: resolvedWorktree!.id,
-          effects,
-          setupReceipt,
-          onStage: (stage) => {
-            failedStage = stage
-          }
-        })
-        return { ...argvResult, mode }
-      }
-      const terminal = await createExistingWorktreeWorkerTerminal({
+      const spawned = await startArgvOrExistingWorktreeTerminal({
+        agent,
         runtime,
+        db,
+        task,
+        launch,
+        effects,
+        setupReceipt,
+        params,
+        runId: run.id,
+        dispatch: started.dispatch,
         worktreeId: resolvedWorktree!.id,
-        agent: agent as TuiAgent,
-        launchPreferences: launch.preferences,
-        taskId: task.id,
-        effects
+        onStage: (stage) => {
+          failedStage = stage
+        }
       })
-      terminalHandle = terminal.handle
-      terminalRevealWarning = terminal.warning
+      if (spawned.kind === 'argv') {
+        return { ...spawned.result, mode }
+      }
+      terminalHandle = spawned.handle
+      terminalRevealWarning = spawned.warning
     } else {
       effects.push({ kind: 'terminal', role: 'agent', action: 'reused', id: terminalHandle })
     }

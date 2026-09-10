@@ -3,6 +3,7 @@
  * that setting describes. No flag reaches this decision, and no combination refuses the start.
  */
 
+import { createHash } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { OrcaRuntimeService } from '../../orca-runtime'
 import { OrchestrationDb } from '../../orchestration/db'
@@ -86,6 +87,26 @@ describe('worker-start honours the settings default', () => {
       exitCode: null
     })
     vi.spyOn(runtime, 'getTerminalOrchestrationCliCommand').mockReturnValue('orca')
+    vi.spyOn(runtime, 'getWorktreeOrchestrationCliCommand').mockResolvedValue('orca')
+    let workerLaunchTokenHash: string | null = null
+    vi.spyOn(runtime, 'createPreAllocatedTerminalHandle').mockReturnValue(TERMINAL_HANDLE)
+    vi.spyOn(runtime, 'createTerminal').mockImplementation(async (_selector, opts) => {
+      workerLaunchTokenHash = opts?.launchToken
+        ? createHash('sha256').update(opts.launchToken).digest('hex')
+        : null
+      return { handle: TERMINAL_HANDLE, worktreeId: 'repo::wt', title: 'worker' } as never
+    })
+    vi.spyOn(runtime, 'getOrchestrationDispatchAuthority').mockImplementation((handle) =>
+      handle === TERMINAL_HANDLE && workerLaunchTokenHash
+        ? ({
+            terminalHandle: handle,
+            paneKey: `tab_worker:${handle}`,
+            processIncarnation: 'runtime_test:worker:1',
+            launchTokenHash: workerLaunchTokenHash,
+            hostScope: { kind: 'local', hostId: 'local' }
+          } as never)
+        : null
+    )
     vi.spyOn(runtime, 'sendTerminalAgentPrompt').mockResolvedValue({
       handle: TERMINAL_HANDLE,
       accepted: true,
@@ -146,7 +167,7 @@ describe('worker-start honours the settings default', () => {
       state: 'ready',
       mode: { mode: 'terminal', preferred: 'terminal', reason: 'user_default' }
     })
-    expect(createExistingWorktreeWorkerTerminal).toHaveBeenCalledTimes(1)
+    expect(runtime.createTerminal).toHaveBeenCalledTimes(1)
     expect(createStructuredWorkerSessionForWorktree).not.toHaveBeenCalled()
   })
 
@@ -162,14 +183,14 @@ describe('worker-start honours the settings default', () => {
       state: 'ready',
       mode: { mode: 'terminal', preferred: 'structured', reason: 'wsl_execution_runtime' }
     })
-    expect(createExistingWorktreeWorkerTerminal).toHaveBeenCalledTimes(1)
+    expect(runtime.createTerminal).toHaveBeenCalledTimes(1)
   })
 
   it('still starts a worker when the runtime has no settings to read', async () => {
     const result = await startWorker(null)
 
     expect(result).toMatchObject({ state: 'ready', mode: { mode: 'terminal' } })
-    expect(createExistingWorktreeWorkerTerminal).toHaveBeenCalledTimes(1)
+    expect(runtime.createTerminal).toHaveBeenCalledTimes(1)
   })
 
   it('falls back instead of refusing a launch preference the structured default cannot apply', async () => {
@@ -179,7 +200,7 @@ describe('worker-start honours the settings default', () => {
       state: 'ready',
       mode: { mode: 'terminal', preferred: 'structured', reason: 'launch_preferences' }
     })
-    expect(createExistingWorktreeWorkerTerminal).toHaveBeenCalledTimes(1)
+    expect(runtime.createTerminal).toHaveBeenCalledTimes(1)
     expect(createStructuredWorkerSessionForWorktree).not.toHaveBeenCalled()
   })
 
