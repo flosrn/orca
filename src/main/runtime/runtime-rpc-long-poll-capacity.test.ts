@@ -7,9 +7,62 @@ import { OrchestrationDb } from './orchestration/db'
 import { readRuntimeMetadata } from './runtime-metadata'
 import { OrcaRuntimeRpcServer } from './runtime-rpc'
 import { getLongPollCapacityReport } from './runtime-rpc/runtime-rpc-long-poll-capacity'
-import { openFramedSession, sendRequest, waitFor } from './runtime-rpc-test-harness'
+import {
+  openFramedSession,
+  sendRequest,
+  waitFor,
+  type FramedSession
+} from './runtime-rpc-test-harness'
 
 describe('runtime long-poll capacity evidence', () => {
+  it('serves status while twenty worker and coordinator inboxes are waiting', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-rpc-wave-'))
+    const runtime = new OrcaRuntimeService()
+    const db = new OrchestrationDb(':memory:')
+    runtime.setOrchestrationDb(db)
+    vi.spyOn(runtime, 'getTerminalPaneKey').mockImplementation((handle) => `tab_${handle}:leaf`)
+    const server = new OrcaRuntimeRpcServer({ runtime, userDataPath, enableWebSocket: false })
+    const parked: FramedSession[] = []
+    await server.start()
+    try {
+      const metadata = readRuntimeMetadata(userDataPath)!
+      const endpoint = metadata.transports[0]!.endpoint
+      // The old sixteen-slot cap refused this worker/coordinator wave.
+      for (let index = 0; index < 20; index++) {
+        parked.push(
+          openFramedSession(endpoint, {
+            id: `wave_${index}`,
+            authToken: metadata.authToken,
+            method: 'orchestration.check',
+            params: { terminal: `term_wave_${index}`, wait: true, timeoutMs: 10_000 }
+          })
+        )
+      }
+      await waitFor(() => server['activeLongPolls'] === 20)
+      const status = await sendRequest(endpoint, {
+        id: 'wave_status',
+        authToken: metadata.authToken,
+        method: 'status.get'
+      })
+      expect(status).toMatchObject({
+        ok: true,
+        result: {
+          longPollCapacity: {
+            held: 20,
+            refusedByClass: { ask: 0, 'browser-host': 0, wait: 0 }
+          }
+        }
+      })
+    } finally {
+      for (const session of parked) {
+        session.socket.destroy()
+      }
+      await Promise.all(parked.map((session) => session.done))
+      await server.stop()
+      db.close()
+    }
+  })
+
   it('records a refused long-poll in the message and in status.get', async () => {
     const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-rpc-'))
     const runtime = new OrcaRuntimeService()
