@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { TerminalProcessInspection } from '../../shared/terminal-process-inspection'
 
 const {
   isPackagedMock,
@@ -17,6 +18,7 @@ const {
   routerSubscriptionError,
   adapterInstances,
   defaultListSessionsSessions,
+  inspectProcessResults,
   listProcessesControl,
   getLocalPtyProviderMock,
   localFallbackProvider,
@@ -143,6 +145,89 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
       gate.markClaudePtyExited('claude-alive')
       gate.markClaudePtyExited('claude-dead')
     }
+  })
+
+  // Why: a daemon session outliving the Claude that ran in it is the ghost that held the gate
+  // — and the refusal of every isolated launch — for the whole life of the pane (#18211).
+  describe('seeded ids whose pane no longer runs Claude', () => {
+    const liveForeground = (processName: string | null) => ({
+      foregroundProcess: processName,
+      hasChildProcesses: processName !== null,
+      foregroundProcessEvidence: {
+        verdict: 'live' as const,
+        processName,
+        fence: {
+          platform: 'posix' as const,
+          shellPid: 4242,
+          shellStartTime: '1',
+          tty: '/dev/ttys001',
+          foregroundPgid: 4242
+        },
+        authorityGeneration: 'gen-1',
+        observationEpoch: 1,
+        capturedAgeMs: 0,
+        ptyId: 'claude-alive',
+        ptyIncarnationId: 'incarnation-1'
+      }
+    })
+
+    afterEach(() => {
+      inspectProcessResults.clear()
+      defaultListSessionsSessions.length = 0
+    })
+
+    it.each<[string, TerminalProcessInspection]>([
+      ['omp', liveForeground('omp')],
+      ['a shell', liveForeground(null)]
+    ])('releases a surviving session whose foreground is %s', async (_label, inspection) => {
+      const mod = await importFresh()
+      // Why: live-pty-gate is intentionally unmocked — import from the same fresh registry so gate state matches daemon-init's.
+      const gate = await import('../claude-accounts/live-pty-gate')
+      defaultListSessionsSessions.push({ sessionId: 'claude-alive' })
+      inspectProcessResults.set('claude-alive', inspection)
+      gate.seedLiveClaudePtysFromPersistence(['claude-alive'])
+      try {
+        await mod.initDaemonPtyProvider()
+
+        expect(gate.hasLiveClaudePtys()).toBe(false)
+      } finally {
+        gate.markClaudePtyExited('claude-alive')
+      }
+    })
+
+    it.each<[string, TerminalProcessInspection]>([
+      ['claude still owns the foreground', liveForeground('claude')],
+      [
+        'the foreground could not be verified',
+        {
+          foregroundProcess: null,
+          hasChildProcesses: false,
+          foregroundProcessEvidence: {
+            verdict: 'unverifiable' as const,
+            reason: 'process_table_unreadable',
+            authorityGeneration: 'gen-1',
+            observationEpoch: 1,
+            capturedAgeMs: 0,
+            ptyId: 'claude-alive',
+            ptyIncarnationId: 'incarnation-1'
+          }
+        }
+      ]
+    ])('keeps the gate when %s', async (_label, inspection) => {
+      const mod = await importFresh()
+      // Why: live-pty-gate is intentionally unmocked — import from the same fresh registry so gate state matches daemon-init's.
+      const gate = await import('../claude-accounts/live-pty-gate')
+      defaultListSessionsSessions.push({ sessionId: 'claude-alive' })
+      inspectProcessResults.set('claude-alive', inspection)
+      gate.seedLiveClaudePtysFromPersistence(['claude-alive'])
+      try {
+        await mod.initDaemonPtyProvider()
+
+        expect(gate.hasLiveClaudePtys()).toBe(true)
+      } finally {
+        gate.markClaudePtyExited('claude-alive')
+      }
+    })
   })
 
   it('does not install a late daemon provider after startup fallback aborts the init attempt', async () => {

@@ -137,6 +137,21 @@ export function hasSeededUnconfirmedClaudePtys(): boolean {
 }
 
 /**
+ * The ids still awaiting daemon confirmation, snapshotted before the reconcile
+ * clears them. Startup needs the list to know WHICH surviving sessions were
+ * restored rather than spawned by this process, since only those can be
+ * holding the gate for a Claude that is no longer there.
+ */
+export function getSeededClaudeLivePtyIds(): string[] {
+  return [...seededUnconfirmedPtyIds]
+}
+
+/** Whether this gate id currently holds the gate closed, under any binding. */
+export function isClaudeLivePtyGateHeld(ptyId: string): boolean {
+  return liveClaudePtyIds.has(ptyId)
+}
+
+/**
  * Reconcile seeded ids against the daemon's live session list. Seeded ids the
  * daemon no longer knows are dead — release them so they cannot defer OAuth
  * refresh forever. Seeded ids that are still alive stay in the gate even if

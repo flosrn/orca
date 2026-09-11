@@ -9,6 +9,12 @@ import {
   setLocalPtyProvider,
   unregisterSshPtyProvider
 } from './pty'
+import {
+  hasLiveClaudePtys,
+  markClaudePtyExited,
+  markClaudePtySpawned,
+  onLiveClaudePtysDrained
+} from '../claude-accounts/live-pty-gate'
 
 vi.mock('electron', () => import('./pty-ipc-mock-registry').then((m) => m.electronModuleMock()))
 vi.mock('fs', () => import('./pty-ipc-mock-registry').then((m) => m.fsModuleMock()))
@@ -107,6 +113,53 @@ describe('registerPtyHandlers', () => {
       expect(inspectProcess).not.toHaveBeenCalled()
     }
   )
+  // Why: a pane's own cadence poll is the only thing that sees a Claude exit back to its
+  // shell inside a daemon session that stays alive; PTY liveness alone would hold the
+  // OAuth-refresh gate — and the legacy-migration refusal — for the life of the pane.
+  it('releases the Claude live-PTY gate when a cadence poll sees the pane back at its shell', async () => {
+    const evidence = (processName: string | null) => ({
+      foregroundProcess: processName,
+      hasChildProcesses: processName !== null,
+      foregroundProcessEvidence: {
+        verdict: 'live' as const,
+        processName,
+        fence: {
+          platform: 'posix' as const,
+          shellPid: 4242,
+          shellStartTime: '1',
+          tty: '/dev/ttys001',
+          foregroundPgid: 4242
+        },
+        authorityGeneration: 'gen-1',
+        observationEpoch: 1,
+        capturedAgeMs: 0,
+        ptyId: 'gate-held-pty',
+        ptyIncarnationId: 'incarnation-1'
+      }
+    })
+    const inspectProcess = vi.fn(async () => evidence('claude'))
+    registerPtyHandlers(mainWindow as never)
+    setLocalPtyProvider({ inspectProcess, hasPty: vi.fn(() => true) } as never)
+    const drained = vi.fn()
+    const unsubscribe = onLiveClaudePtysDrained(drained)
+    try {
+      markClaudePtySpawned('gate-held-pty', { route: 'account-dir', accountId: 'account-1' })
+
+      await handlers.get('pty:inspectProcess')!(null, { id: 'gate-held-pty', steadyState: true })
+      expect(hasLiveClaudePtys()).toBe(true)
+
+      inspectProcess.mockResolvedValue(evidence('zsh'))
+      await handlers.get('pty:inspectProcess')!(null, { id: 'gate-held-pty', steadyState: true })
+      expect(hasLiveClaudePtys()).toBe(false)
+      expect(drained).toHaveBeenCalledTimes(1)
+
+      await handlers.get('pty:inspectProcess')!(null, { id: 'gate-held-pty', steadyState: true })
+      expect(drained).toHaveBeenCalledTimes(1)
+    } finally {
+      unsubscribe()
+      markClaudePtyExited('gate-held-pty')
+    }
+  })
   it('lists duplicate SSH relay session ids as distinct app sessions', async () => {
     registerPtyHandlers(mainWindow as never)
     const shutdownA = vi.fn(async () => undefined)

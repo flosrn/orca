@@ -15,6 +15,7 @@ import type {
   MockSpawner,
   NetConnectStubs
 } from './daemon-init-mock-types'
+import type { TerminalProcessInspection } from '../../shared/terminal-process-inspection'
 
 export type { DaemonInitMockState } from './daemon-init-mock-types'
 
@@ -120,6 +121,9 @@ function createDaemonInitMockState(): DaemonInitMockState {
   const adapterInstances: MockAdapter[] = []
   // Why: adapters are built inside initDaemonPtyProvider, so tests set this before init to make listSessions report live sessions.
   const defaultListSessionsSessions: { sessionId: string }[] = []
+  // Why: the reconcile asks a surviving session what its foreground is; an id with no entry
+  // answers unverifiable so the gate stays closed unless a test proves otherwise.
+  const inspectProcessResults = new Map<string, TerminalProcessInspection>()
   const listProcessesControl: {
     current: null | (() => Promise<{ sessionId: string }[]>)
   } = { current: null }
@@ -191,6 +195,7 @@ function createDaemonInitMockState(): DaemonInitMockState {
     routerSubscriptionError,
     adapterInstances,
     defaultListSessionsSessions,
+    inspectProcessResults,
     listProcessesControl,
     getLocalPtyProviderMock,
     localFallbackProvider,

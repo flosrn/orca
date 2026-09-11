@@ -44,6 +44,7 @@ export function createDaemonInitModuleFactories(state: DaemonInitMockState) {
     routerSubscriptionError,
     adapterInstances,
     defaultListSessionsSessions,
+    inspectProcessResults,
     listProcessesControl,
     getLocalPtyProviderMock,
     setLocalPtyProviderMock,
@@ -115,6 +116,7 @@ export function createDaemonInitModuleFactories(state: DaemonInitMockState) {
     readonly fanoutSyntheticExits: Mock
     readonly listProcesses: Mock
     readonly listSessions: Mock
+    readonly inspectProcess: Mock
     readonly establishLifecycleLease: Mock
     readonly shutdown: Mock
     readonly dispose: Mock
@@ -134,6 +136,15 @@ export function createDaemonInitModuleFactories(state: DaemonInitMockState) {
         listProcessesControl.current ? listProcessesControl.current() : []
       )
       this.listSessions = vi.fn(async () => [...defaultListSessionsSessions])
+      this.inspectProcess = vi.fn(
+        async (sessionId: string) =>
+          inspectProcessResults.get(sessionId) ?? {
+            foregroundProcess: null,
+            hasChildProcesses: false,
+            verdict: 'unverifiable',
+            reason: 'old_host'
+          }
+      )
       const lifecycleLeaseError = lifecycleLeaseErrors.shift()
       this.establishLifecycleLease = vi.fn(async () => {
         if (lifecycleLeaseError) {

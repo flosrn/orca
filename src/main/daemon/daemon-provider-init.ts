@@ -1,8 +1,11 @@
 import { getLocalPtyProvider, rebindLocalProviderListeners } from '../ipc/pty'
 import {
   confirmSeededClaudeLivePtys,
-  hasSeededUnconfirmedClaudePtys
+  getSeededClaudeLivePtyIds,
+  hasSeededUnconfirmedClaudePtys,
+  isClaudeLivePtyGateHeld
 } from '../claude-accounts/live-pty-gate'
+import { releaseClaudeLivePtyOnNonClaudeForeground } from '../claude-accounts/live-pty-gate-foreground-release'
 import { isStartupDiagnosticsEnabled, logStartupDiagnostic } from '../startup/startup-diagnostics'
 import { checkDaemonHealth } from './daemon-health'
 import { collectPinnedDaemonVersions, pruneOldDaemonHosts } from './daemon-host-relocation'
@@ -200,14 +203,39 @@ async function reconcileSeededClaudeLivePtys(provider: DaemonProvider): Promise<
       provider instanceof DaemonPtyRouter || provider instanceof DegradedDaemonPtyProvider
         ? provider.getAllAdapters()
         : [provider]
+    const seeded = new Set(getSeededClaudeLivePtyIds())
     const results = await Promise.allSettled(adapters.map((entry) => entry.listSessions()))
     if (results.some((result) => result.status === 'rejected')) {
       console.warn('[daemon] Keeping seeded Claude live-PTY gate — session listing failed')
       return
     }
-    confirmSeededClaudeLivePtys(
-      results.flatMap((result) =>
-        result.status === 'fulfilled' ? result.value.map((session) => session.sessionId) : []
+    const aliveByAdapter = adapters.map((adapter, index) => {
+      const result = results[index]
+      return {
+        adapter,
+        sessionIds:
+          result?.status === 'fulfilled' ? result.value.map((session) => session.sessionId) : []
+      }
+    })
+    confirmSeededClaudeLivePtys(aliveByAdapter.flatMap((entry) => entry.sessionIds))
+    // Why: a surviving daemon session is not a surviving Claude. A pane whose
+    // Claude exited back to its shell keeps its session id alive forever, so
+    // liveness alone would hold the refresh gate for the life of the pane.
+    await Promise.all(
+      aliveByAdapter.flatMap(({ adapter, sessionIds }) =>
+        sessionIds
+          .filter((sessionId) => seeded.has(sessionId) && isClaudeLivePtyGateHeld(sessionId))
+          .map(async (sessionId) => {
+            try {
+              releaseClaudeLivePtyOnNonClaudeForeground(
+                sessionId,
+                await adapter.inspectProcess(sessionId),
+                'startup-reconcile'
+              )
+            } catch {
+              // Why: an inspection that failed observed nothing — fail closed and keep the gate.
+            }
+          })
       )
     )
   } catch (error) {
