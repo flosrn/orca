@@ -1,4 +1,5 @@
 import type { Mock } from 'vitest'
+import type { TerminalProcessInspection } from '../../shared/terminal-process-inspection'
 
 /** Fake DaemonSpawner instance every mocked `new DaemonSpawner()` records. */
 export type MockSpawner = {
@@ -27,6 +28,7 @@ export type MockAdapter = {
   fanoutSyntheticExits: Mock
   listProcesses: Mock
   listSessions: Mock
+  inspectProcess: Mock
   establishLifecycleLease: Mock
   shutdown: Mock
   dispose: Mock
@@ -137,6 +139,9 @@ export type DaemonInitMockState = {
   routerSubscriptionError: { current: Error | null }
   adapterInstances: MockAdapter[]
   defaultListSessionsSessions: { sessionId: string }[]
+  /** Per-session inspection answers the fake adapter hands the startup gate reconcile.
+   *  A session with no entry reads as unverifiable, which keeps the gate closed. */
+  inspectProcessResults: Map<string, TerminalProcessInspection>
   listProcessesControl: { current: null | (() => Promise<{ sessionId: string }[]>) }
   getLocalPtyProviderMock: Mock<() => MockLocalPtyProvider>
   localFallbackProvider: MockLocalPtyProvider

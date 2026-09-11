@@ -1,6 +1,7 @@
 import { getPtyIpc } from '../../pty-host-bindings'
 import { parseAppSshPtyId } from '../../../providers/ssh-pty-id'
 import { inspectPtyProviderProcessForRenderer } from '../../../providers/pty-process-inspection'
+import { releaseClaudeLivePtyOnNonClaudeForeground } from '../../../claude-accounts/live-pty-gate-foreground-release'
 import { clientOnlyUnverifiableInspection } from '../../../../shared/terminal-process-inspection'
 import {
   PtyProcessListAdmission,
@@ -219,9 +220,14 @@ export function installPtyInspectIpcHandlers(deps: {
         ...(args.scanChildProcesses === true ? { scanChildProcesses: true } : {}),
         ...(args.steadyState === true ? { steadyState: true } : {})
       }
-      return Object.keys(options).length > 0
+      const inspection = await (Object.keys(options).length > 0
         ? inspectPtyProviderProcessForRenderer(getProviderForPty(args.id), args.id, options)
-        : inspectPtyProviderProcessForRenderer(getProviderForPty(args.id), args.id)
+        : inspectPtyProviderProcessForRenderer(getProviderForPty(args.id), args.id))
+      // Why: the pane's own cadence poll is the only thing that observes a Claude
+      // exiting back to its shell inside a session that stays alive; without this
+      // the live-PTY gate would hold that pane's refresh until the PTY itself dies.
+      releaseClaudeLivePtyOnNonClaudeForeground(args.id, inspection, 'steady-state')
+      return inspection
     }
   )
 
