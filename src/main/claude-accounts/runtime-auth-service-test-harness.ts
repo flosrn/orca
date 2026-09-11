@@ -1,5 +1,13 @@
 import { vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { getDefaultSettings } from '../../shared/constants'
@@ -20,6 +28,10 @@ export const testState = {
   throwLegacyRuntimeKeychainWrite: false,
   throwScopedKeychainWrite: false,
   runtimeWriteConfigDir: null as string | null,
+  // Why: per-account host isolation gives every managed account its own
+  // CLAUDE_CONFIG_DIR, so the scoped active-Claude keychain item is per-dir.
+  // `scopedKeychainCredentials` stays the shared ~/.claude item's value.
+  keychainByConfigDir: new Map<string, string | null>(),
   managedKeychainCredentials: new Map<string, string>()
 }
 
@@ -51,7 +63,8 @@ export function createKeychainMock() {
     readActiveClaudeKeychainCredentials: vi.fn(async (configDir?: string) => {
       if (configDir) {
         if (configDir !== expectedRuntimeConfigDir()) {
-          return testState.legacyKeychainCredentials
+          // Real keychain.ts falls back to the unscoped service on a miss.
+          return testState.keychainByConfigDir.get(configDir) ?? testState.legacyKeychainCredentials
         }
         return testState.scopedKeychainCredentials ?? testState.legacyKeychainCredentials
       }
@@ -59,13 +72,17 @@ export function createKeychainMock() {
     }),
     writeActiveClaudeKeychainCredentials: vi.fn(async (contents: string, configDir?: string) => {
       if (configDir) {
-        if (configDir !== expectedRuntimeConfigDir()) {
-          throw new Error(`Unexpected Claude config dir: ${configDir}`)
-        }
         if (testState.throwScopedKeychainWrite) {
           throw new Error('scoped keychain write failed')
         }
-        testState.scopedKeychainCredentials = contents
+        if (configDir === expectedRuntimeConfigDir()) {
+          testState.scopedKeychainCredentials = contents
+        } else {
+          // Scoped-only on purpose: this write must never reach the unscoped
+          // `Claude Code-credentials` item another account/default reads.
+          testState.keychainByConfigDir.set(configDir, contents)
+          return
+        }
       } else {
         testState.legacyKeychainCredentials = contents
       }
@@ -78,10 +95,12 @@ export function createKeychainMock() {
     }),
     deleteActiveClaudeKeychainCredentialsStrict: vi.fn(async (configDir?: string) => {
       if (configDir) {
-        if (configDir !== expectedRuntimeConfigDir()) {
-          throw new Error(`Unexpected Claude config dir: ${configDir}`)
+        if (configDir === expectedRuntimeConfigDir()) {
+          testState.scopedKeychainCredentials = null
+        } else {
+          testState.keychainByConfigDir.set(configDir, null)
+          return
         }
-        testState.scopedKeychainCredentials = null
       } else {
         testState.legacyKeychainCredentials = null
       }
@@ -95,7 +114,7 @@ export function createKeychainMock() {
             }
             return configDir === expectedRuntimeConfigDir()
               ? testState.scopedKeychainCredentials
-              : null
+              : (testState.keychainByConfigDir.get(configDir) ?? null)
           })()
         : (() => {
             if (testState.throwLegacyKeychainRead) {
@@ -151,9 +170,13 @@ export function resetRuntimeAuthTestState(): void {
   testState.throwLegacyRuntimeKeychainWrite = false
   testState.throwScopedKeychainWrite = false
   testState.runtimeWriteConfigDir = null
+  testState.keychainByConfigDir.clear()
   testState.managedKeychainCredentials.clear()
-  testState.userDataDir = mkdtempSync(join(tmpdir(), 'orca-claude-runtime-'))
-  testState.fakeHomeDir = mkdtempSync(join(tmpdir(), 'orca-claude-home-'))
+  // Why: managed-path ownership resolves through realpath, so a non-canonical
+  // temp root (/var → /private/var on macOS) would make every account dir
+  // compare unequal to the path the service hands a launch.
+  testState.userDataDir = realpathSync(mkdtempSync(join(tmpdir(), 'orca-claude-runtime-')))
+  testState.fakeHomeDir = realpathSync(mkdtempSync(join(tmpdir(), 'orca-claude-home-')))
   mkdirSync(join(testState.fakeHomeDir, '.claude'), { recursive: true })
 }
 
@@ -274,4 +297,48 @@ export function readRuntimeOauthAccountForTest(): unknown {
   return (
     (JSON.parse(readFileSync(configPath, 'utf-8')) as Record<string, unknown>).oauthAccount ?? null
   )
+}
+
+/**
+ * The surface a selected HOST managed account materializes into: its own
+ * config dir. The user's `~/.claude` (see `expectedRuntimeConfigDir`) is never
+ * that surface, which is what per-account isolation buys.
+ */
+export function accountRuntimeCredentialsPath(managedAuthPath: string): string {
+  return join(managedAuthPath, '.credentials.json')
+}
+
+export function accountRuntimeConfigPath(managedAuthPath: string): string {
+  return join(managedAuthPath, '.claude.json')
+}
+
+export function readAccountRuntimeCredentials(managedAuthPath: string): string | null {
+  const path = accountRuntimeCredentialsPath(managedAuthPath)
+  return existsSync(path) ? readFileSync(path, 'utf-8') : null
+}
+
+/** Simulates the account's own Claude CLI rewriting its credentials file. */
+export function writeAccountRuntimeCredentials(managedAuthPath: string, contents: string): void {
+  mkdirSync(managedAuthPath, { recursive: true })
+  writeFileSync(accountRuntimeCredentialsPath(managedAuthPath), contents, 'utf-8')
+}
+
+export function readAccountRuntimeOauthAccount(managedAuthPath: string): unknown {
+  const configPath = accountRuntimeConfigPath(managedAuthPath)
+  if (!existsSync(configPath)) {
+    return null
+  }
+  return (
+    (JSON.parse(readFileSync(configPath, 'utf-8')) as Record<string, unknown>).oauthAccount ?? null
+  )
+}
+
+/** The account's dir-scoped Keychain item — distinct from both the shared
+ *  scoped item and the unscoped `Claude Code-credentials` one. */
+export function readAccountKeychainCredentials(managedAuthPath: string): string | null {
+  return testState.keychainByConfigDir.get(managedAuthPath) ?? null
+}
+
+export function setAccountKeychainCredentials(managedAuthPath: string, contents: string): void {
+  testState.keychainByConfigDir.set(managedAuthPath, contents)
 }

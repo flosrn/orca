@@ -25,6 +25,7 @@ import {
   makeClaudeUsageResult,
   metadataForClaudeUsageAttempt,
   recordClaudeUsageAttempt,
+  resolveClaudeAuthProvenance,
   warnClaudeUsageFetchFailure
 } from './claude-usage-result'
 
@@ -32,7 +33,7 @@ export async function fetchActiveClaudeRateLimits(
   options?: ClaudeRateLimitFetchOptions
 ): Promise<ProviderRateLimits> {
   if (options?.signal?.aborted) {
-    return abortedClaudeRateLimitResult()
+    return abortedClaudeRateLimitResult(resolveClaudeAuthProvenance(options.authPreparation))
   }
   const attempts = { attemptedSources: [] }
   const allowCliFallback = options?.allowPtyFallback !== false
@@ -57,7 +58,7 @@ export async function fetchActiveClaudeRateLimits(
     resolveClaudeOAuthCredentialReadOptions(options?.authPreparation)
   )
   if (options?.signal?.aborted) {
-    return abortedClaudeRateLimitResult()
+    return abortedClaudeRateLimitResult(resolveClaudeAuthProvenance(options.authPreparation))
   }
 
   if (plan.steps.some((step) => step.source === 'oauth') && oauthCredentials.token) {
@@ -66,10 +67,10 @@ export async function fetchActiveClaudeRateLimits(
       const oauthLimits = await fetchClaudeOAuthUsage(
         oauthCredentials.token,
         options?.signal,
-        options?.authPreparation?.provenance ?? 'system'
+        resolveClaudeAuthProvenance(options?.authPreparation)
       )
       if (options?.signal?.aborted) {
-        return abortedClaudeRateLimitResult()
+        return abortedClaudeRateLimitResult(resolveClaudeAuthProvenance(options.authPreparation))
       }
       return await completeClaudeOAuthUsageSuccess({
         oauthLimits,

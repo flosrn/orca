@@ -3454,8 +3454,6 @@
             "2c35eca8d4": "无法获取使用情况",
             "1292d4f2ee": "不可用",
             "7567cd1c6b": "无法使用",
-            "a9a318b7a3": "刷新失败——显示缓存数据",
-            "7ad719c4bf": "受限",
             "e740f92596": "刷新失败",
             "8418ec448d": "{{value0}} 用量无法刷新。智能体会话可能仍处于登录状态。",
             "45198c7d95": "1 次速率限制重置可用",
@@ -3464,12 +3462,10 @@
             "d1e442a9e5": "现在过期",
             "6cf9eaed10": "下一个将在 {{value0}} 后过期",
             "20ad66aed1": "将在 {{value0}} 后过期",
-            "0d8d7cfe15": "等待 Claude 会话",
             "1804cd8c3f": "正在刷新登录",
             "f8f0f9d8cc": "网络问题",
             "bf2e739f18": "登录不可用",
             "f8b8dbed85": "用量不可用",
-            "3d3c9c0c1f": "实时 Claude 终端轮换凭据后，Claude 用量会刷新。",
             "42fdd4da1d": "正在刷新 Claude 登录。智能体会话可能仍处于登录状态。",
             "c06c1d215d": "由于网络请求失败，无法刷新 Claude 用量。",
             "cabdc2a9e0": "无法读取 Claude 登录凭据。",
@@ -3477,7 +3473,21 @@
             "e2c6a4f917": "运行 Grok 以刷新",
             "d1b7f509ac": "在运行 Orca 的电脑上的终端中运行 grok，并等待其启动。如有提示，请完成登录，然后重试用量检查。您无需发送聊天消息。",
             "f90b3d7a16": "运行 Kimi 以刷新",
-            "a37e8c15d4": "在运行 Orca 的电脑上的终端中运行 kimi，等待其启动，然后重试用量检查。"
+            "a37e8c15d4": "在运行 Orca 的电脑上的终端中运行 kimi，等待其启动，然后重试用量检查。",
+            "claude": {
+              "deferredRefresh": {
+                "label": "等待凭据刷新",
+                "detail": "该账户完成凭据轮换后，Claude 用量将自动刷新。"
+              },
+              "rateLimitedRead": {
+                "label": "刷新受到限流",
+                "detail": "Claude 限流的是用量读取本身，并不表示你的订阅额度已用尽。"
+              }
+            },
+            "refreshRateLimited": {
+              "label": "刷新受到限流"
+            },
+            "staleCachedLabel": "{{label}}——显示缓存数据"
           },
           "SshTargetStatusRow": {
             "sshHost": "SSH 主机"
@@ -3506,7 +3516,14 @@
             "compact": "精简",
             "footerDetailAria": "使用情况页脚详情",
             "detailedTooltip": "完整使用情况，包含条形图、标签和百分比",
-            "compactTooltip": "精简使用情况：仅显示最吃紧的窗口"
+            "compactTooltip": "精简使用情况：仅显示最吃紧的窗口",
+            "stale": {
+              "noSample": "没有更早的读数",
+              "justRead": "刚刚读取",
+              "lastRead": "{{age}}前读取",
+              "retryIn": "{{countdown}}后重试"
+            },
+            "accountOrdinal": "账户 {{n}}"
           },
           "RemoteServerUpdateStatusSegment": {
             "updating": "Updating {{value0}}/{{value1}}",

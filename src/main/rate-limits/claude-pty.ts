@@ -45,12 +45,17 @@ export async function fetchViaPty(options?: {
   networkProxySettings?: NetworkProxySettings
   signal?: AbortSignal
 }): Promise<ProviderRateLimits> {
+  // Why: this probe runs against whichever Claude config dir the preparation
+  // pins, so every result it resolves names that surface. A result that cannot
+  // name its account is treated as a different account by meter retention.
+  const authProvenance = options?.authPreparation?.provenance
+  const provenanceMetadata = authProvenance ? { usageMetadata: { authProvenance } } : {}
   if (options?.signal?.aborted) {
-    return abortedClaudeUsageResult()
+    return abortedClaudeUsageResult(authProvenance)
   }
   const pty = await import('node-pty')
   if (options?.signal?.aborted) {
-    return abortedClaudeUsageResult()
+    return abortedClaudeUsageResult(authProvenance)
   }
 
   return new Promise<ProviderRateLimits>((resolve) => {
@@ -158,7 +163,7 @@ export async function fetchViaPty(options?: {
       }
       clearFollowupTimers()
       cleanupHiddenRateLimitPty(term, termDisposables, { kill: true })
-      resolve(abortedClaudeUsageResult())
+      resolve(abortedClaudeUsageResult(authProvenance))
     }
 
     if (options?.signal) {
@@ -188,7 +193,8 @@ export async function fetchViaPty(options?: {
             fableWeekly,
             updatedAt: Date.now(),
             error: null,
-            status: 'ok'
+            status: 'ok',
+            ...provenanceMetadata
           })
         } else {
           resolve({
@@ -202,7 +208,8 @@ export async function fetchViaPty(options?: {
                 : 'PTY timeout — /usage panel did not render',
               clean
             ),
-            status: 'error'
+            status: 'error',
+            ...provenanceMetadata
           })
         }
       }
@@ -243,7 +250,8 @@ export async function fetchViaPty(options?: {
           weekly: null,
           updatedAt: Date.now(),
           error: withMacTailscaleDnsHint(describeClaudeUsageFailure(clean), clean),
-          status: 'error'
+          status: 'error',
+          ...provenanceMetadata
         })
       } else {
         resolve({
@@ -253,7 +261,8 @@ export async function fetchViaPty(options?: {
           fableWeekly,
           updatedAt: Date.now(),
           error: null,
-          status: 'ok'
+          status: 'ok',
+          ...provenanceMetadata
         })
       }
     }

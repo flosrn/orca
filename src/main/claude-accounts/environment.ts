@@ -9,6 +9,10 @@ export const CLAUDE_AUTH_ENV_VARS = [
 
 export type ClaudeEnvPatch = {
   CLAUDE_CONFIG_DIR?: string
+  /** Claude Code 2.1.220+ derives the macOS Keychain service name from this dir
+   *  (sha256 of it), so a launch pinned to an account config dir must pin this
+   *  too or two accounts share one Keychain item. */
+  CLAUDE_SECURESTORAGE_CONFIG_DIR?: string
   ANTHROPIC_CUSTOM_HEADERS?: string
 }
 
@@ -36,6 +40,9 @@ export function applyClaudeEnvPatch(
   if (patch.CLAUDE_CONFIG_DIR) {
     baseEnv.CLAUDE_CONFIG_DIR = patch.CLAUDE_CONFIG_DIR
   }
+  if (patch.CLAUDE_SECURESTORAGE_CONFIG_DIR) {
+    baseEnv.CLAUDE_SECURESTORAGE_CONFIG_DIR = patch.CLAUDE_SECURESTORAGE_CONFIG_DIR
+  }
   if (patch.ANTHROPIC_CUSTOM_HEADERS !== undefined) {
     baseEnv.ANTHROPIC_CUSTOM_HEADERS = patch.ANTHROPIC_CUSTOM_HEADERS
   }
@@ -47,6 +54,14 @@ export function applyClaudeEnvPatch(
  *  cannot drift into telling the user two different things about one refusal. */
 export const CLAUDE_AUTH_ENV_CONFLICT_MESSAGE =
   'This Claude launch defines explicit Anthropic auth environment variables. Remove those overrides before using a managed Claude account.'
+
+/**
+ * Shown when an account cannot be isolated yet because a Claude started before
+ * per-account isolation still holds its credentials. Both copies would rotate
+ * the same single-use refresh token, so the launch waits for that session.
+ */
+export const CLAUDE_LEGACY_SESSION_MIGRATION_MESSAGE =
+  'This Claude account is still in use by a session started before per-account isolation. Close that Claude session (or restart Orca) before launching this account again.'
 
 export const CLAUDE_AUTH_SWITCH_IN_PROGRESS_MESSAGE =
   'A Claude account switch is in progress. Try again after it finishes.'

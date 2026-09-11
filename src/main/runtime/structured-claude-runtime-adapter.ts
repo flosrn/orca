@@ -25,8 +25,11 @@ export type StructuredClaudeRuntimeAdapterDeps = {
   resolveClaudeCommand?: () => string
   resolveClaudeLaunchEnv?: () => Promise<Record<string, string>> | Record<string, string>
   /** Managed-account auth state for a Claude launch, mirroring the terminal preflight.
-   *  Required: an absent policy is what silently under-strips. */
-  resolveClaudeAuthPolicy: () => Promise<ClaudeStructuredAuthPolicy> | ClaudeStructuredAuthPolicy
+   *  Required: an absent policy is what silently under-strips. Answered for the config
+   *  dir the session's record launches against, not for the active selection. */
+  resolveClaudeAuthPolicy: (input: {
+    claudeConfigDir: string
+  }) => Promise<ClaudeStructuredAuthPolicy> | ClaudeStructuredAuthPolicy
   readClaudeManagedAccountGate?: () => ClaudeManagedAccountGateSettings | null
   openClaudeConnection?: ClaudeStructuredSessionAdapterDeps['openConnection']
   readProcessStartTime?: ClaudeStructuredSessionAdapterDeps['readProcessStartTime']

@@ -9,6 +9,7 @@ import {
   normalizeSshTarget
 } from '../leasing-ssh-ptys/ssh-normalization'
 import {
+  normalizeClaudeLivePtyBindings,
   normalizeClaudeLivePtySessionIds,
   normalizeLegacyPaneKeyAliasEntries,
   normalizeMigrationUnsupportedPtyEntries
@@ -100,6 +101,7 @@ export function normalizeLoadedProfileState(
       .filter((lease): lease is SshRemotePtyLease => lease !== null),
     sshPtyConsumerRecoveries: parsed.sshPtyConsumerRecoveries,
     claudeLivePtySessionIds: normalizeClaudeLivePtySessionIds(parsed.claudeLivePtySessionIds),
+    claudeLivePtyBindings: normalizeClaudeLivePtyBindings(parsed.claudeLivePtyBindings),
     migrationUnsupportedPtyEntries: normalizeMigrationUnsupportedPtyEntries(
       parsed.migrationUnsupportedPtyEntries
     ),

@@ -186,10 +186,12 @@ describe('provider usage error copy', () => {
     }
   })
 
-  it('keeps rate-limit failures distinct from refresh failures', () => {
+  // Why: "Limited" reads as "your subscription is out"; what actually failed is Orca's own
+  // usage read, which says nothing about the user's remaining quota.
+  it('names a rate-limited usage read as a refresh failure, not an exhausted plan', () => {
     const p = provider({ error: 'Claude usage is rate limited right now.' })
 
-    expect(getProviderUsageStatusLabel(p)).toBe('Limited')
+    expect(getProviderUsageStatusLabel(p)).toBe('Refresh rate limited')
     expect(getProviderUsageErrorMessage(p)).toBe('Claude usage is rate limited right now.')
   })
 
@@ -198,9 +200,21 @@ describe('provider usage error copy', () => {
       error: 'Rate limit reached while refreshing OAuth access token.'
     })
 
-    expect(getProviderUsageStatusLabel(p)).toBe('Limited')
+    expect(getProviderUsageStatusLabel(p)).toBe('Refresh rate limited')
     expect(getProviderUsageErrorMessage(p)).toBe(
       'Rate limit reached while refreshing OAuth access token.'
+    )
+  })
+
+  it('explains a structured Claude 429 as a throttled read of the quota endpoint', () => {
+    const p = provider({
+      error: 'HTTP 429 from the Claude usage endpoint',
+      usageMetadata: { failureKind: 'rate-limited' }
+    })
+
+    expect(getProviderUsageStatusLabel(p)).toBe('Refresh rate limited')
+    expect(getProviderUsageErrorMessage(p)).toBe(
+      'Claude throttled the usage read itself. This does not mean your subscription quota is spent.'
     )
   })
 
@@ -229,7 +243,9 @@ describe('provider usage error copy', () => {
     )
   })
 
-  it('keeps live-Claude refresh deferral copy visible', () => {
+  // Why: with per-account credentials the deferral is a credential rotation Orca is waiting on,
+  // not a missing session the user is supposed to go open somewhere.
+  it('describes a deferred refresh as waiting on credentials, not on the user', () => {
     const p = provider({
       error:
         'Claude usage refresh is waiting for the live Claude terminal to rotate its credentials.',
@@ -239,9 +255,9 @@ describe('provider usage error copy', () => {
       }
     })
 
-    expect(getProviderUsageStatusLabel(p)).toBe('Waiting for Claude session')
+    expect(getProviderUsageStatusLabel(p)).toBe('Waiting for credential refresh')
     expect(getProviderUsageErrorMessage(p)).toBe(
-      'Claude usage will refresh after the live Claude terminal rotates its credentials.'
+      'Claude usage refreshes once this account finishes rotating its credentials.'
     )
   })
 

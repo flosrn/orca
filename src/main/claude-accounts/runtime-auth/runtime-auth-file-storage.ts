@@ -2,12 +2,47 @@ import { chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
 import { writeFileAtomically } from '../../codex-accounts/fs-utils'
+import {
+  writeActiveClaudeKeychainCredentials,
+  writeActiveClaudeKeychainCredentialsForRuntime
+} from '../keychain'
+import type { ClaudeRuntimePaths } from '../runtime-paths'
 import { ClaudeRuntimeAuthState } from './runtime-auth-state'
 
 export class ClaudeRuntimeAuthFileStorage extends ClaudeRuntimeAuthState {
+  /** The surface the active selection materializes into: the pinned account's
+   *  own config dir, or the user's ~/.claude when nothing is pinned. */
+  protected getActiveRuntimePaths(): ClaudeRuntimePaths {
+    return this.pinnedAccountConfigDir
+      ? this.pathResolver.getAccountRuntimePaths(this.pinnedAccountConfigDir)
+      : this.pathResolver.getRuntimePaths()
+  }
+
+  /**
+   * Publishes credentials to the macOS Keychain item the CLI will read.
+   *
+   * A pinned account writes ONLY its dir-scoped service. The unscoped
+   * `Claude Code-credentials` item is the surface the user's own ~/.claude and
+   * every other account fall back to, so writing it from an account sync is the
+   * cross-account leak this isolation exists to remove.
+   */
+  protected async writeActiveRuntimeKeychainCredentials(contents: string): Promise<void> {
+    const configDir = this.getActiveRuntimePaths().configDir
+    if (this.pinnedAccountConfigDir) {
+      await writeActiveClaudeKeychainCredentials(contents, configDir)
+      return
+    }
+    // Why: Claude Code 2.1+ reads the scoped service, older builds the legacy
+    // unsuffixed one; the shared surface must satisfy both.
+    await writeActiveClaudeKeychainCredentialsForRuntime(contents, configDir)
+  }
+
   protected writeRuntimeCredentials(contents: string): void {
-    const credentialsPath = this.pathResolver.getRuntimePaths().credentialsPath
+    const credentialsPath = this.getActiveRuntimePaths().credentialsPath
     mkdirSync(dirname(credentialsPath), { recursive: true })
+    // Why: the surface this write lands on is what later proves (or fails to
+    // prove) that Orca owns what is sitting there.
+    this.lastWrittenRuntimeConfigDir = this.pinnedAccountConfigDir
     // Why: skip unchanged rewrites to dodge Windows EPERM contention (#1507); re-verify the file since another Claude may have rewritten it.
     if (
       this.lastWrittenCredentialsJson === contents &&

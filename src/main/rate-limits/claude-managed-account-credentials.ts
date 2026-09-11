@@ -97,6 +97,15 @@ function resolveOwnedWslClaudeManagedAuthPath(account: InactiveClaudeAccount): s
   }
 }
 
+/**
+ * Runs `operation` with the account's credentials readable by a CLI pinned to
+ * that account's config dir.
+ *
+ * Since per-account isolation, that dir-scoped Keychain item is not scratch
+ * space: it is the account's canonical credential surface, which a live
+ * session of that account reads. So whatever was there is put back afterwards,
+ * and the item is deleted only when the preview is what created it.
+ */
 export async function withClaudeManagedPreviewKeychainCredentials<T>(
   location: ClaudeManagedCredentialsLocation,
   credentialsJson: string,
@@ -105,11 +114,23 @@ export async function withClaudeManagedPreviewKeychainCredentials<T>(
   if (location.kind !== 'keychain') {
     return operation()
   }
-  await writeActiveClaudeKeychainCredentials(credentialsJson, location.managedAuthPath)
+  const existingCredentialsJson = await readActiveClaudeKeychainCredentialsStrict(
+    location.managedAuthPath
+  ).catch(() => null)
+  if (existingCredentialsJson !== credentialsJson) {
+    await writeActiveClaudeKeychainCredentials(credentialsJson, location.managedAuthPath)
+  }
   try {
     return await operation()
   } finally {
-    await deleteActiveClaudeKeychainCredentialsStrict(location.managedAuthPath).catch(() => {})
+    if (existingCredentialsJson === null) {
+      await deleteActiveClaudeKeychainCredentialsStrict(location.managedAuthPath).catch(() => {})
+    } else if (existingCredentialsJson !== credentialsJson) {
+      await writeActiveClaudeKeychainCredentials(
+        existingCredentialsJson,
+        location.managedAuthPath
+      ).catch(() => {})
+    }
   }
 }
 

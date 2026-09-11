@@ -6,7 +6,12 @@ import type { AgentSessionRecord } from '../../shared/agent-session-record'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
 import { AgentSessionPreSpawnError } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
-import { claudeStructuredAuthPolicyForSettings } from '../claude-accounts/claude-structured-auth-policy'
+import {
+  claudeStructuredAuthPolicyForLaunchSurface,
+  claudeStructuredAuthPolicyForSettings
+} from '../claude-accounts/claude-structured-auth-policy'
+import { CLAUDE_LEGACY_SESSION_MIGRATION_MESSAGE } from '../claude-accounts/environment'
+import type { ClaudeRuntimeAuthPreparation } from '../claude-accounts/runtime-auth/runtime-auth-types'
 import type { ClaudeManagedAccountGateSettings } from '../native-chat/claude-structured-managed-account-support'
 import {
   CLAUDE_DEFAULT_SETTING_SOURCES,
@@ -387,6 +392,162 @@ describe('claude structured launch resolution', () => {
       await expect(
         resolverFor(RESUMABLE)({ identity: identityAt('leaf-current') })
       ).resolves.toMatchObject({ providerSessionId: 'provider-current' })
+    })
+  })
+
+  /**
+   * A structured session launches against the config dir its record was created
+   * with — immutable afterwards — while the user is free to select another account
+   * in the meantime. The gate binding, and the credentials the child finds in that
+   * dir, must both follow the RECORD. Binding the selected account instead frees
+   * the single-use refresh token of the account the child is actually holding.
+   */
+  describe('binding the surface the child launches against', () => {
+    const ACCOUNT_A_DIR = '/managed/account-a'
+    /** The account selected right now — the one the pre-fix resolver bound. */
+    const ACCOUNT_B_DIR = '/managed/account-b'
+    const SHARED_DIR = '/home/work/.claude'
+
+    /** The account service's answer, as `prepareForClaudeLaunchOnConfigDir` gives
+     *  it: keyed on the dir asked for, never on the active selection. */
+    function preparationFor(configDir: string): ClaudeRuntimeAuthPreparation {
+      if (configDir === SHARED_DIR) {
+        return {
+          configDir,
+          envPatch: {},
+          stripAuthEnv: false,
+          accountId: null,
+          configDirRoute: 'shared-dir',
+          provenance: 'system'
+        }
+      }
+      const accountId = { [ACCOUNT_A_DIR]: 'account-a', [ACCOUNT_B_DIR]: 'account-b' }[configDir]
+      if (!accountId) {
+        throw new Error(`no managed Claude account owns ${configDir}`)
+      }
+      return {
+        configDir,
+        envPatch: { CLAUDE_CONFIG_DIR: configDir, CLAUDE_SECURESTORAGE_CONFIG_DIR: configDir },
+        stripAuthEnv: true,
+        accountId,
+        configDirRoute: 'account-dir',
+        provenance: `managed:${accountId}`
+      }
+    }
+
+    function resolverForSurface(
+      accountHomePath: string,
+      prepare: (configDir: string) => Promise<ClaudeRuntimeAuthPreparation>
+    ) {
+      return createClaudeStructuredLaunchResolver({
+        store: {
+          getRecord: () =>
+            record({ accountHome: { variable: 'CLAUDE_CONFIG_DIR', path: accountHomePath } })
+        } as unknown as AgentSessionRecordStore,
+        resolveWorkspacePath: async (id) => `/repos/${id}`,
+        resolveCommand: () => '/usr/local/bin/claude',
+        resolveAuthPolicy: ({ claudeConfigDir }) =>
+          claudeStructuredAuthPolicyForLaunchSurface(claudeConfigDir, prepare)
+      })
+    }
+
+    it('prepares and binds account A while account B is the active selection', async () => {
+      const prepared: string[] = []
+      // Account B is selected and preparable: asking for the selection would have
+      // succeeded and bound B, which is exactly the mis-attribution being pinned.
+      const launch = await resolverForSurface(ACCOUNT_A_DIR, async (configDir) => {
+        prepared.push(configDir)
+        return preparationFor(configDir)
+      })({ identity: IDENTITY })
+
+      expect(prepared).toEqual([ACCOUNT_A_DIR])
+      expect(launch.claudeConfigDir).toBe(ACCOUNT_A_DIR)
+      expect(launch.authBinding).toEqual({ route: 'account-dir', accountId: 'account-a' })
+    })
+
+    it('refuses when a pre-isolation Claude still owns that account grant', async () => {
+      const resolve = resolverForSurface(ACCOUNT_A_DIR, async () => {
+        throw new Error(CLAUDE_LEGACY_SESSION_MIGRATION_MESSAGE)
+      })
+
+      await expect(resolve({ identity: IDENTITY })).rejects.toThrow(
+        CLAUDE_LEGACY_SESSION_MIGRATION_MESSAGE
+      )
+      await expect(resolve({ identity: IDENTITY })).rejects.toBeInstanceOf(
+        AgentSessionPreSpawnError
+      )
+    })
+
+    it('refuses a config dir no managed account owns rather than guessing a surface', async () => {
+      await expect(
+        resolverForSurface('/managed/not-ours', async (configDir) => preparationFor(configDir))({
+          identity: IDENTITY
+        })
+      ).rejects.toBeInstanceOf(AgentSessionPreSpawnError)
+    })
+
+    it('refuses a policy that answers for the selected account rather than the record', async () => {
+      await expect(
+        resolverForSurface(ACCOUNT_A_DIR, async () => preparationFor(ACCOUNT_B_DIR))({
+          identity: IDENTITY
+        })
+      ).rejects.toThrow(/prepared for \/managed\/account-b/)
+    })
+
+    /** The gate exists to stop a child from running as the ambient identity while the
+     *  UI names a WSL account. A proved account-dir surface is not that child, and
+     *  refusing it would strand a chat the user cannot reach any other way. */
+    it('admits a session on its own account dir while the selection is WSL-bound', async () => {
+      const launch = await createClaudeStructuredLaunchResolver({
+        store: {
+          getRecord: () =>
+            record({ accountHome: { variable: 'CLAUDE_CONFIG_DIR', path: ACCOUNT_A_DIR } })
+        } as unknown as AgentSessionRecordStore,
+        resolveWorkspacePath: async (id) => `/repos/${id}`,
+        resolveCommand: () => '/usr/local/bin/claude',
+        resolveAuthPolicy: ({ claudeConfigDir }) =>
+          claudeStructuredAuthPolicyForLaunchSurface(claudeConfigDir, async (configDir) =>
+            preparationFor(configDir)
+          ),
+        readManagedAccountGate: () => WSL_ONLY_NORMALIZED
+      })({ identity: IDENTITY })
+
+      expect(launch.authBinding).toEqual({ route: 'account-dir', accountId: 'account-a' })
+    })
+
+    it('still refuses a shared-surface session under a WSL-bound selection', async () => {
+      await expect(
+        createClaudeStructuredLaunchResolver({
+          store: {
+            getRecord: () =>
+              record({ accountHome: { variable: 'CLAUDE_CONFIG_DIR', path: SHARED_DIR } })
+          } as unknown as AgentSessionRecordStore,
+          resolveWorkspacePath: async (id) => `/repos/${id}`,
+          resolveCommand: () => '/usr/local/bin/claude',
+          resolveAuthPolicy: ({ claudeConfigDir }) =>
+            claudeStructuredAuthPolicyForLaunchSurface(claudeConfigDir, async (configDir) =>
+              preparationFor(configDir)
+            ),
+          readManagedAccountGate: () => WSL_ONLY_NORMALIZED
+        })({ identity: IDENTITY })
+      ).rejects.toBeInstanceOf(AgentSessionPreSpawnError)
+    })
+
+    it('refuses an account directory prepared without naming its account', async () => {
+      await expect(
+        resolverForSurface(ACCOUNT_A_DIR, async (configDir) => ({
+          ...preparationFor(configDir),
+          accountId: null
+        }))({ identity: IDENTITY })
+      ).rejects.toBeInstanceOf(AgentSessionPreSpawnError)
+    })
+
+    it('binds the shared surface for a session pinned to the user own claude dir', async () => {
+      const launch = await resolverForSurface(SHARED_DIR, async (configDir) =>
+        preparationFor(configDir)
+      )({ identity: IDENTITY })
+
+      expect(launch.authBinding).toEqual({ route: 'shared-dir' })
     })
   })
 })

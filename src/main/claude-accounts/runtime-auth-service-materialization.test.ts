@@ -1,4 +1,5 @@
 import {
+  accountRuntimeCredentialsPath,
   cleanupRuntimeAuthTestState,
   createClaudeAccount,
   createClaudeCredentialsJson,
@@ -8,12 +9,13 @@ import {
   createOauthRefreshMock,
   createSettings,
   createStore,
-  expectedRuntimeConfigDir,
   hostPlatform,
+  readAccountRuntimeCredentials,
   readRuntimeOauthAccountForTest,
   resetRuntimeAuthTestState,
   setPlatform,
-  testState
+  testState,
+  writeAccountRuntimeCredentials
 } from './runtime-auth-service-test-harness'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -53,8 +55,8 @@ describe('ClaudeRuntimeAuthService', () => {
     cleanupRuntimeAuthTestState()
   })
 
-  it('rematerializes unchanged managed credentials when the runtime file is missing', async () => {
-    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
+  it('rematerializes unchanged managed credentials when the account runtime file is missing', async () => {
+    const sharedCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const managedCredentials = createClaudeCredentialsJson('user@example.com', 'managed')
     const managedAuthPath = createManagedClaudeAuth(
       testState.userDataDir,
@@ -71,13 +73,16 @@ describe('ClaudeRuntimeAuthService', () => {
     const service = new ClaudeRuntimeAuthService(store as never)
     await service.syncForCurrentSelection()
 
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(managedCredentials)
+    expect(readAccountRuntimeCredentials(managedAuthPath)).toBe(managedCredentials)
 
-    rmSync(runtimeCredentialsPath, { force: true })
+    rmSync(accountRuntimeCredentialsPath(managedAuthPath), { force: true })
     await service.prepareForClaudeLaunch()
 
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(managedCredentials)
-    expect(testState.runtimeWriteConfigDir).toBe(expectedRuntimeConfigDir())
+    expect(readAccountRuntimeCredentials(managedAuthPath)).toBe(managedCredentials)
+    // Why: the user's shared ~/.claude is never the pinned account's surface,
+    // so neither the file nor the shared runtime keychain write may happen.
+    expect(existsSync(sharedCredentialsPath)).toBe(false)
+    expect(testState.runtimeWriteConfigDir).toBeNull()
   })
 
   it('restores system default instead of materializing corrupt managed credentials', async () => {
@@ -155,7 +160,7 @@ describe('ClaudeRuntimeAuthService', () => {
 
   it('adopts canonical legacy managed auth paths without existing markers', async () => {
     setPlatform('linux')
-    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
+    const sharedCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const managedCredentials = createClaudeCredentialsJson('user@example.com', 'managed')
     const managedAuthPath = join(testState.userDataDir, 'claude-accounts', 'account-1', 'auth')
     mkdirSync(managedAuthPath, { recursive: true })
@@ -176,7 +181,9 @@ describe('ClaudeRuntimeAuthService', () => {
     await service.syncForCurrentSelection()
 
     const markerPath = join(managedAuthPath, '.orca-managed-claude-auth')
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(managedCredentials)
+    expect(readAccountRuntimeCredentials(managedAuthPath)).toBe(managedCredentials)
+    // Why: adoption must not spill the adopted account onto the shared surface.
+    expect(existsSync(sharedCredentialsPath)).toBe(false)
     expect(lstatSync(markerPath).isFile()).toBe(true)
     expect(readFileSync(markerPath, 'utf-8')).toBe('account-1\n')
   })
@@ -260,7 +267,10 @@ describe('ClaudeRuntimeAuthService', () => {
     const service = new ClaudeRuntimeAuthService(store as never)
     store.updateSettings({ activeClaudeManagedAccountId: 'account-1' })
     await service.syncForCurrentSelection()
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(ownedCredentials)
+    // Why: while account-1 is pinned the credentials land in its own config
+    // dir; the shared ~/.claude keeps the untouched system default.
+    expect(readAccountRuntimeCredentials(ownedAuthPath)).toBe(ownedCredentials)
+    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(systemCredentials)
 
     store.updateSettings({ activeClaudeManagedAccountId: 'account-2' })
     await service.syncForCurrentSelection()
@@ -315,7 +325,9 @@ describe('ClaudeRuntimeAuthService', () => {
     const service = new ClaudeRuntimeAuthService(store as never)
     store.updateSettings({ activeClaudeManagedAccountId: 'account-1' })
     await service.syncForCurrentSelection()
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(ownedCredentials)
+    // Why: pinned account materializes into its own dir, shared surface intact.
+    expect(readAccountRuntimeCredentials(ownedAuthPath)).toBe(ownedCredentials)
+    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(systemCredentials)
 
     store.updateSettings({
       claudeManagedAccounts: [
@@ -382,7 +394,9 @@ describe('ClaudeRuntimeAuthService', () => {
     const service = new ClaudeRuntimeAuthService(store as never)
     store.updateSettings({ activeClaudeManagedAccountId: 'account-1' })
     await service.syncForCurrentSelection()
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(account1Credentials)
+    // Why: pinned account materializes into its own dir, shared surface intact.
+    expect(readAccountRuntimeCredentials(managedAuthPath1)).toBe(account1Credentials)
+    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(systemCredentials)
 
     store.updateSettings({ activeClaudeManagedAccountId: 'account-2' })
     await service.syncForCurrentSelection()
@@ -426,7 +440,9 @@ describe('ClaudeRuntimeAuthService', () => {
     }
 
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
+    const accountCredentialsPath = accountRuntimeCredentialsPath(
+      join(testState.userDataDir, 'claude-accounts', 'account-1', 'auth')
+    )
     const managedCredentials = createClaudeCredentialsJson('user@example.com', 'managed')
     const rotatedCredentials = createClaudeCredentialsJson('user@example.com', 'rotated')
     const managedAuthPath = createManagedClaudeAuth(
@@ -445,18 +461,20 @@ describe('ClaudeRuntimeAuthService', () => {
     await service.syncForCurrentSelection()
 
     testState.managedKeychainCredentials.set('account-1', rotatedCredentials)
-    writeFileSync(join(managedAuthPath, '.credentials.json'), rotatedCredentials, 'utf-8')
-    chmodSync(runtimeCredentialsPath, 0o000)
+    // Why: the pinned account's own CLI rotates tokens in its config dir, which
+    // is also where the unchanged check reads — make that read fail.
+    writeAccountRuntimeCredentials(managedAuthPath, rotatedCredentials)
+    chmodSync(accountCredentialsPath, 0o000)
     try {
       await service.syncForCurrentSelection()
     } finally {
-      if (existsSync(runtimeCredentialsPath)) {
-        chmodSync(runtimeCredentialsPath, 0o600)
+      if (existsSync(accountCredentialsPath)) {
+        chmodSync(accountCredentialsPath, 0o600)
       }
       warn.mockRestore()
     }
 
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(rotatedCredentials)
+    expect(readAccountRuntimeCredentials(managedAuthPath)).toBe(rotatedCredentials)
   })
 
   it('tightens credential file permissions when unchanged content is already present', async () => {
@@ -464,7 +482,9 @@ describe('ClaudeRuntimeAuthService', () => {
       return
     }
 
-    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
+    const accountCredentialsPath = accountRuntimeCredentialsPath(
+      join(testState.userDataDir, 'claude-accounts', 'account-1', 'auth')
+    )
     const managedCredentials = createClaudeCredentialsJson('user@example.com', 'managed')
     const managedAuthPath = createManagedClaudeAuth(
       testState.userDataDir,
@@ -480,9 +500,9 @@ describe('ClaudeRuntimeAuthService', () => {
     const service = new ClaudeRuntimeAuthService(store as never)
     settings.activeClaudeManagedAccountId = 'account-1'
     await service.syncForCurrentSelection()
-    chmodSync(runtimeCredentialsPath, 0o644)
+    chmodSync(accountCredentialsPath, 0o644)
     await service.syncForCurrentSelection()
 
-    expect(statSync(runtimeCredentialsPath).mode & 0o777).toBe(0o600)
+    expect(statSync(accountCredentialsPath).mode & 0o777).toBe(0o600)
   })
 })

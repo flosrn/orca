@@ -31,6 +31,14 @@ export type ClaudeOAuthCredentialReadResult = {
 type ClaudeOAuthCredentialReadOptions = {
   credentialsFileConfigDir?: string
   keychainConfigDir?: string
+  /**
+   * Whether a scoped miss may fall back to the unscoped `Claude Code-credentials`
+   * item. True for the user's own ~/.claude, whose older Claude builds wrote
+   * there. False for a managed account's own dir: that item belongs to another
+   * surface, and reading it would report one account's quota under another's
+   * name.
+   */
+  allowUnscopedKeychainFallback?: boolean
 }
 
 export function parseClaudeOAuthCredentialsJson(
@@ -64,14 +72,17 @@ function unavailableKeychainResult(): ClaudeOAuthCredentialReadResult {
   }
 }
 
-async function readFromKeychain(configDir?: string): Promise<ClaudeOAuthCredentialReadResult> {
+async function readFromKeychain(
+  configDir: string | undefined,
+  allowUnscopedFallback: boolean
+): Promise<ClaudeOAuthCredentialReadResult> {
   if (process.platform !== 'darwin') {
     return emptyClaudeOAuthCredentialReadResult()
   }
 
   if (configDir) {
     const scoped = await readClaudeCredentialsFromStrictKeychain(configDir, 'scoped-keychain')
-    if (scoped.token) {
+    if (scoped.token || !allowUnscopedFallback) {
       return scoped
     }
 
@@ -135,7 +146,10 @@ async function readFromCredentialsFile(
 export async function readClaudeOAuthCredentials(
   options?: ClaudeOAuthCredentialReadOptions
 ): Promise<ClaudeOAuthCredentialReadResult> {
-  const keychain = await readFromKeychain(options?.keychainConfigDir)
+  const keychain = await readFromKeychain(
+    options?.keychainConfigDir,
+    options?.allowUnscopedKeychainFallback ?? true
+  )
   if (keychain.token || keychain.hasRefreshableCredentials) {
     return keychain
   }
@@ -155,6 +169,10 @@ export function resolveClaudeOAuthCredentialReadOptions(
   }
   return {
     credentialsFileConfigDir: authPreparation.configDir,
-    keychainConfigDir: authPreparation.configDir
+    keychainConfigDir: authPreparation.configDir,
+    // Why: a managed account's dir owns its own Keychain item. Falling back to
+    // the unscoped one would read the user's own ~/.claude token and report its
+    // quota as this account's.
+    allowUnscopedKeychainFallback: authPreparation.configDirRoute !== 'account-dir'
   }
 }

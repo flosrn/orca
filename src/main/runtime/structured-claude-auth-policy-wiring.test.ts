@@ -1,6 +1,5 @@
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { mkdtemp, rm } from 'node:fs/promises'
+import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
@@ -16,22 +15,11 @@ import {
  * leave ~1000 tests green while every `ANTHROPIC_*` variable in the shell reached the
  * child, because `stripAuthEnv` silently fell back to `false`.
  *
- * Two independent guards replace that silence, and this file pins both.
+ * The guard is that the host refuses to install without one: what the policy then
+ * means is pinned behaviourally by claude-structured-auth-policy.test.ts and
+ * claude-structured-launch-resolution.test.ts.
  */
 describe('structured Claude auth policy wiring', () => {
-  // The behavioural version of this assertion — importing the runtime class and
-  // capturing the installed deps — costs 35s of module transform for the whole
-  // OrcaRuntime chain (measured), so the wiring itself is pinned by source and the
-  // policy's meaning by claude-structured-auth-policy.test.ts.
-  it('passes a settings-derived Claude auth policy to the host installer', () => {
-    const source = readFileSync(join(__dirname, 'orca-runtime-get-worktree-ps.ts'), 'utf8')
-
-    expect(source).toContain('claudeStructuredAuthPolicyForSettings')
-    expect(source).toMatch(
-      /resolveClaudeAuthPolicy:\s*\(\)\s*=>\s*\n?\s*claudeStructuredAuthPolicyForSettings\(/
-    )
-  })
-
   describe('installing without one', () => {
     let stateDirectory: string | null = null
 

@@ -96,8 +96,13 @@ export function getProviderUsageStatusLabel(p: ProviderRateLimits): string {
     switch (p.usageMetadata?.failureKind) {
       case 'deferred-by-live-session':
         return translate(
-          'auto.components.status.bar.tooltip.0d8d7cfe15',
-          'Waiting for Claude session'
+          'auto.components.status.bar.tooltip.claude.deferredRefresh.label',
+          'Waiting for credential refresh'
+        )
+      case 'rate-limited':
+        return translate(
+          'auto.components.status.bar.tooltip.claude.rateLimitedRead.label',
+          'Refresh rate limited'
         )
       case 'stale-token':
       case 'refreshable-credentials-without-token':
@@ -113,7 +118,6 @@ export function getProviderUsageStatusLabel(p: ProviderRateLimits): string {
       case 'missing-credentials':
       case 'missing-scope':
       case 'parse':
-      case 'rate-limited':
       case 'server':
       case 'unknown':
       case undefined:
@@ -126,7 +130,11 @@ export function getProviderUsageStatusLabel(p: ProviderRateLimits): string {
     return translate('auto.components.status.bar.tooltip.minimax.expired.label', 'Sign-in expired')
   }
   if (isUsageRateLimitError(p.error)) {
-    return translate('auto.components.status.bar.tooltip.7ad719c4bf', 'Limited')
+    // Why: what hit a limit is Orca's usage read, not necessarily the user's plan.
+    return translate(
+      'auto.components.status.bar.tooltip.refreshRateLimited.label',
+      'Refresh rate limited'
+    )
   }
   return translate('auto.components.status.bar.tooltip.e740f92596', 'Refresh failed')
 }
@@ -156,8 +164,13 @@ export function getProviderUsageErrorMessage(p: ProviderRateLimits): string {
     switch (p.usageMetadata?.failureKind) {
       case 'deferred-by-live-session':
         return translate(
-          'auto.components.status.bar.tooltip.3d3c9c0c1f',
-          'Claude usage will refresh after the live Claude terminal rotates its credentials.'
+          'auto.components.status.bar.tooltip.claude.deferredRefresh.detail',
+          'Claude usage refreshes once this account finishes rotating its credentials.'
+        )
+      case 'rate-limited':
+        return translate(
+          'auto.components.status.bar.tooltip.claude.rateLimitedRead.detail',
+          'Claude throttled the usage read itself. This does not mean your subscription quota is spent.'
         )
       case 'stale-token':
       case 'refreshable-credentials-without-token':
@@ -187,7 +200,6 @@ export function getProviderUsageErrorMessage(p: ProviderRateLimits): string {
           'Claude usage is unavailable right now.'
         )
       case 'missing-credentials':
-      case 'rate-limited':
       case 'unknown':
       case undefined:
         break

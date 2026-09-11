@@ -13,6 +13,7 @@ import type { CodexRateLimitResetOutcome, RateLimitState } from '../../shared/ra
 import type { CodexResetCreditExpectedScope } from '../../shared/codex-reset-credit-scope'
 import type { CommitMessageAgentEnvironmentResolvers } from '../text-generation/commit-message-agent-environment'
 import type { ClaudeAccountSelectionTarget } from '../claude-accounts/runtime-selection'
+import type { ClaudeRuntimeAuthPreparation } from '../claude-accounts/runtime-auth/runtime-auth-types'
 
 export type RuntimeAccountServices = {
   claudeAccounts: ClaudeAccountService
@@ -56,6 +57,12 @@ export class RuntimeAccountController {
 
   getClaudeConfigDirectory(target: ClaudeAccountSelectionTarget): string | null {
     return this.services?.claudeAccounts.getRuntimeConfigDir(target) ?? null
+  }
+
+  /** Credential preparation for the config dir a structured Claude session is
+   *  pinned to. Absent account services are a refusal, not a shared-surface guess. */
+  prepareClaudeStructuredLaunchAuth(configDir: string): Promise<ClaudeRuntimeAuthPreparation> {
+    return this.requireServices().claudeAccounts.prepareStructuredLaunchAuth(configDir)
   }
 
   getSnapshot(): AccountsSnapshot {

@@ -5,14 +5,37 @@ import { ClaudeRuntimeAuthSnapshotCapture } from './runtime-auth-snapshot-captur
 import type { ClaudeKeychainSnapshotValue } from './runtime-auth-types'
 
 export class ClaudeRuntimeAuthSnapshotRestore extends ClaudeRuntimeAuthSnapshotCapture {
+  /**
+   * Refuses to run a shared-surface operation while an account pin is set.
+   *
+   * These helpers take their Keychain and config dir from
+   * `pathResolver.getRuntimePaths()` (the user's own ~/.claude) but reach the
+   * credentials file and `.claude.json` through `getActiveRuntimePaths()`,
+   * which follows the pin. Running them pinned mixes the two surfaces: the
+   * user's snapshot credentials and oauth identity land in a managed account's
+   * config dir (or its `.credentials.json` is deleted). The pin is scoped to a
+   * single sync, so reaching here with one set is a bug in the caller.
+   */
+  protected assertSharedSurfaceRestore(operation: string): void {
+    if (this.pinnedAccountConfigDir !== null) {
+      throw new Error(`${operation} must run against the shared surface`)
+    }
+  }
+
   protected async restoreSystemDefaultSnapshot(
     ownedCredentialsJson?: string | null,
     ownedOauthAccount?: unknown
   ): Promise<void> {
+    this.assertSharedSurfaceRestore('restoreSystemDefaultSnapshot')
     const snapshotPath = this.getSystemDefaultSnapshotPath()
     const paths = this.pathResolver.getRuntimePaths()
+    // Why: only a write that went to ~/.claude proves Orca owns what is there.
+    // A pinned account's last write describes its own dir, and accepting it
+    // here would delete the user's own credentials or oauth metadata.
+    const sharedLastWrittenCredentialsJson =
+      this.lastWrittenRuntimeConfigDir === null ? this.lastWrittenCredentialsJson : null
     const previouslyWrittenCredentialsJson =
-      this.lastWrittenCredentialsJson ?? ownedCredentialsJson ?? null
+      sharedLastWrittenCredentialsJson ?? ownedCredentialsJson ?? null
     const snapshot = this.readSystemDefaultSnapshot(snapshotPath)
 
     const fileCredentialsOwned = this.hasUnchangedRuntimeCredentials(
@@ -59,17 +82,14 @@ export class ClaudeRuntimeAuthSnapshotRestore extends ClaudeRuntimeAuthSnapshotC
         await this.restoreActiveClaudeKeychainCredentials(legacySnapshot.credentialsJson)
       }
     }
-    this.lastWrittenCredentialsJson = null
-    this.lastWrittenOauthAccount = null
-    this.hasLastWrittenOauthAccount = false
-    this.hasMaterializedRuntimeAuth = false
+    this.clearLastWrittenRuntimeState()
   }
 
   protected getOwnedRuntimeOauthBaseline(
     ownedOauthAccount: unknown,
     hasCredentialSurfaceOwnership: boolean
   ): unknown {
-    if (this.hasLastWrittenOauthAccount) {
+    if (this.hasLastWrittenOauthAccount && this.lastWrittenRuntimeConfigDir === null) {
       return this.lastWrittenOauthAccount
     }
     // Why: managed metadata hints identity but isn't proof Orca wrote .claude.json; use only after a credential surface proves ownership.
@@ -83,6 +103,7 @@ export class ClaudeRuntimeAuthSnapshotRestore extends ClaudeRuntimeAuthSnapshotC
     account: ClaudeManagedAccount,
     managedOauthAccount: unknown
   ): Promise<void> {
+    this.assertSharedSurfaceRestore('clearRuntimeAuthForAccount')
     const paths = this.pathResolver.getRuntimePaths()
     const fileCredentialsOwned = this.runtimeCredentialsBelongToAccount(
       this.readRuntimeCredentialsFile(),
@@ -128,6 +149,7 @@ export class ClaudeRuntimeAuthSnapshotRestore extends ClaudeRuntimeAuthSnapshotC
     account: ClaudeManagedAccount,
     managedOauthAccount: unknown
   ): Promise<void> {
+    this.assertSharedSurfaceRestore('restoreSystemDefaultSnapshotForMissingManagedCredentials')
     const snapshot = this.readSystemDefaultSnapshot(this.getSystemDefaultSnapshotPath())
     if (!snapshot) {
       await this.clearRuntimeAuthForAccount(account, managedOauthAccount)

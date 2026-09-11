@@ -11,8 +11,12 @@ describe('claude config dir pin', () => {
   })
 
   it('pins a managed account home the CLI would not find on its own', () => {
+    // Why both: the CLI reads credentials out of CLAUDE_CONFIG_DIR but derives its
+    // Keychain service name from CLAUDE_SECURESTORAGE_CONFIG_DIR, so pinning one
+    // without the other puts two accounts on one Keychain item.
     expect(claudeConfigDirEnvPatch('/accounts/claude/managed', { env: {} })).toEqual({
-      CLAUDE_CONFIG_DIR: '/accounts/claude/managed'
+      CLAUDE_CONFIG_DIR: '/accounts/claude/managed',
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: '/accounts/claude/managed'
     })
   })
 
@@ -21,7 +25,8 @@ describe('claude config dir pin', () => {
     expect(defaultClaudeConfigDir(env)).toBe('/inherited/home')
     expect(claudeConfigDirEnvPatch('/inherited/home', { env })).toEqual({})
     expect(claudeConfigDirEnvPatch('/other/home', { env })).toEqual({
-      CLAUDE_CONFIG_DIR: '/other/home'
+      CLAUDE_CONFIG_DIR: '/other/home',
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: '/other/home'
     })
   })
 

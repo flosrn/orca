@@ -9,14 +9,29 @@ import {
   createOauthRefreshMock,
   createSettings,
   createStore,
+  readAccountRuntimeCredentials,
   readManagedCredentialsForTest,
   resetRuntimeAuthTestState,
-  setPlatform,
-  testState
+  testState,
+  writeAccountRuntimeCredentials
 } from './runtime-auth-service-test-harness'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+
+/**
+ * Per-account isolation means a selected host account materializes into its
+ * own config dir, so the user's own `~/.claude` must come out of every one of
+ * these read-back scenarios exactly as untouched as it went in.
+ */
+function expectSharedSurfaceUntouched(): void {
+  expect(existsSync(join(testState.fakeHomeDir, '.claude', '.credentials.json'))).toBe(false)
+  expect(testState.scopedKeychainCredentials).toBeNull()
+  expect(testState.legacyKeychainCredentials).toBeNull()
+  // Why: the shared-surface runtime keychain write is the one a pinned account
+  // must never reach; it is the only thing that sets this.
+  expect(testState.runtimeWriteConfigDir).toBeNull()
+}
 
 vi.mock('electron', () => createElectronMock())
 
@@ -42,7 +57,6 @@ describe('ClaudeRuntimeAuthService', () => {
   })
 
   it('reads back refreshed credentials when the Claude identity still matches', async () => {
-    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const originalCredentials = createClaudeCredentialsJson('user@example.com', 'original')
     const refreshedCredentials = createClaudeCredentialsJson('user@example.com', 'refreshed')
     const managedAuthPath = createManagedClaudeAuth(
@@ -60,15 +74,16 @@ describe('ClaudeRuntimeAuthService', () => {
     settings.activeClaudeManagedAccountId = 'account-1'
     await service.syncForCurrentSelection()
 
-    writeFileSync(runtimeCredentialsPath, refreshedCredentials, 'utf-8')
+    writeAccountRuntimeCredentials(managedAuthPath, refreshedCredentials)
     await service.syncForCurrentSelection()
 
     expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(refreshedCredentials)
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(refreshedCredentials)
+    expect(readAccountRuntimeCredentials(managedAuthPath)).toBe(refreshedCredentials)
+
+    expectSharedSurfaceUntouched()
   })
 
   it('rejects wrong-shaped refreshed credentials during read-back', async () => {
-    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const originalCredentials = createClaudeCredentialsJson('user@example.com', 'original')
     const wrongShapedRefresh = `${JSON.stringify({
       claudeAiOauth: {
@@ -91,15 +106,16 @@ describe('ClaudeRuntimeAuthService', () => {
     settings.activeClaudeManagedAccountId = 'account-1'
     await service.syncForCurrentSelection()
 
-    writeFileSync(runtimeCredentialsPath, wrongShapedRefresh, 'utf-8')
+    writeAccountRuntimeCredentials(managedAuthPath, wrongShapedRefresh)
     await service.syncForCurrentSelection()
 
     expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(originalCredentials)
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(originalCredentials)
+    expect(readAccountRuntimeCredentials(managedAuthPath)).toBe(originalCredentials)
+
+    expectSharedSurfaceUntouched()
   })
 
   it('reads back verified same-account credentials on first sync after restart', async () => {
-    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const originalCredentials = createClaudeCredentialsJson(
       'user@example.com',
       'original',
@@ -112,12 +128,12 @@ describe('ClaudeRuntimeAuthService', () => {
       null,
       2_000
     )
-    writeFileSync(runtimeCredentialsPath, refreshedCredentials, 'utf-8')
     const managedAuthPath = createManagedClaudeAuth(
       testState.userDataDir,
       'account-1',
       originalCredentials
     )
+    writeAccountRuntimeCredentials(managedAuthPath, refreshedCredentials)
     const settings = createSettings({
       claudeManagedAccounts: [createClaudeAccount('account-1', managedAuthPath)],
       activeClaudeManagedAccountId: 'account-1'
@@ -129,11 +145,12 @@ describe('ClaudeRuntimeAuthService', () => {
     await service.syncForCurrentSelection()
 
     expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(refreshedCredentials)
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(refreshedCredentials)
+    expect(readAccountRuntimeCredentials(managedAuthPath)).toBe(refreshedCredentials)
+
+    expectSharedSurfaceUntouched()
   })
 
   it('rejects older same-account Claude credentials on first sync after restart', async () => {
-    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const staleRuntimeCredentials = createClaudeCredentialsJson(
       'user@example.com',
       'stale',
@@ -146,12 +163,12 @@ describe('ClaudeRuntimeAuthService', () => {
       null,
       2_000
     )
-    writeFileSync(runtimeCredentialsPath, staleRuntimeCredentials, 'utf-8')
     const managedAuthPath = createManagedClaudeAuth(
       testState.userDataDir,
       'account-1',
       managedCredentials
     )
+    writeAccountRuntimeCredentials(managedAuthPath, staleRuntimeCredentials)
     const settings = createSettings({
       claudeManagedAccounts: [createClaudeAccount('account-1', managedAuthPath)],
       activeClaudeManagedAccountId: 'account-1'
@@ -163,11 +180,12 @@ describe('ClaudeRuntimeAuthService', () => {
     await service.syncForCurrentSelection()
 
     expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(managedCredentials)
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(managedCredentials)
+    expect(readAccountRuntimeCredentials(managedAuthPath)).toBe(managedCredentials)
+
+    expectSharedSurfaceUntouched()
   })
 
   it('rejects runtime read-back from a different Claude identity', async () => {
-    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const selectedCredentials = createClaudeCredentialsJson('user@example.com', 'selected')
     const staleCredentials = createClaudeCredentialsJson('other@example.com', 'stale')
     const managedAuthPath = createManagedClaudeAuth(
@@ -185,15 +203,16 @@ describe('ClaudeRuntimeAuthService', () => {
     settings.activeClaudeManagedAccountId = 'account-1'
     await service.syncForCurrentSelection()
 
-    writeFileSync(runtimeCredentialsPath, staleCredentials, 'utf-8')
+    writeAccountRuntimeCredentials(managedAuthPath, staleCredentials)
     await service.syncForCurrentSelection()
 
     expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(selectedCredentials)
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(selectedCredentials)
+    expect(readAccountRuntimeCredentials(managedAuthPath)).toBe(selectedCredentials)
+
+    expectSharedSurfaceUntouched()
   })
 
   it('rejects runtime read-back from the same Claude email in a different organization', async () => {
-    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const selectedCredentials = createClaudeCredentialsJson('user@example.com', 'selected', 'org-b')
     const staleCredentials = createClaudeCredentialsJson('user@example.com', 'stale', 'org-a')
     const managedAuthPath = createManagedClaudeAuth(
@@ -213,15 +232,16 @@ describe('ClaudeRuntimeAuthService', () => {
     const service = new ClaudeRuntimeAuthService(store as never)
     await service.syncForCurrentSelection()
 
-    writeFileSync(runtimeCredentialsPath, staleCredentials, 'utf-8')
+    writeAccountRuntimeCredentials(managedAuthPath, staleCredentials)
     await service.syncForCurrentSelection()
 
     expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(selectedCredentials)
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(selectedCredentials)
+    expect(readAccountRuntimeCredentials(managedAuthPath)).toBe(selectedCredentials)
+
+    expectSharedSurfaceUntouched()
   })
 
   it('rejects same-email Claude read-back using stored managed organization identity', async () => {
-    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const selectedCredentials = createClaudeCredentialsJson('user@example.com', 'selected', 'org-b')
     const staleCredentials = createClaudeCredentialsJson('user@example.com', 'stale', 'org-a')
     const managedAuthPath = createManagedClaudeAuth(
@@ -239,15 +259,16 @@ describe('ClaudeRuntimeAuthService', () => {
     settings.activeClaudeManagedAccountId = 'account-1'
     await service.syncForCurrentSelection()
 
-    writeFileSync(runtimeCredentialsPath, staleCredentials, 'utf-8')
+    writeAccountRuntimeCredentials(managedAuthPath, staleCredentials)
     await service.syncForCurrentSelection()
 
     expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(selectedCredentials)
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(selectedCredentials)
+    expect(readAccountRuntimeCredentials(managedAuthPath)).toBe(selectedCredentials)
+
+    expectSharedSurfaceUntouched()
   })
 
   it('rejects same-email Claude read-back using stored oauth-account organization identity', async () => {
-    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const selectedCredentials = createClaudeCredentialsJson('user@example.com', 'selected')
     const staleCredentials = createClaudeCredentialsJson('user@example.com', 'stale', 'org-a')
     const managedAuthPath = createManagedClaudeAuth(
@@ -266,15 +287,16 @@ describe('ClaudeRuntimeAuthService', () => {
     const service = new ClaudeRuntimeAuthService(store as never)
     await service.syncForCurrentSelection()
 
-    writeFileSync(runtimeCredentialsPath, staleCredentials, 'utf-8')
+    writeAccountRuntimeCredentials(managedAuthPath, staleCredentials)
     await service.syncForCurrentSelection()
 
     expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(selectedCredentials)
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(selectedCredentials)
+    expect(readAccountRuntimeCredentials(managedAuthPath)).toBe(selectedCredentials)
+
+    expectSharedSurfaceUntouched()
   })
 
   it('rejects no-email Claude read-back when organization identity conflicts', async () => {
-    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const selectedCredentials = createClaudeCredentialsJson('user@example.com', 'selected', 'org-b')
     const staleCredentials = createClaudeCredentialsWithoutEmail('stale', 'org-a')
     const managedAuthPath = createManagedClaudeAuth(
@@ -294,15 +316,16 @@ describe('ClaudeRuntimeAuthService', () => {
     const service = new ClaudeRuntimeAuthService(store as never)
     await service.syncForCurrentSelection()
 
-    writeFileSync(runtimeCredentialsPath, staleCredentials, 'utf-8')
+    writeAccountRuntimeCredentials(managedAuthPath, staleCredentials)
     await service.syncForCurrentSelection()
 
     expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(selectedCredentials)
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(selectedCredentials)
+    expect(readAccountRuntimeCredentials(managedAuthPath)).toBe(selectedCredentials)
+
+    expectSharedSurfaceUntouched()
   })
 
   it('rejects no-email refreshed credentials even when organization identity matches', async () => {
-    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const originalCredentials = createClaudeCredentialsJson('user@example.com', 'original', 'org-a')
     const refreshedCredentials = createClaudeCredentialsWithoutEmail('refreshed', 'org-a')
     const managedAuthPath = createManagedClaudeAuth(
@@ -322,16 +345,16 @@ describe('ClaudeRuntimeAuthService', () => {
     const service = new ClaudeRuntimeAuthService(store as never)
     await service.syncForCurrentSelection()
 
-    writeFileSync(runtimeCredentialsPath, refreshedCredentials, 'utf-8')
+    writeAccountRuntimeCredentials(managedAuthPath, refreshedCredentials)
     await service.syncForCurrentSelection()
 
     expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(originalCredentials)
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(originalCredentials)
+    expect(readAccountRuntimeCredentials(managedAuthPath)).toBe(originalCredentials)
+
+    expectSharedSurfaceUntouched()
   })
 
-  it('preserves rejected runtime refreshes while a Claude terminal is live on Windows', async () => {
-    setPlatform('win32')
-    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
+  it('preserves rejected runtime refreshes while a Claude terminal is live', async () => {
     const originalCredentials = createClaudeCredentialsJson('user@example.com', 'original', 'org-a')
     const refreshedCredentials = createClaudeCredentialsWithoutEmail('refreshed', 'org-a')
     const managedAuthPath = createManagedClaudeAuth(
@@ -352,25 +375,27 @@ describe('ClaudeRuntimeAuthService', () => {
     const service = new ClaudeRuntimeAuthService(store as never)
     await service.syncForCurrentSelection()
 
-    markClaudePtySpawned('live-claude-pty')
+    // Why: the refresh gate is per account now — only a pty bound to this
+    // account's config dir owns its single-use refresh token.
+    markClaudePtySpawned('live-claude-pty', { route: 'account-dir', accountId: 'account-1' })
     try {
-      writeFileSync(runtimeCredentialsPath, refreshedCredentials, 'utf-8')
+      writeAccountRuntimeCredentials(managedAuthPath, refreshedCredentials)
       await service.syncForCurrentSelection()
 
       expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(refreshedCredentials)
-      expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(refreshedCredentials)
+      expect(readAccountRuntimeCredentials(managedAuthPath)).toBe(refreshedCredentials)
     } finally {
       markClaudePtyExited('live-claude-pty')
     }
 
     await service.syncForCurrentSelection()
 
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(refreshedCredentials)
+    expect(readAccountRuntimeCredentials(managedAuthPath)).toBe(refreshedCredentials)
+
+    expectSharedSurfaceUntouched()
   })
 
   it('does not persist live runtime refreshes with conflicting organization identity', async () => {
-    setPlatform('win32')
-    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const originalCredentials = createClaudeCredentialsJson('user@example.com', 'original', 'org-a')
     const conflictingCredentials = createClaudeCredentialsWithoutEmail('refreshed', 'org-b')
     const managedAuthPath = createManagedClaudeAuth(
@@ -391,21 +416,23 @@ describe('ClaudeRuntimeAuthService', () => {
     const service = new ClaudeRuntimeAuthService(store as never)
     await service.syncForCurrentSelection()
 
-    markClaudePtySpawned('live-claude-pty')
+    // Why: the refresh gate is per account now — only a pty bound to this
+    // account's config dir owns its single-use refresh token.
+    markClaudePtySpawned('live-claude-pty', { route: 'account-dir', accountId: 'account-1' })
     try {
-      writeFileSync(runtimeCredentialsPath, conflictingCredentials, 'utf-8')
+      writeAccountRuntimeCredentials(managedAuthPath, conflictingCredentials)
       await service.syncForCurrentSelection()
 
       expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(originalCredentials)
-      expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(conflictingCredentials)
+      expect(readAccountRuntimeCredentials(managedAuthPath)).toBe(conflictingCredentials)
     } finally {
       markClaudePtyExited('live-claude-pty')
     }
+
+    expectSharedSurfaceUntouched()
   })
 
   it('rematerializes managed credentials over a wiped runtime blob while a Claude terminal is live', async () => {
-    setPlatform('win32')
-    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const originalCredentials = createClaudeCredentialsJson('user@example.com', 'original', 'org-a')
     // Why: Claude CLI wipes tokens in place (keeps identity fields) after an
     // invalid_grant refresh — the exact blob shape this regression guards.
@@ -438,20 +465,23 @@ describe('ClaudeRuntimeAuthService', () => {
     const service = new ClaudeRuntimeAuthService(store as never)
     await service.syncForCurrentSelection()
 
-    markClaudePtySpawned('live-claude-pty')
+    // Why: the refresh gate is per account now — only a pty bound to this
+    // account's config dir owns its single-use refresh token.
+    markClaudePtySpawned('live-claude-pty', { route: 'account-dir', accountId: 'account-1' })
     try {
-      writeFileSync(runtimeCredentialsPath, wipedCredentials, 'utf-8')
+      writeAccountRuntimeCredentials(managedAuthPath, wipedCredentials)
       await service.syncForCurrentSelection()
 
       expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(originalCredentials)
-      expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(originalCredentials)
+      expect(readAccountRuntimeCredentials(managedAuthPath)).toBe(originalCredentials)
     } finally {
       markClaudePtyExited('live-claude-pty')
     }
+
+    expectSharedSurfaceUntouched()
   })
 
   it('rejects unverifiable refreshed runtime credentials', async () => {
-    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const originalCredentials = createClaudeCredentialsWithoutEmail('original')
     const refreshedCredentials = createClaudeCredentialsWithoutEmail('refreshed')
     const managedAuthPath = createManagedClaudeAuth(
@@ -469,16 +499,17 @@ describe('ClaudeRuntimeAuthService', () => {
     const service = new ClaudeRuntimeAuthService(store as never)
     await service.syncForCurrentSelection()
 
-    writeFileSync(runtimeCredentialsPath, refreshedCredentials, 'utf-8')
+    writeAccountRuntimeCredentials(managedAuthPath, refreshedCredentials)
     await service.syncForCurrentSelection()
     await service.syncForCurrentSelection()
 
     expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(originalCredentials)
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(originalCredentials)
+    expect(readAccountRuntimeCredentials(managedAuthPath)).toBe(originalCredentials)
+
+    expectSharedSurfaceUntouched()
   })
 
   it('reads back identity-less refreshed credentials when the refresh token matches', async () => {
-    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const refreshToken = 'same-managed-refresh-token'
     const originalCredentials = createClaudeCredentialsWithoutEmail('original', null, {
       expiresAt: 1_000,
@@ -505,16 +536,16 @@ describe('ClaudeRuntimeAuthService', () => {
     const service = new ClaudeRuntimeAuthService(store as never)
     await service.syncForCurrentSelection()
 
-    writeFileSync(runtimeCredentialsPath, refreshedCredentials, 'utf-8')
+    writeAccountRuntimeCredentials(managedAuthPath, refreshedCredentials)
     await service.syncForCurrentSelection()
 
     expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(refreshedCredentials)
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(refreshedCredentials)
+    expect(readAccountRuntimeCredentials(managedAuthPath)).toBe(refreshedCredentials)
+
+    expectSharedSurfaceUntouched()
   })
 
   it('reads back identity-less refreshed credentials when runtime oauth metadata matches', async () => {
-    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
-    const runtimeConfigPath = join(testState.fakeHomeDir, '.claude.json')
     const originalCredentials = createClaudeCredentialsJson(
       'user@example.com',
       'original',
@@ -525,7 +556,6 @@ describe('ClaudeRuntimeAuthService', () => {
       expiresAt: 2_000,
       refreshToken: 'rotated-refresh-token'
     })
-    writeFileSync(runtimeConfigPath, '{}\n', 'utf-8')
     const managedAuthPath = createManagedClaudeAuth(
       testState.userDataDir,
       'account-1',
@@ -547,15 +577,16 @@ describe('ClaudeRuntimeAuthService', () => {
     const service = new ClaudeRuntimeAuthService(store as never)
     await service.syncForCurrentSelection()
 
-    writeFileSync(runtimeCredentialsPath, refreshedCredentials, 'utf-8')
+    writeAccountRuntimeCredentials(managedAuthPath, refreshedCredentials)
     await service.syncForCurrentSelection()
 
     expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(refreshedCredentials)
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(refreshedCredentials)
+    expect(readAccountRuntimeCredentials(managedAuthPath)).toBe(refreshedCredentials)
+
+    expectSharedSurfaceUntouched()
   })
 
   it('rules out other identity-less accounts with different refresh tokens', async () => {
-    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const account1RefreshToken = 'account-1-refresh-token'
     const account1OriginalCredentials = createClaudeCredentialsWithoutEmail('account-1', null, {
       expiresAt: 1_000,
@@ -595,13 +626,15 @@ describe('ClaudeRuntimeAuthService', () => {
     const service = new ClaudeRuntimeAuthService(store as never)
     await service.syncForCurrentSelection()
 
-    writeFileSync(runtimeCredentialsPath, account1RefreshedCredentials, 'utf-8')
+    writeAccountRuntimeCredentials(managedAuthPath1, account1RefreshedCredentials)
     await service.syncForCurrentSelection()
 
     expect(readManagedCredentialsForTest('account-1', managedAuthPath1)).toBe(
       account1RefreshedCredentials
     )
     expect(readManagedCredentialsForTest('account-2', managedAuthPath2)).toBe(account2Credentials)
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(account1RefreshedCredentials)
+    expect(readAccountRuntimeCredentials(managedAuthPath1)).toBe(account1RefreshedCredentials)
+
+    expectSharedSurfaceUntouched()
   })
 })

@@ -74,7 +74,9 @@ export abstract class RateLimitServiceInactiveAccounts extends RateLimitServiceP
           ) {
             this.inactiveClaudeCache.delete(account.id)
           } else {
-            this.cacheInactiveFailure(this.inactiveClaudeCache, account.id, 'claude', error)
+            this.cacheInactiveFailure(this.inactiveClaudeCache, account.id, 'claude', error, {
+              authProvenance: `managed:${account.id}`
+            })
           }
         }
         this.inactiveClaudeFetching.delete(account.id)
@@ -278,7 +280,11 @@ export abstract class RateLimitServiceInactiveAccounts extends RateLimitServiceP
     cache: Map<string, ProviderRateLimits>,
     accountId: string,
     provider: ProviderRateLimits['provider'],
-    error: unknown
+    error: unknown,
+    // Why: the failure belongs to the account this lane was fetching, and the
+    // stale policy drops a retained sample whose surface the new result cannot
+    // name — an unnamed failure would empty that account's own cached numbers.
+    usageMetadata?: ProviderRateLimits['usageMetadata']
   ): void {
     cache.set(
       accountId,
@@ -289,7 +295,8 @@ export abstract class RateLimitServiceInactiveAccounts extends RateLimitServiceP
           weekly: null,
           updatedAt: Date.now(),
           error: toErrorMessage(error),
-          status: 'error'
+          status: 'error',
+          ...(usageMetadata ? { usageMetadata } : {})
         },
         cache.get(accountId) ?? null
       )

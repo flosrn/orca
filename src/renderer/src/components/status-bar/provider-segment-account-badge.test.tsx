@@ -32,12 +32,12 @@ describe('ProviderSegment account badge', () => {
     const { ProviderSegment } = await import('./StatusBar')
 
     const markup = renderToStaticMarkup(
-      ProviderSegment({
-        p: claudeLimits(42),
-        compact: false,
-        display: 'used',
-        badge: { ordinal: 2, email: 'florian.seran@gmail.com', isActive: false }
-      })
+      <ProviderSegment
+        p={claudeLimits(42)}
+        compact={false}
+        display="used"
+        badge={{ ordinal: 2, email: 'florian.seran@gmail.com', isActive: false }}
+      />
     )
 
     expect(markup).toContain('title="florian.seran@gmail.com"')
@@ -51,20 +51,20 @@ describe('ProviderSegment account badge', () => {
     const { ProviderSegment } = await import('./StatusBar')
 
     const active = renderToStaticMarkup(
-      ProviderSegment({
-        p: claudeLimits(10),
-        compact: false,
-        display: 'used',
-        badge: { ordinal: 1, email: 'a@example.com', isActive: true }
-      })
+      <ProviderSegment
+        p={claudeLimits(10)}
+        compact={false}
+        display="used"
+        badge={{ ordinal: 1, email: 'a@example.com', isActive: true }}
+      />
     )
     const inactive = renderToStaticMarkup(
-      ProviderSegment({
-        p: claudeLimits(10),
-        compact: false,
-        display: 'used',
-        badge: { ordinal: 2, email: 'b@example.com', isActive: false }
-      })
+      <ProviderSegment
+        p={claudeLimits(10)}
+        compact={false}
+        display="used"
+        badge={{ ordinal: 2, email: 'b@example.com', isActive: false }}
+      />
     )
 
     expect(active).not.toBe(inactive)
@@ -76,7 +76,7 @@ describe('ProviderSegment account badge', () => {
     const { ProviderSegment } = await import('./StatusBar')
 
     const markup = renderToStaticMarkup(
-      ProviderSegment({ p: claudeLimits(42), compact: false, display: 'used' })
+      <ProviderSegment p={claudeLimits(42)} compact={false} display="used" />
     )
 
     expect(markup).not.toMatch(/>\d<\/span>/)
@@ -88,19 +88,19 @@ describe('ProviderSegment account badge', () => {
     const { ProviderSegment } = await import('./StatusBar')
 
     const markup = renderToStaticMarkup(
-      ProviderSegment({
-        p: {
+      <ProviderSegment
+        p={{
           provider: 'claude',
           session: null,
           weekly: null,
           updatedAt: 0,
           error: null,
           status: 'unavailable'
-        },
-        compact: false,
-        display: 'used',
-        badge: { ordinal: 3, email: 'c@example.com', isActive: false }
-      })
+        }}
+        compact={false}
+        display="used"
+        badge={{ ordinal: 3, email: 'c@example.com', isActive: false }}
+      />
     )
 
     expect(markup).toContain('--')

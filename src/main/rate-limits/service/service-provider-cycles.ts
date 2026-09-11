@@ -117,7 +117,10 @@ export abstract class RateLimitServiceProviderCycles extends RateLimitServiceFul
       weekly: null,
       updatedAt: Date.now(),
       error: err instanceof Error ? err.message : 'Unknown error',
-      status: 'error'
+      status: 'error',
+      // Why: a lane that crashed still ran against this account; without the
+      // name, retention treats the account's own numbers as a stranger's.
+      usageMetadata: { authProvenance: claudeProvenance }
     }))
 
     if (signal.aborted) {

@@ -1,4 +1,7 @@
-import type { LegacyPaneKeyAliasEntry } from '../../../shared/persisted-state-types'
+import type {
+  ClaudeLivePtyBindingEntry,
+  LegacyPaneKeyAliasEntry
+} from '../../../shared/persisted-state-types'
 import type { MigrationUnsupportedPtyEntry } from '../../../shared/agent-status-types'
 import { canRegisterPaneKeyAlias, isOpaqueRemintedPaneKey } from '../../../shared/pane-key-alias'
 import {
@@ -65,6 +68,54 @@ export function normalizeClaudeLivePtySessionIds(value: unknown): string[] {
     }
   }
   return ids.toReversed()
+}
+
+/**
+ * Which Claude account each persisted live session was launched under.
+ *
+ * Unparseable or unknown entries are dropped rather than guessed: the gate
+ * reads a missing binding as "cannot be attributed", which protects the shared
+ * credentials without falsely claiming an account.
+ */
+export function normalizeClaudeLivePtyBindings(value: unknown): ClaudeLivePtyBindingEntry[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  const entries: ClaudeLivePtyBindingEntry[] = []
+  for (let index = value.length - 1; index >= 0; index -= 1) {
+    const entry = value[index] as Partial<ClaudeLivePtyBindingEntry> | null
+    if (
+      !entry ||
+      typeof entry !== 'object' ||
+      typeof entry.sessionId !== 'string' ||
+      entry.sessionId.length === 0 ||
+      entry.sessionId.length > 512 ||
+      (entry.route !== 'account-dir' && entry.route !== 'wsl-dir' && entry.route !== 'shared-dir')
+    ) {
+      continue
+    }
+    if (entry.accountId !== undefined && typeof entry.accountId !== 'string') {
+      continue
+    }
+    // Why: an account-dir row without an account names no surface at all. Drop
+    // it so the gate reads that session as unattributed — conservative for the
+    // shared credentials — instead of binding it to an empty account id.
+    if (entry.route === 'account-dir' && !entry.accountId) {
+      continue
+    }
+    if (entries.some((existing) => existing.sessionId === entry.sessionId)) {
+      continue
+    }
+    entries.push({
+      sessionId: entry.sessionId,
+      route: entry.route,
+      ...(entry.accountId === undefined ? {} : { accountId: entry.accountId })
+    })
+    if (entries.length >= MAX_CLAUDE_LIVE_PTY_SESSION_IDS) {
+      break
+    }
+  }
+  return entries.toReversed()
 }
 
 export function normalizeMigrationUnsupportedPtyEntries(

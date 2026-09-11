@@ -98,6 +98,31 @@ function isManagedAuthMarkerValid(markerPath: string, accountId: string): boolea
   }
 }
 
+/**
+ * Whether a directory is one of Orca's managed Claude account auth dirs.
+ *
+ * Account-agnostic on purpose: the caller is the shared-surface resolver,
+ * which only needs to know the dir belongs to SOME account and is therefore
+ * not the user's own ~/.claude. The marker only NAMES the candidate owner;
+ * ownership itself is decided by the same resolver every other caller uses,
+ * so a hand-written marker in an ordinary directory proves nothing and leaves
+ * an explicitly inherited CLAUDE_CONFIG_DIR alone.
+ */
+export function isOrcaManagedClaudeAuthDir(candidatePath: string): boolean {
+  try {
+    const markerPath = join(resolve(candidatePath), MANAGED_AUTH_MARKER)
+    if (!existsSync(markerPath) || lstatSync(markerPath).isSymbolicLink()) {
+      return false
+    }
+    const accountId = readFileSync(markerPath, 'utf-8').trim()
+    return (
+      accountId.length > 0 && resolveOwnedClaudeManagedAuthPath(accountId, candidatePath) !== null
+    )
+  } catch {
+    return false
+  }
+}
+
 function isOwnedChildFile(managedAuthPath: string, filePath: string): boolean {
   if (
     !existsSync(filePath) ||

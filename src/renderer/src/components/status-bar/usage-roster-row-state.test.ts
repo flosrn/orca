@@ -95,10 +95,56 @@ describe('getUsageRosterRowState', () => {
     })
   })
 
-  it('lets real usage data win over a stale error status', () => {
-    expect(getUsageRosterRowState(provider({ status: 'error' }), true)).toEqual({
+  // Why: retained numbers from the last successful capture are still worth showing, but a row
+  // that shows them while the refresh is failing must say so — silently rendering them as a
+  // healthy reading is the dishonest case this replaces.
+  it('keeps retained usage visible but labels it as a failed refresh', () => {
+    expect(
+      getUsageRosterRowState(
+        provider({ status: 'error', usageMetadata: { failureKind: 'rate-limited' } }),
+        true
+      )
+    ).toEqual({ kind: 'stale-usage', statusLabel: 'Refresh rate limited' })
+  })
+
+  it('reports fresh data with no status label', () => {
+    expect(getUsageRosterRowState(provider({ status: 'ok' }), true)).toEqual({
       kind: 'usage',
       statusLabel: null
     })
+  })
+
+  it('does not label a plain refetch over existing data as stale', () => {
+    expect(getUsageRosterRowState(provider({ status: 'fetching', error: null }), true)).toEqual({
+      kind: 'usage',
+      statusLabel: null
+    })
+  })
+
+  // Why: the store overlays `status: 'fetching'` on the failed sample while the retry is in
+  // flight, keeping its error and windows. Keying staleness on status alone made the row flip
+  // back to a clean reading for the whole round trip.
+  it('stays stale while a retry runs over a retained failed sample', () => {
+    expect(
+      getUsageRosterRowState(
+        provider({
+          status: 'fetching',
+          error: 'HTTP 429 from the Claude usage endpoint',
+          usageMetadata: { failureKind: 'rate-limited' }
+        }),
+        true
+      )
+    ).toEqual({ kind: 'stale-usage', statusLabel: 'Refresh rate limited' })
+  })
+
+  // Why: a revoked lane that still has yesterday's numbers needs the sign-in route, not just
+  // a failure label it cannot act on.
+  it('keeps the sign-in route for a revoked lane that still has retained numbers', () => {
+    expect(
+      getUsageRosterRowState(
+        provider({ status: 'error', usageMetadata: { failureKind: 'missing-credentials' } }),
+        true
+      )
+    ).toEqual({ kind: 'sign-in', statusLabel: 'not signed in' })
   })
 })

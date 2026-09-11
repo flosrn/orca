@@ -25,14 +25,15 @@ import {
   warnClaudeUsageFetchFailure
 } from './claude-usage-result'
 
-function noClaudeManagedCredentialsResult(): ProviderRateLimits {
+function noClaudeManagedCredentialsResult(authProvenance: string): ProviderRateLimits {
   return {
     provider: 'claude',
     session: null,
     weekly: null,
     updatedAt: Date.now(),
     error: 'No credentials',
-    status: 'error'
+    status: 'error',
+    usageMetadata: { authProvenance }
   }
 }
 
@@ -40,7 +41,8 @@ function noClaudeManagedCredentialsResult(): ProviderRateLimits {
 // throttling; report the refresh failure instead of replaying it.
 function staleClaudeManagedCredentialsResult(
   credentialsJson: string,
-  failure: ClaudeOauthRefreshFailure | null
+  failure: ClaudeOauthRefreshFailure | null,
+  authProvenance: string
 ): ProviderRateLimits {
   const oauthCredentials = parseClaudeOAuthCredentialsJson(credentialsJson, 'credentials-file')
   const rateLimited = failure?.status === 429
@@ -56,6 +58,7 @@ function staleClaudeManagedCredentialsResult(
     metadataForClaudeUsageAttempt({
       attemptedSources: ['oauth'],
       oauthCredentials,
+      authProvenance,
       source: 'oauth',
       failureKind: rateLimited
         ? 'rate-limited'
@@ -71,16 +74,17 @@ export async function fetchInactiveClaudeAccountUsage(
   account: InactiveClaudeAccount,
   options: ClaudeManagedAccountUsageOptions = {}
 ): Promise<ProviderRateLimits> {
+  const authProvenance = `managed:${account.id}`
   if (options.signal?.aborted) {
-    return abortedClaudeRateLimitResult()
+    return abortedClaudeRateLimitResult(authProvenance)
   }
   const location = resolveClaudeManagedCredentialsLocation(account)
   let credentialsJson = location ? await readClaudeManagedCredentialsJson(location) : null
   if (options.signal?.aborted) {
-    return abortedClaudeRateLimitResult()
+    return abortedClaudeRateLimitResult(authProvenance)
   }
   if (!location || !credentialsJson) {
-    return noClaudeManagedCredentialsResult()
+    return noClaudeManagedCredentialsResult(authProvenance)
   }
 
   let token = parseClaudeOAuthCredentialsJson(credentialsJson, 'credentials-file').token
@@ -88,7 +92,7 @@ export async function fetchInactiveClaudeAccountUsage(
     const { credentialsJson: refreshed, failure } =
       await refreshClaudeOauthCredentialsOutcome(credentialsJson)
     if (options.signal?.aborted) {
-      return abortedClaudeRateLimitResult()
+      return abortedClaudeRateLimitResult(authProvenance)
     }
     if (refreshed) {
       try {
@@ -103,17 +107,17 @@ export async function fetchInactiveClaudeAccountUsage(
         accountId: account.id,
         status: failure?.status ?? null
       })
-      return staleClaudeManagedCredentialsResult(credentialsJson, failure)
+      return staleClaudeManagedCredentialsResult(credentialsJson, failure, authProvenance)
     }
     // Why: within the refresh buffer the stored bearer is still valid; use it.
   }
 
   if (!token) {
-    return noClaudeManagedCredentialsResult()
+    return noClaudeManagedCredentialsResult(authProvenance)
   }
-  const oauthLimits = await fetchClaudeOAuthUsage(token, options.signal, `managed:${account.id}`)
+  const oauthLimits = await fetchClaudeOAuthUsage(token, options.signal, authProvenance)
   if (options.signal?.aborted) {
-    return abortedClaudeRateLimitResult()
+    return abortedClaudeRateLimitResult(authProvenance)
   }
   if (
     !canSupplementClaudeOAuthUsage({

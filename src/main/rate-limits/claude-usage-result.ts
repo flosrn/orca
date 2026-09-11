@@ -12,15 +12,28 @@ export type ClaudeUsageAttemptState = {
   attemptedSources: UsageRateLimitSource[]
 }
 
-export function abortedClaudeRateLimitResult(): ProviderRateLimits {
+// Why: an abort still ran against a specific auth surface, and the retention
+// policy discards a sample whose identity a later result cannot match. A lane
+// that knows which account it was bound to must say so, or its own next read
+// looks like a different account's.
+export function abortedClaudeRateLimitResult(authProvenance?: string): ProviderRateLimits {
   return {
     provider: 'claude',
     session: null,
     weekly: null,
     updatedAt: Date.now(),
     error: 'Rate-limit fetch aborted',
-    status: 'error'
+    status: 'error',
+    ...(authProvenance ? { usageMetadata: { authProvenance } } : {})
   }
+}
+
+// Why: the active lane's surface is the managed account when one is prepared,
+// and the user's own shared ~/.claude otherwise — never an unknown identity.
+export function resolveClaudeAuthProvenance(
+  authPreparation: ClaudeRuntimeAuthPreparation | undefined
+): string {
+  return authPreparation?.provenance ?? 'system'
 }
 
 export function recordClaudeUsageAttempt(
@@ -67,6 +80,8 @@ export function metadataForClaudeUsageAttempt(input: {
   attemptedSources: UsageRateLimitSource[]
   oauthCredentials: ClaudeOAuthCredentialReadResult
   authPreparation?: ClaudeRuntimeAuthPreparation
+  /** Explicit surface identity for lanes that carry no ClaudeRuntimeAuthPreparation (inactive accounts). */
+  authProvenance?: string
   source?: UsageRateLimitSource
   failureKind?: UsageRateLimitFailureKind
   deferredByLiveClaudeSession?: boolean
@@ -77,7 +92,7 @@ export function metadataForClaudeUsageAttempt(input: {
     attemptedSources: [...input.attemptedSources],
     failureKind: input.failureKind,
     credentialSource: input.oauthCredentials.source,
-    authProvenance: input.authPreparation?.provenance ?? 'system',
+    authProvenance: input.authProvenance ?? resolveClaudeAuthProvenance(input.authPreparation),
     deferredByLiveClaudeSession: input.deferredByLiveClaudeSession,
     retryAtMs: input.retryAtMs
   }

@@ -3,6 +3,8 @@ import type { ClaudeManagedAccount } from '../../../shared/managed-account-types
 import { resolveLocalAccountRuntimeTarget } from '../../../shared/local-account-runtime'
 import { parseWslUncPath } from '../../../shared/wsl-paths'
 import { shouldStripClaudeAuthEnvForAccount } from '../environment'
+import { syncSystemClaudeResourcesIntoAccountConfigDir } from '../account-config-dir-resources'
+import { resolveOwnedClaudeManagedAuthPath } from '../managed-auth-path'
 import { getDefaultWslDistro, getWslHome } from '../../wsl'
 import {
   getSelectedClaudeAccountIdForTarget,
@@ -33,6 +35,8 @@ export class ClaudeRuntimeAuthPreparationService extends ClaudeRuntimeAuthSnapsh
         wslLinuxConfigDir: activeAccount.wslLinuxAuthPath,
         envPatch: { CLAUDE_CONFIG_DIR: activeAccount.wslLinuxAuthPath },
         stripAuthEnv: true,
+        accountId: activeAccount.id,
+        configDirRoute: 'wsl-dir',
         provenance: `managed:${activeAccount.id}:wsl:${activeAccount.wslDistro ?? ''}`
       }
     }
@@ -51,6 +55,8 @@ export class ClaudeRuntimeAuthPreparationService extends ClaudeRuntimeAuthSnapsh
           wslLinuxConfigDir: linuxConfigDir,
           envPatch: {},
           stripAuthEnv: true,
+          accountId: null,
+          configDirRoute: 'shared-dir',
           provenance: `wsl:${distro}:system`
         }
       }
@@ -61,7 +67,47 @@ export class ClaudeRuntimeAuthPreparationService extends ClaudeRuntimeAuthSnapsh
         wslLinuxConfigDir: null,
         envPatch: {},
         stripAuthEnv: true,
+        accountId: null,
+        configDirRoute: 'shared-dir',
         provenance: `wsl:${normalizeClaudeAccountSelectionTarget(normalizedTarget).wslDistro ?? '__default__'}:system`
+      }
+    }
+    const hostAccountConfigDir =
+      activeAccount && activeAccount.managedAuthRuntime !== 'wsl'
+        ? // Why: sync() has already refused a selection whose directory Orca
+          // cannot prove it owns, but getPreparation is also reached directly
+          // (getRuntimeConfigDir). Re-resolving here means an unowned path can
+          // never be handed to a launch as a config dir.
+          resolveOwnedClaudeManagedAuthPath(activeAccount.id, activeAccount.managedAuthPath)
+        : null
+    if (activeAccount && hostAccountConfigDir) {
+      const legacySharedGrantBlocked = this.legacySharedGrantBlockedAccountId === activeAccount.id
+      // Why: every managed account gets its own CLAUDE_CONFIG_DIR, the way WSL
+      // managed accounts already do. Two accounts then have two credential
+      // surfaces and two scoped Keychain items, so selecting one cannot rewrite
+      // the other's tokens or the user's own ~/.claude.
+      if (!legacySharedGrantBlocked) {
+        syncSystemClaudeResourcesIntoAccountConfigDir(hostAccountConfigDir)
+      }
+      return {
+        configDir: hostAccountConfigDir,
+        runtime: 'host',
+        wslDistro: null,
+        wslLinuxConfigDir: null,
+        envPatch: {
+          CLAUDE_CONFIG_DIR: hostAccountConfigDir,
+          CLAUDE_SECURESTORAGE_CONFIG_DIR: hostAccountConfigDir
+        },
+        stripAuthEnv: true,
+        // Why: nothing was materialized into this dir yet, so a quota read here
+        // must report "waiting on a live session", not an auth failure.
+        managedRefreshDeferredByLivePty:
+          legacySharedGrantBlocked ||
+          this.managedRefreshDeferredByLivePtyAccountId === activeAccount.id,
+        legacySharedGrantBlocked,
+        accountId: activeAccount.id,
+        configDirRoute: 'account-dir',
+        provenance: `managed:${activeAccount.id}`
       }
     }
     return {
@@ -74,15 +120,9 @@ export class ClaudeRuntimeAuthPreparationService extends ClaudeRuntimeAuthSnapsh
         settings.claudeManagedAccounts,
         activeAccountId
       ),
-      managedRefreshDeferredByLivePty: Boolean(
-        activeAccountId &&
-        activeAccount?.managedAuthRuntime !== 'wsl' &&
-        this.managedRefreshDeferredByLivePtyAccountId === activeAccountId
-      ),
-      provenance:
-        activeAccountId && activeAccount?.managedAuthRuntime !== 'wsl'
-          ? `managed:${activeAccountId}`
-          : 'system'
+      accountId: null,
+      configDirRoute: 'shared-dir',
+      provenance: 'system'
     }
   }
 
