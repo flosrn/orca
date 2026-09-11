@@ -8,6 +8,8 @@ import {
 import type { StatusBarUsageMode } from '../../../../shared/status-bar-usage-mode'
 import { ProviderIcon, clampUsedPercent, getProviderUsageStatusLabel } from './tooltip'
 import { getStatusBarUsageSection } from './UsageRosterPanel'
+import { isProviderRefreshFailing, isUsageWindowExpired } from './usage-stale-sample'
+import { useResetCountdownClock } from '@/hooks/useResetCountdownClock'
 import { formatRateLimitWindowChipLabel } from '@/lib/window-label-formatter'
 import { formatUsagePercentageLabel } from './usage-percentage-label'
 import { translate } from '@/i18n/i18n'
@@ -37,16 +39,18 @@ function WindowLabel({
   w,
   label,
   display,
-  showLabel = true
+  showLabel = true,
+  expired = false
 }: {
   w: RateLimitWindow
   label: string
   display: UsagePercentageDisplay
   showLabel?: boolean
+  expired?: boolean
 }): React.JSX.Element {
   return (
     <span className="tabular-nums">
-      {formatUsagePercentageLabel(w.usedPercent, display)}
+      {expired ? '—' : formatUsagePercentageLabel(w.usedPercent, display)}
       {showLabel ? ` ${label}` : ''}
     </span>
   )
@@ -57,11 +61,16 @@ function WindowLabel({
 // and markup can't drift between the two.
 export function ProviderLetterBadge({ p }: { p: ProviderRateLimits }): React.JSX.Element {
   const hasData = Boolean(p.session || p.weekly || p.fableWeekly || p.monthly || p.buckets?.length)
+  // The dot is the whole message at this width, so a lane whose refresh is failing must not
+  // wear the same solid dot as one that just refreshed.
+  const dotClass = isProviderRefreshFailing(p)
+    ? 'bg-amber-500/70'
+    : hasData
+      ? 'bg-muted-foreground/60'
+      : 'bg-muted-foreground/30'
   return (
     <span className="inline-flex items-center gap-1 text-muted-foreground">
-      <span
-        className={`inline-block h-2 w-2 rounded-full ${hasData ? 'bg-muted-foreground/60' : 'bg-muted-foreground/30'}`}
-      />
+      <span className={`inline-block h-2 w-2 rounded-full ${dotClass}`} />
       {getProviderLetter(p.provider)}
     </span>
   )
@@ -103,10 +112,12 @@ const STATUS_BAR_BUCKET_NAMES = new Set(['Flash', 'Pro', '1.5 Pro'])
 
 function VerboseProviderUsage({
   p,
-  display
+  display,
+  now
 }: {
   p: ProviderRateLimits
   display: UsagePercentageDisplay
+  now: number
 }): React.JSX.Element {
   if (p.buckets && p.buckets.length > 0) {
     const visibleBuckets = p.buckets.filter((bucket) => STATUS_BAR_BUCKET_NAMES.has(bucket.name))
@@ -116,7 +127,10 @@ function VerboseProviderUsage({
           <React.Fragment key={bucket.name}>
             {index > 0 ? <span className="text-muted-foreground">·</span> : null}
             <span className="tabular-nums">
-              {bucket.name} {formatUsagePercentageLabel(bucket.usedPercent, display)}
+              {bucket.name}{' '}
+              {isUsageWindowExpired(bucket, now)
+                ? '—'
+                : formatUsagePercentageLabel(bucket.usedPercent, display)}
             </span>
           </React.Fragment>
         ))}
@@ -125,6 +139,7 @@ function VerboseProviderUsage({
             w={p.session}
             label={formatRateLimitWindowChipLabel(p.session)}
             display={display}
+            expired={isUsageWindowExpired(p.session, now)}
           />
         ) : null}
       </>
@@ -170,7 +185,12 @@ function VerboseProviderUsage({
       {visibleWindows.map((window, index) => (
         <React.Fragment key={window.key}>
           {index > 0 ? <span className="text-muted-foreground">·</span> : null}
-          <WindowLabel w={window.window} label={window.label} display={display} />
+          <WindowLabel
+            w={window.window}
+            label={window.label}
+            display={display}
+            expired={isUsageWindowExpired(window.window, now)}
+          />
         </React.Fragment>
       ))}
     </>
@@ -221,6 +241,16 @@ export function ProviderSegment({
   badge?: UsageAccountBadge | null
 }): React.JSX.Element {
   const provider = p?.provider ?? 'claude'
+  // Hooks run before the early returns below; the bar is always mounted, so without a
+  // boundary-scheduled clock an expired window would keep printing its old percentage
+  // until some unrelated provider push happened to re-render the surface.
+  const now = useResetCountdownClock([
+    p?.session?.resetsAt,
+    p?.weekly?.resetsAt,
+    p?.fableWeekly?.resetsAt,
+    p?.monthly?.resetsAt,
+    ...(p?.buckets ?? []).map((bucket) => bucket.resetsAt)
+  ])
   const mark = <ProviderAccountMark provider={provider} badge={badge} />
   const statusLabel = p ? getProviderUsageStatusLabel(p) : ''
 
@@ -264,18 +294,19 @@ export function ProviderSegment({
     )
   }
 
-  // Has data (ok, fetching with stale data, or error with stale data)
-  const isStale = p.status === 'error'
+  // Has data (ok, fetching with retained data, or error with retained data)
+  const isStale = isProviderRefreshFailing(p)
+  const summaryExpired = Boolean(summary && isUsageWindowExpired(summary.window, now))
 
   return (
     <span className="inline-flex items-center gap-1.5">
       {mark}
       {mode === 'verbose' ? (
         <>
-          {summary && !compact ? (
+          {summary && !compact && !summaryExpired ? (
             <MiniBar usedPct={clampUsedPercent(summary.window.usedPercent)} display={display} />
           ) : null}
-          <VerboseProviderUsage p={p} display={display} />
+          <VerboseProviderUsage p={p} display={display} now={now} />
         </>
       ) : summary ? (
         <WindowLabel
@@ -283,6 +314,7 @@ export function ProviderSegment({
           label={summary.label}
           display={display}
           showLabel={!compact}
+          expired={summaryExpired}
         />
       ) : null}
       {isStale && <AlertTriangle size={11} className="text-muted-foreground/80" />}

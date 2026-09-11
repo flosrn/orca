@@ -2,12 +2,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   attachClaudeLivePtyPersistence,
   beginClaudeAuthSwitch,
+  claudeLivePtyBindingForPreparation,
   confirmSeededClaudeLivePtys,
   endClaudeAuthSwitch,
   hasLiveClaudePtys,
+  hasLiveClaudePtysForAccount,
+  hasLiveClaudeSessionsOnSharedSurface,
   isClaudeAuthSwitchInProgress,
   markClaudePtyExited,
   markClaudePtySpawned,
+  markClaudeStructuredChildExited,
+  markClaudeStructuredChildSpawned,
   onLiveClaudePtysDrained,
   seedLiveClaudePtysFromPersistence
 } from './live-pty-gate'
@@ -17,6 +22,10 @@ describe('Claude live PTY gate', () => {
     markClaudePtyExited('live-claude-pty')
     markClaudePtyExited('seeded-pty-1')
     markClaudePtyExited('seeded-pty-2')
+    markClaudePtyExited('pty-account-a')
+    markClaudePtyExited('pty-account-b')
+    markClaudePtyExited('pty-legacy')
+    markClaudeStructuredChildExited('structured-a')
     confirmSeededClaudeLivePtys([])
     attachClaudeLivePtyPersistence(null)
     endClaudeAuthSwitch()
@@ -138,5 +147,103 @@ describe('Claude live PTY gate', () => {
 
     markClaudePtyExited('live-claude-pty')
     expect(removeClaudeLivePtySessionId).toHaveBeenCalledWith('live-claude-pty')
+  })
+
+  it('holds the refresh gate per account, so a live A does not freeze B', () => {
+    markClaudePtySpawned('pty-account-a', { route: 'account-dir', accountId: 'account-a' })
+
+    expect(hasLiveClaudePtysForAccount('account-a')).toBe(true)
+    expect(hasLiveClaudePtysForAccount('account-b')).toBe(false)
+    // Why: an account-pinned session reads its own dir, never the user's ~/.claude.
+    expect(hasLiveClaudeSessionsOnSharedSurface()).toBe(false)
+  })
+
+  it('treats a session it cannot attribute as holding the shared credentials only', () => {
+    markClaudePtySpawned('pty-legacy')
+
+    expect(hasLiveClaudeSessionsOnSharedSurface()).toBe(true)
+    // Why: counting an unattributed session against an account would restore the
+    // global block where one legacy pane froze every account's refresh.
+    expect(hasLiveClaudePtysForAccount('account-a')).toBe(false)
+  })
+
+  it('binds a structured child to its account too', () => {
+    markClaudeStructuredChildSpawned('structured-a', {
+      route: 'account-dir',
+      accountId: 'account-a'
+    })
+
+    expect(hasLiveClaudePtysForAccount('account-a')).toBe(true)
+
+    markClaudeStructuredChildExited('structured-a')
+
+    expect(hasLiveClaudePtysForAccount('account-a')).toBe(false)
+  })
+
+  it('keeps a live session on the account it was exec-ed against', () => {
+    markClaudePtySpawned('pty-account-a', { route: 'account-dir', accountId: 'account-a' })
+    // A later spawn record for a live id cannot move the running CLI to another
+    // config dir, so the first binding stands.
+    markClaudePtySpawned('pty-account-a', { route: 'account-dir', accountId: 'account-b' })
+
+    expect(hasLiveClaudePtysForAccount('account-a')).toBe(true)
+    expect(hasLiveClaudePtysForAccount('account-b')).toBe(false)
+  })
+
+  it('attributes a restored session to the account persistence recorded for it', () => {
+    seedLiveClaudePtysFromPersistence(['seeded-pty-1', 'seeded-pty-2'], {
+      'seeded-pty-1': { route: 'account-dir', accountId: 'account-a' }
+    })
+
+    expect(hasLiveClaudePtysForAccount('account-a')).toBe(true)
+    expect(hasLiveClaudePtysForAccount('account-b')).toBe(false)
+    // Why: seeded-pty-2 has no recorded binding, so it protects the shared
+    // surface without claiming an account.
+    expect(hasLiveClaudeSessionsOnSharedSurface()).toBe(true)
+
+    confirmSeededClaudeLivePtys(['seeded-pty-1'])
+
+    expect(hasLiveClaudeSessionsOnSharedSurface()).toBe(false)
+    expect(hasLiveClaudePtysForAccount('account-a')).toBe(true)
+  })
+
+  it('records the surface a spawn actually launched against', () => {
+    const recordClaudeLivePtyBinding = vi.fn()
+    attachClaudeLivePtyPersistence({
+      addClaudeLivePtySessionId: vi.fn(),
+      removeClaudeLivePtySessionId: vi.fn(),
+      recordClaudeLivePtyBinding
+    })
+
+    markClaudePtySpawned(
+      'pty-account-a',
+      claudeLivePtyBindingForPreparation({
+        configDir: '/accounts/a',
+        envPatch: {},
+        stripAuthEnv: true,
+        accountId: 'account-a',
+        configDirRoute: 'account-dir',
+        provenance: 'managed:account-a'
+      })
+    )
+
+    expect(recordClaudeLivePtyBinding).toHaveBeenCalledWith('pty-account-a', {
+      route: 'account-dir',
+      accountId: 'account-a'
+    })
+  })
+
+  it('reads a launch with no managed wiring as unattributed', () => {
+    expect(claudeLivePtyBindingForPreparation(null)).toEqual({ route: 'unknown' })
+    expect(
+      claudeLivePtyBindingForPreparation({
+        configDir: '/home/user/.claude',
+        envPatch: {},
+        stripAuthEnv: false,
+        accountId: null,
+        configDirRoute: 'shared-dir',
+        provenance: 'system'
+      })
+    ).toEqual({ route: 'shared-dir' })
   })
 })

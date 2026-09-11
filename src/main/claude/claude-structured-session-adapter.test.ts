@@ -232,10 +232,14 @@ describe('ClaudeStructuredSessionAdapter.acquire', () => {
 
     await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
 
+    // Both halves of the pin: Claude Code derives the macOS Keychain service name
+    // from CLAUDE_SECURESTORAGE_CONFIG_DIR, so a launch that sets only the config
+    // dir leaves two accounts sharing one Keychain item.
     expect(claude.connections[0].launch.env).toEqual({
       ANTHROPIC_AUTH_TOKEN: 'configured-token',
       ANTHROPIC_BASE_URL: 'https://gateway.example.test',
       CLAUDE_CONFIG_DIR: '/accounts/claude',
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: '/accounts/claude',
       [CLAUDE_SPAWN_TOKEN_ENV]: 'spawn-9'
     })
   })
@@ -250,19 +254,44 @@ describe('ClaudeStructuredSessionAdapter.acquire', () => {
     expect(claude.connections[0].launch.env).toEqual({ [CLAUDE_SPAWN_TOKEN_ENV]: 'spawn-9' })
   })
 
-  it('re-pins the account home when the launch env would send the child elsewhere', async () => {
+  it('re-pins both account-home variables when the launch env would send the child elsewhere', async () => {
     const claude = fakeClaude()
     const accountHome = join(homedir(), '.claude')
     const adapter = adapterFor(claude, {
       claudeConfigDir: accountHome,
-      env: { CLAUDE_CONFIG_DIR: '/other/account' }
+      // A configured env that names another account's dir AND another account's
+      // Keychain surface: the second is the one that survives an overriding pin
+      // written for CLAUDE_CONFIG_DIR alone, and it decides which credentials the
+      // child reads on macOS.
+      env: {
+        CLAUDE_CONFIG_DIR: '/other/account',
+        CLAUDE_SECURESTORAGE_CONFIG_DIR: '/other/account'
+      }
     })
 
     await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
 
     expect(claude.connections[0].launch.env).toEqual({
       CLAUDE_CONFIG_DIR: accountHome,
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: accountHome,
       [CLAUDE_SPAWN_TOKEN_ENV]: 'spawn-9'
+    })
+  })
+
+  /** The resolver proves which account's credentials the child will hold; the gate
+   *  only learns it if the acquisition hands that binding to the connection. */
+  it('hands the resolved account binding to the connection that registers the child', async () => {
+    const claude = fakeClaude()
+    const adapter = adapterFor(claude, {
+      claudeConfigDir: '/accounts/account-a',
+      authBinding: { route: 'account-dir', accountId: 'account-a' }
+    })
+
+    await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
+
+    expect(claude.connections[0].launch.authBinding).toEqual({
+      route: 'account-dir',
+      accountId: 'account-a'
     })
   })
 

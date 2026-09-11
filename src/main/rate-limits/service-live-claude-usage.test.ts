@@ -3,6 +3,7 @@ import type { ProviderRateLimits } from '../../shared/rate-limit-types'
 import { RateLimitService } from './service'
 import { fetchClaudeRateLimits } from './claude-fetcher'
 import { fetchCodexRateLimits } from './codex-fetcher'
+import { fetchGrokRateLimits } from './grok-fetcher'
 import {
   asRateLimitWindow,
   deferred,
@@ -393,6 +394,115 @@ describe('RateLimitService', () => {
       await service.refreshAfterClaudeLivePtysDrained()
 
       expect(fetchClaudeRateLimits).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('retained sample when a refresh fails', () => {
+    function claudeSample(usedPercent: number, provenance: string, updatedAt: number) {
+      return {
+        ...okProvider('claude', usedPercent, updatedAt),
+        usageMetadata: { source: 'oauth' as const, authProvenance: provenance }
+      }
+    }
+
+    it('keeps the last good numbers under the error, still dated by the successful read', async () => {
+      const service = new RateLimitService()
+      const readAt = Date.now() - 60_000
+      vi.mocked(fetchClaudeRateLimits).mockResolvedValueOnce(
+        claudeSample(42, 'managed:account-1', readAt)
+      )
+      await service.refresh()
+
+      vi.mocked(fetchClaudeRateLimits).mockResolvedValueOnce({
+        ...errorProvider('claude', 'Claude usage read failed'),
+        usageMetadata: { failureKind: 'network', authProvenance: 'managed:account-1' }
+      })
+      await service.refresh()
+
+      const claude = service.getState().claude
+      expect(claude?.status).toBe('error')
+      expect(claude?.error).toBe('Claude usage read failed')
+      expect(claude?.session?.usedPercent).toBe(42)
+      // Why: the row dates the numbers it is showing, not the attempt that failed.
+      expect(claude?.updatedAt).toBe(readAt)
+    })
+
+    it('drops a sample read under another account rather than relabelling it', async () => {
+      const service = new RateLimitService()
+      vi.mocked(fetchClaudeRateLimits).mockResolvedValueOnce(
+        claudeSample(42, 'managed:account-1', Date.now())
+      )
+      await service.refresh()
+
+      vi.mocked(fetchClaudeRateLimits).mockResolvedValueOnce({
+        ...errorProvider('claude', 'Claude usage read failed'),
+        usageMetadata: { failureKind: 'network', authProvenance: 'managed:account-2' }
+      })
+      await service.refresh()
+
+      const claude = service.getState().claude
+      expect(claude?.status).toBe('error')
+      // account-2 has never returned data; showing account-1's quota under its
+      // name is the cross-account leak per-account isolation exists to remove.
+      expect(claude?.session).toBeNull()
+    })
+
+    it('drops the retained sample when the failing read cannot name its account', async () => {
+      const service = new RateLimitService()
+      vi.mocked(fetchClaudeRateLimits).mockResolvedValueOnce(
+        claudeSample(42, 'managed:account-1', Date.now())
+      )
+      await service.refresh()
+
+      // The CLI/PTY lane used to resolve failures with no usageMetadata at all;
+      // an unattributable read must not inherit account-1's quota.
+      vi.mocked(fetchClaudeRateLimits).mockResolvedValueOnce(
+        errorProvider('claude', 'Claude usage read failed')
+      )
+      await service.refresh()
+
+      const claude = service.getState().claude
+      expect(claude?.status).toBe('error')
+      expect(claude?.session).toBeNull()
+    })
+
+    it('keeps a provider whose failures never carry a surface name', async () => {
+      const service = new RateLimitService()
+      vi.mocked(fetchGrokRateLimits).mockResolvedValueOnce({
+        ...okProvider('grok', 31),
+        usageMetadata: { source: 'oauth' as const, authProvenance: 'flo@example.com (SuperGrok)' }
+      })
+      await service.refresh()
+
+      vi.mocked(fetchGrokRateLimits).mockResolvedValueOnce(
+        errorProvider('grok', 'Grok read failed')
+      )
+      await service.refresh()
+
+      const grok = service.getState().grok
+      expect(grok?.status).toBe('error')
+      // Grok has one identity and labels only its successful reads; the Claude
+      // cross-account rule must not empty its bar on a transient failure.
+      expect(grok?.session?.usedPercent).toBe(31)
+    })
+
+    it('still drops a non-Claude sample when both reads name different identities', async () => {
+      const service = new RateLimitService()
+      vi.mocked(fetchGrokRateLimits).mockResolvedValueOnce({
+        ...okProvider('grok', 31),
+        usageMetadata: { source: 'oauth' as const, authProvenance: 'flo@example.com (SuperGrok)' }
+      })
+      await service.refresh()
+
+      vi.mocked(fetchGrokRateLimits).mockResolvedValueOnce({
+        ...errorProvider('grok', 'Grok read failed'),
+        usageMetadata: { authProvenance: 'other@example.com (SuperGrok)' }
+      })
+      await service.refresh()
+
+      const grok = service.getState().grok
+      expect(grok?.status).toBe('error')
+      expect(grok?.session).toBeNull()
     })
   })
 })

@@ -58,15 +58,16 @@ function mapFableWeeklyWindow(data: OAuthUsageResponse): RateLimitWindow | null 
 export async function fetchClaudeOAuthUsage(
   token: string,
   signal?: AbortSignal,
-  budgetKey?: string
+  // Why: the caller's surface identity doubles as the poll budget key — it must
+  // survive token rotation, and every result must name the account it read.
+  authProvenance?: string
 ): Promise<ProviderRateLimits> {
   if (signal?.aborted) {
-    return abortedClaudeRateLimitResult()
+    return abortedClaudeRateLimitResult(authProvenance)
   }
   // Why: the usage endpoint budgets ~28-30 reads per identity-hour; overshooting
   // earns per-token 429s with retry-after up to an hour, so defer locally first.
-  // The key must survive token rotation, or every refresh would reopen the cap.
-  const budget = takeClaudeUsagePollBudget(budgetKey ?? token)
+  const budget = takeClaudeUsagePollBudget(authProvenance ?? token)
   if (!budget.ok) {
     logClaudeAuthDiagnostic('claude-usage-budget-deferred', { retryAfterMs: budget.retryAfterMs })
     throw new OAuthUsageError(
@@ -78,7 +79,7 @@ export async function fetchClaudeOAuthUsage(
   }
   await ensureProxyFromEnvironment()
   if (signal?.aborted) {
-    return abortedClaudeRateLimitResult()
+    return abortedClaudeRateLimitResult(authProvenance)
   }
 
   const requestSignal = signal
@@ -104,7 +105,7 @@ export async function fetchClaudeOAuthUsage(
 
     const data = (await response.json()) as OAuthUsageResponse
     if (signal?.aborted) {
-      return abortedClaudeRateLimitResult()
+      return abortedClaudeRateLimitResult(authProvenance)
     }
     return {
       provider: 'claude',
@@ -113,11 +114,12 @@ export async function fetchClaudeOAuthUsage(
       fableWeekly: mapFableWeeklyWindow(data),
       updatedAt: Date.now(),
       error: null,
-      status: 'ok'
+      status: 'ok',
+      ...(authProvenance ? { usageMetadata: { authProvenance } } : {})
     }
   } catch (error) {
     if (signal?.aborted) {
-      return abortedClaudeRateLimitResult()
+      return abortedClaudeRateLimitResult(authProvenance)
     }
     throw error
   }

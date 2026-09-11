@@ -1,5 +1,4 @@
 import { existsSync, readFileSync } from 'node:fs'
-import { writeActiveClaudeKeychainCredentialsForRuntime } from '../keychain'
 import { ClaudeRuntimeAuthCredentialMatching } from './runtime-auth-credential-matching'
 import type {
   ClaudeReadBackMatch,
@@ -100,8 +99,11 @@ export class ClaudeRuntimeAuthReadback extends ClaudeRuntimeAuthCredentialMatchi
         this.writeRuntimeCredentials(runtimeContents)
         this.lastWrittenCredentialsJson = runtimeContents
         if (process.platform === 'darwin') {
-          const paths = this.pathResolver.getRuntimePaths()
-          await writeActiveClaudeKeychainCredentialsForRuntime(runtimeContents, paths.configDir)
+          // Why: publishes to whichever surface this selection owns — a pinned
+          // account's own scoped item, or the shared pair. A pinned account
+          // must not write the unscoped item (see
+          // writeActiveRuntimeKeychainCredentials).
+          await this.writeActiveRuntimeKeychainCredentials(runtimeContents)
         }
       }
       return { status: 'persisted' }
@@ -121,7 +123,7 @@ export class ClaudeRuntimeAuthReadback extends ClaudeRuntimeAuthCredentialMatchi
   protected async readRuntimeCredentialCandidatesForReadBack(
     baselineCredentialsJson: string
   ): Promise<ClaudeRuntimeCredentialCandidate[]> {
-    const paths = this.pathResolver.getRuntimePaths()
+    const paths = this.getActiveRuntimePaths()
     const fileCredentials = existsSync(paths.credentialsPath)
       ? readFileSync(paths.credentialsPath, 'utf-8')
       : null
@@ -139,7 +141,13 @@ export class ClaudeRuntimeAuthReadback extends ClaudeRuntimeAuthCredentialMatchi
       const scopedKeychainCredentials = await this.readActiveClaudeKeychainCredentialsBestEffort(
         paths.configDir
       )
-      const legacyKeychainCredentials = await this.readActiveClaudeKeychainCredentialsBestEffort()
+      // Why: the unscoped `Claude Code-credentials` item belongs to the user's
+      // own ~/.claude. A pinned account reading it back would adopt another
+      // surface's token as its own rotation, which is the leak this isolation
+      // removes; only the shared selection may treat it as its runtime.
+      const legacyKeychainCredentials = this.pinnedAccountConfigDir
+        ? null
+        : await this.readActiveClaudeKeychainCredentialsBestEffort()
       if (this.lastWrittenCredentialsJson === null) {
         pushCandidate(scopedKeychainCredentials)
         pushCandidate(legacyKeychainCredentials)

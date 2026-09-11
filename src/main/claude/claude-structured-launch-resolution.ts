@@ -11,7 +11,11 @@ import {
   applyClaudeEnvPatch,
   hasClaudeAuthEnvConflict
 } from '../claude-accounts/environment'
-import type { ClaudeStructuredAuthPolicy } from '../claude-accounts/claude-structured-auth-policy'
+import {
+  claudeStructuredLaunchAuthBinding,
+  type ClaudeStructuredAuthPolicy
+} from '../claude-accounts/claude-structured-auth-policy'
+import type { ClaudeLivePtyBinding } from '../claude-accounts/live-pty-gate'
 import {
   CLAUDE_AUTH_SWITCH_SETTLE_TIMEOUT_MS,
   whenClaudeAuthSwitchSettles
@@ -122,6 +126,9 @@ export type ClaudeStructuredLaunch = {
   cwd: string
   env?: Record<string, string>
   claudeConfigDir: string
+  /** The credential surface this child will own, for the OAuth refresh gate.
+   *  Optional for hand-built fixtures; the resolver always sets it. */
+  authBinding?: ClaudeLivePtyBinding
   providerSessionId: string
   resumeLeafUuid: string | null
   resumed: boolean
@@ -139,12 +146,21 @@ export type ClaudeStructuredLaunchResolverDeps = {
    * Required, and deliberately not defaulted. `stripAuthEnv` used to be a literal
    * `true` here, so a missing dependency could not under-strip. Now it can, and the
    * failure is silent — so every caller states the account's policy rather than
-   * inherit a guess. Build it with claudeStructuredAuthPolicyForSettings.
+   * inherit a guess.
+   *
+   * It is handed the config dir this session will actually launch against, and
+   * must answer for THAT surface: prepare its credentials, refuse what cannot be
+   * prepared, and state which surface it prepared. Build it with
+   * claudeStructuredAuthPolicyForLaunchSurface.
    */
-  resolveAuthPolicy: () => Promise<ClaudeStructuredAuthPolicy> | ClaudeStructuredAuthPolicy
+  resolveAuthPolicy: (input: {
+    claudeConfigDir: string
+  }) => Promise<ClaudeStructuredAuthPolicy> | ClaudeStructuredAuthPolicy
   /** How long an in-flight account switch may hold a launch before it is refused. */
   authSwitchSettleTimeoutMs?: number
-  /** Account state for the managed-account gate; null when it cannot be read, which refuses. */
+  /** Account state for the managed-account gate; null when it cannot be read, which
+   *  refuses. Consulted only for a launch whose surface the auth policy could not
+   *  attribute to an owned account — an attributed one answers for itself. */
   readManagedAccountGate?: () => ClaudeManagedAccountGateSettings | null
 }
 
@@ -195,17 +211,6 @@ export function createClaudeStructuredLaunchResolver(
     if (record.accountHome.variable !== 'CLAUDE_CONFIG_DIR') {
       throw new Error(`claude sessions pin CLAUDE_CONFIG_DIR, not ${record.accountHome.variable}`)
     }
-    // Every acquisition, not just the first: the account state can change under a live session, and
-    // a reacquire after an unexpected exit would otherwise spawn under whatever it has become.
-    // Codex has no gate here — it resolves its account on a different path.
-    if (
-      deps.readManagedAccountGate &&
-      !structuredClaudeMatchesActiveManagedAccount(deps.readManagedAccountGate())
-    ) {
-      throw new AgentSessionPreSpawnError(
-        'structured Claude is not offered under the active managed Claude account'
-      )
-    }
     const head = agentSessionProviderHandleChainHead(record.providerHandleChain)
     if (
       head?.handle.provider === 'claude' &&
@@ -221,7 +226,37 @@ export function createClaudeStructuredLaunchResolver(
         : claudeSessionIdForOrcaSession(identity.sessionId)
     const durable = claudeSdkOptionsForLaunchArgs(record.launchArgs ?? [])
     const command = (deps.resolveCommand ?? resolveClaudeCommand)()
-    const auth = await deps.resolveAuthPolicy()
+    // The surface this child launches against is the record's, fixed at session
+    // creation and immutable afterwards — never the selection of the moment. The
+    // policy must prepare THAT dir's credentials and answer for it.
+    const claudeConfigDir = record.accountHome.path
+    const auth = await resolveLaunchAuthPolicy(deps, claudeConfigDir)
+    const authBinding = claudeStructuredLaunchAuthBinding(auth, claudeConfigDir)
+    if (!authBinding.ok) {
+      // Nothing has spawned: an unattributable surface must refuse rather than run
+      // the child as one account while the refresh gate is told another.
+      throw new AgentSessionPreSpawnError(authBinding.reason)
+    }
+    // Every acquisition, not just the first: the account state can change under a live
+    // session, and a reacquire after an unexpected exit would otherwise spawn under
+    // whatever it has become. Codex has no gate here — it resolves its account on a
+    // different path.
+    //
+    // Only for a surface the preparation could NOT attribute to an owned account. The
+    // gate's hazard is a child that authenticates as whatever ambient identity the
+    // shared surface carries while the UI names a WSL-bound account; a proved
+    // account-dir launch holds that account's own credentials, so refusing it would
+    // strand a session that is already honestly attributed. Creating a session under a
+    // WSL selection is still refused, upstream, by the create-support gate.
+    if (
+      deps.readManagedAccountGate &&
+      authBinding.binding.route !== 'account-dir' &&
+      !structuredClaudeMatchesActiveManagedAccount(deps.readManagedAccountGate())
+    ) {
+      throw new AgentSessionPreSpawnError(
+        'structured Claude is not offered under the active managed Claude account'
+      )
+    }
     const overlay = await deps.resolveEnv?.()
     // A switch can begin while the policy and overlay resolve, exactly as it can
     // during the terminal preflight's prepareClaudeAuth — recheck after the awaits.
@@ -268,10 +303,27 @@ export function createClaudeStructuredLaunchResolver(
       },
       cwd: await deps.resolveWorkspacePath(record.location.workspaceId),
       env,
-      claudeConfigDir: record.accountHome.path,
+      claudeConfigDir,
+      authBinding: authBinding.binding,
       providerSessionId,
       resumeLeafUuid: head?.handle.provider === 'claude' ? head.handle.leafUuid : null,
       resumed: head?.handle.provider === 'claude'
     }
+  }
+}
+
+/**
+ * A refusal from the auth policy is a pre-spawn refusal, not a crash: the legacy
+ * shared-grant migration block and an unownable config dir both mean no child was
+ * started, so the acquire surfaces them the way the gate's refusals surface.
+ */
+async function resolveLaunchAuthPolicy(
+  deps: ClaudeStructuredLaunchResolverDeps,
+  claudeConfigDir: string
+): Promise<ClaudeStructuredAuthPolicy> {
+  try {
+    return await deps.resolveAuthPolicy({ claudeConfigDir })
+  } catch (error) {
+    throw new AgentSessionPreSpawnError(error)
   }
 }

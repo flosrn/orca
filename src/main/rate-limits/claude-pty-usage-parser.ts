@@ -154,13 +154,14 @@ export function describeClaudeUsageFailure(output: string): string {
   return 'Claude usage is unavailable right now.'
 }
 
-export function abortedClaudeUsageResult(): ProviderRateLimits {
+export function abortedClaudeUsageResult(authProvenance?: string): ProviderRateLimits {
   return {
     provider: 'claude',
     session: null,
     weekly: null,
     updatedAt: Date.now(),
     error: 'Rate-limit fetch aborted',
-    status: 'error'
+    status: 'error',
+    ...(authProvenance ? { usageMetadata: { authProvenance } } : {})
   }
 }

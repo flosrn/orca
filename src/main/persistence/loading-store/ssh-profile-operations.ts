@@ -1,4 +1,6 @@
 import type { RemovedSshTargetTombstone, SshTarget } from '../../../shared/ssh-types'
+import type { ClaudeLivePtyBindingEntry } from '../../../shared/persisted-state-types'
+import type { ClaudeLivePtyBinding } from '../../claude-accounts/live-pty-gate'
 import {
   type SshTargetStateOperations,
   addClaudeLivePtySessionId as addClaudeLivePtySessionIdOperation,
@@ -6,7 +8,9 @@ import {
   addRemovedSshTargetTombstone as addRemovedSshTargetTombstoneOperation,
   addSshTarget as addSshTargetOperation,
   clearDeletedSshConfigAliases as clearDeletedSshConfigAliasesOperation,
+  getClaudeLivePtyBindings as getClaudeLivePtyBindingsOperation,
   getClaudeLivePtySessionIds as getClaudeLivePtySessionIdsOperation,
+  recordClaudeLivePtyBinding as recordClaudeLivePtyBindingOperation,
   getDeletedSshConfigAliases as getDeletedSshConfigAliasesOperation,
   getRemovedSshTargetTombstones as getRemovedSshTargetTombstonesOperation,
   getSshTarget as getSshTargetOperation,
@@ -90,6 +94,23 @@ export class SshProfileOperations {
 
   removeClaudeLivePtySessionId(sessionId: string): void {
     removeClaudeLivePtySessionIdOperation(getSshTargetStateOperations(this), sessionId)
+  }
+
+  getClaudeLivePtyBindings(): ClaudeLivePtyBindingEntry[] {
+    return getClaudeLivePtyBindingsOperation(this[sshProfileOperationsContext].runtime.state)
+  }
+
+  recordClaudeLivePtyBinding(sessionId: string, binding: ClaudeLivePtyBinding): void {
+    if (binding.route === 'unknown') {
+      return
+    }
+    recordClaudeLivePtyBindingOperation(getSshTargetStateOperations(this), {
+      sessionId,
+      route: binding.route,
+      ...(binding.route === 'shared-dir' || binding.accountId === null
+        ? {}
+        : { accountId: binding.accountId })
+    })
   }
 
   getDeletedSshConfigAliases(): string[] {

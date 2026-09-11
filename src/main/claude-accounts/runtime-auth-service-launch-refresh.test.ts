@@ -8,12 +8,15 @@ import {
   createOauthRefreshMock,
   createSettings,
   createStore,
+  readAccountKeychainCredentials,
+  readAccountRuntimeCredentials,
   readManagedCredentialsForTest,
   resetRuntimeAuthTestState,
-  testState
+  testState,
+  writeAccountRuntimeCredentials
 } from './runtime-auth-service-test-harness'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { isOauthTokenExpiring, refreshClaudeOauthCredentials } from './oauth-refresh'
 
@@ -60,12 +63,16 @@ describe('ClaudeRuntimeAuthService', () => {
     await service.syncForCurrentSelection()
 
     testState.managedKeychainCredentials.set('account-1', reauthedCredentials)
-    writeFileSync(join(managedAuthPath, '.credentials.json'), reauthedCredentials, 'utf-8')
+    writeAccountRuntimeCredentials(managedAuthPath, reauthedCredentials)
     service.clearLastWrittenCredentialsJson()
     await service.syncForCurrentSelection()
 
     expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(reauthedCredentials)
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(reauthedCredentials)
+    expect(readAccountRuntimeCredentials(managedAuthPath)).toBe(reauthedCredentials)
+    // Why: the account owns its own CLAUDE_CONFIG_DIR, so the user's ~/.claude
+    // must never be created by materializing it.
+    expect(existsSync(runtimeCredentialsPath)).toBe(false)
+    expect(testState.legacyKeychainCredentials).toBeNull()
   })
 
   it('leaves host system-default credentials untouched before launch', async () => {
@@ -135,7 +142,13 @@ describe('ClaudeRuntimeAuthService', () => {
 
     expect(refreshClaudeOauthCredentials).toHaveBeenCalledWith(account1Stale)
     expect(readManagedCredentialsForTest('account-1', managedAuthPath1)).toBe(account1Refreshed)
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(account1Refreshed)
+    expect(readAccountRuntimeCredentials(managedAuthPath1)).toBe(account1Refreshed)
+    expect(readAccountKeychainCredentials(managedAuthPath1)).toBe(account1Refreshed)
+    // Why: the rotation belongs to the account's own surface; the user's
+    // ~/.claude and the unscoped Keychain item stay out of the switch-in.
+    expect(existsSync(runtimeCredentialsPath)).toBe(false)
+    expect(testState.legacyKeychainCredentials).toBeNull()
+    expect(testState.runtimeWriteConfigDir).toBeNull()
   })
 
   it('refreshes the active account with an expired token when no Claude PTY is live', async () => {
@@ -167,13 +180,14 @@ describe('ClaudeRuntimeAuthService', () => {
 
     expect(refreshClaudeOauthCredentials).toHaveBeenCalled()
     expect(readManagedCredentialsForTest('account-1', managedAuthPath1)).toBe(refreshedCreds)
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(refreshedCreds)
+    expect(readAccountRuntimeCredentials(managedAuthPath1)).toBe(refreshedCreds)
+    expect(existsSync(runtimeCredentialsPath)).toBe(false)
 
     vi.mocked(isOauthTokenExpiring).mockReturnValue(false)
     vi.mocked(refreshClaudeOauthCredentials).mockResolvedValue(null)
   })
 
-  it('does not refresh the active account while a Claude PTY is live', async () => {
+  it('does not refresh the active account while its own Claude PTY is live', async () => {
     const expired = createClaudeCredentialsJson('one@example.com', 'one-expired', null, 1_000)
     const managedAuthPath1 = createManagedClaudeAuth(testState.userDataDir, 'account-1', expired)
     const settings = createSettings({
@@ -193,13 +207,16 @@ describe('ClaudeRuntimeAuthService', () => {
     const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
     const service = new ClaudeRuntimeAuthService(store as never)
 
-    markClaudePtySpawned('pty-live-1')
+    // Why: the gate is per account now — the session must be bound to the
+    // account whose credentials it holds, or it defers nothing.
+    markClaudePtySpawned('pty-live-1', { route: 'account-dir', accountId: 'account-1' })
     try {
       const preparation = await service.prepareForRateLimitFetch()
       // A live Claude owns the credentials; refreshing here would race its
       // rotation, so the proactive refresh must be skipped entirely.
       expect(refreshClaudeOauthCredentials).not.toHaveBeenCalled()
       expect(preparation.managedRefreshDeferredByLivePty).toBe(true)
+      expect(readManagedCredentialsForTest('account-1', managedAuthPath1)).toBe(expired)
     } finally {
       markClaudePtyExited('pty-live-1')
       vi.mocked(isOauthTokenExpiring).mockReturnValue(false)
@@ -207,8 +224,56 @@ describe('ClaudeRuntimeAuthService', () => {
     }
   })
 
+  it('refreshes the active account while only another account Claude PTY is live', async () => {
+    const expired = createClaudeCredentialsJson('one@example.com', 'one-expired', null, 1_000)
+    const refreshedCreds = createClaudeCredentialsJson(
+      'one@example.com',
+      'one-refreshed',
+      null,
+      9_999_999_999_999
+    )
+    const account2Credentials = createClaudeCredentialsJson('two@example.com', 'two')
+    const managedAuthPath1 = createManagedClaudeAuth(testState.userDataDir, 'account-1', expired)
+    const managedAuthPath2 = createManagedClaudeAuth(
+      testState.userDataDir,
+      'account-2',
+      account2Credentials
+    )
+    const settings = createSettings({
+      claudeManagedAccounts: [
+        createClaudeAccount('account-1', managedAuthPath1, { email: 'one@example.com' }),
+        createClaudeAccount('account-2', managedAuthPath2, { email: 'two@example.com' })
+      ],
+      activeClaudeManagedAccountId: 'account-1'
+    })
+    const store = createStore(settings)
+
+    vi.mocked(isOauthTokenExpiring).mockReturnValue(true)
+    vi.mocked(refreshClaudeOauthCredentials).mockResolvedValue(refreshedCreds)
+
+    const { markClaudePtySpawned, markClaudePtyExited } = await import('./live-pty-gate')
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+
+    markClaudePtySpawned('pty-live-2', { route: 'account-dir', accountId: 'account-2' })
+    try {
+      const preparation = await service.prepareForRateLimitFetch()
+      // Why: that session holds account-2's single-use refresh token in
+      // account-2's own dir; it cannot race account-1's rotation, so a global
+      // gate here would freeze every other account behind one live pane.
+      expect(refreshClaudeOauthCredentials).toHaveBeenCalled()
+      expect(preparation.managedRefreshDeferredByLivePty).toBe(false)
+      expect(readManagedCredentialsForTest('account-1', managedAuthPath1)).toBe(refreshedCreds)
+      expect(readAccountRuntimeCredentials(managedAuthPath1)).toBe(refreshedCreds)
+      expect(readAccountRuntimeCredentials(managedAuthPath2)).toBe(account2Credentials)
+    } finally {
+      markClaudePtyExited('pty-live-2')
+      vi.mocked(isOauthTokenExpiring).mockReturnValue(false)
+      vi.mocked(refreshClaudeOauthCredentials).mockResolvedValue(null)
+    }
+  })
+
   it('adopts a rotated-refresh-token runtime credential on cold-start read-back', async () => {
-    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     // Same expiry on both sides (cold start), but the runtime refresh token has
     // rotated — proof the CLI refreshed. Must be read back into managed storage.
     const managedCredentials = createClaudeCredentialsJson(
@@ -225,12 +290,13 @@ describe('ClaudeRuntimeAuthService', () => {
         expiresAt: 3_000
       }
     })}\n`
-    writeFileSync(runtimeCredentialsPath, runtimeRotated, 'utf-8')
     const managedAuthPath1 = createManagedClaudeAuth(
       testState.userDataDir,
       'account-1',
       managedCredentials
     )
+    // The account's own Claude CLI rotated the tokens in the account config dir.
+    writeAccountRuntimeCredentials(managedAuthPath1, runtimeRotated)
     const settings = createSettings({
       claudeManagedAccounts: [
         createClaudeAccount('account-1', managedAuthPath1, { email: 'one@example.com' })
@@ -244,5 +310,6 @@ describe('ClaudeRuntimeAuthService', () => {
     await service.syncForCurrentSelection()
 
     expect(readManagedCredentialsForTest('account-1', managedAuthPath1)).toBe(runtimeRotated)
+    expect(readAccountRuntimeCredentials(managedAuthPath1)).toBe(runtimeRotated)
   })
 })

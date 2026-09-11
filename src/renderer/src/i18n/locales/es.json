@@ -3445,8 +3445,6 @@
             "2c35eca8d4": "No se pudo obtener el uso",
             "1292d4f2ee": "No disponible",
             "7567cd1c6b": "Uso no disponible",
-            "a9a318b7a3": "Error al actualizar — mostrando datos en caché",
-            "7ad719c4bf": "Limitado",
             "e740f92596": "Error al actualizar",
             "8418ec448d": "No se pudo actualizar el uso de {{value0}}. Es posible que las sesiones de agentes sigan iniciadas.",
             "45198c7d95": "1 reset de rate limit disponible",
@@ -3455,12 +3453,10 @@
             "d1e442a9e5": "Vence ahora",
             "6cf9eaed10": "El siguiente vence en {{value0}}",
             "20ad66aed1": "Vence en {{value0}}",
-            "0d8d7cfe15": "Esperando sesión de Claude",
             "1804cd8c3f": "Actualizando inicio de sesión",
             "f8f0f9d8cc": "Problema de red",
             "bf2e739f18": "Inicio de sesión no disponible",
             "f8b8dbed85": "Uso no disponible",
-            "3d3c9c0c1f": "El uso de Claude se actualizará cuando el terminal Claude activo rote sus credenciales.",
             "42fdd4da1d": "Se está actualizando el inicio de sesión de Claude. Las sesiones de agentes pueden seguir iniciadas.",
             "c06c1d215d": "No se pudo actualizar el uso de Claude porque falló la solicitud de red.",
             "cabdc2a9e0": "No se pudieron leer las credenciales de inicio de sesión de Claude.",
@@ -3468,7 +3464,21 @@
             "e2c6a4f917": "Run Grok to refresh",
             "d1b7f509ac": "Run grok in a terminal on the computer running Orca and wait for it to start. If prompted, complete sign-in, then retry usage. You do not need to send a chat message.",
             "f90b3d7a16": "Run Kimi to refresh",
-            "a37e8c15d4": "Run kimi in a terminal on the computer running Orca and wait for it to start, then retry usage."
+            "a37e8c15d4": "Run kimi in a terminal on the computer running Orca and wait for it to start, then retry usage.",
+            "claude": {
+              "deferredRefresh": {
+                "label": "Esperando la renovación de credenciales",
+                "detail": "El uso de Claude se actualizará cuando esta cuenta termine de rotar sus credenciales."
+              },
+              "rateLimitedRead": {
+                "label": "Actualización limitada por el servidor",
+                "detail": "Claude limitó la propia lectura del uso. Esto no significa que tu cuota de suscripción esté agotada."
+              }
+            },
+            "refreshRateLimited": {
+              "label": "Actualización limitada por el servidor"
+            },
+            "staleCachedLabel": "{{label}} — mostrando datos en caché"
           },
           "SshTargetStatusRow": {
             "sshHost": "Host SSH"
@@ -3497,7 +3507,14 @@
             "compact": "Compact",
             "footerDetailAria": "Usage footer detail",
             "detailedTooltip": "Uso completo con barras, etiquetas y porcentajes",
-            "compactTooltip": "Uso condensado: sólo la ventana más estrecha"
+            "compactTooltip": "Uso condensado: sólo la ventana más estrecha",
+            "stale": {
+              "noSample": "sin lectura anterior",
+              "justRead": "última lectura ahora mismo",
+              "lastRead": "última lectura hace {{age}}",
+              "retryIn": "reintento en {{countdown}}"
+            },
+            "accountOrdinal": "cuenta {{n}}"
           },
           "RemoteServerUpdateStatusSegment": {
             "updating": "Updating {{value0}}/{{value1}}",

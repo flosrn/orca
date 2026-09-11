@@ -131,7 +131,9 @@ describe('UsageRow', () => {
     )
 
     expect(mocks.useResetCountdownClock).toHaveBeenCalledOnce()
-    expect(mocks.useResetCountdownClock).toHaveBeenCalledWith([sessionReset, weeklyReset])
+    // The trailing slot is the lane's Retry-After deadline: absent here, but in the clock's
+    // input so an all-expired lane's countdown still ticks.
+    expect(mocks.useResetCountdownClock).toHaveBeenCalledWith([sessionReset, weeklyReset, null])
     expect(markup).toContain('Resets in 2m')
     expect(markup).toContain('5h')
     expect(markup).toContain('25%')

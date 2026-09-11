@@ -47,6 +47,14 @@ export type PersistedMobileClientTabSelections = Record<
 >
 
 // ─── Persistence shape ──────────────────────────────────────────────
+/** One persisted Claude session's credential-surface binding. `accountId` is
+ *  absent for the shared ~/.claude and for a WSL default-distro selection. */
+export type ClaudeLivePtyBindingEntry = {
+  sessionId: string
+  route: 'account-dir' | 'wsl-dir' | 'shared-dir'
+  accountId?: string
+}
+
 export type PersistedState = {
   schemaVersion: number
   repos: Repo[]
@@ -105,6 +113,11 @@ export type PersistedState = {
   sshPtyConsumerRecoveries?: SshPtyConsumerRecovery[]
   /** Live local Claude daemon session ids; seeds the live-PTY gate so early OAuth refresh can't rotate the single-use refresh token out from under a running daemon. */
   claudeLivePtySessionIds?: string[]
+  /** Which managed Claude account each of those sessions was launched under, so a
+   *  daemon-surviving pane defers only its own account's OAuth refresh instead of
+   *  every account's. Sessions absent here cannot be attributed and are treated as
+   *  holding the shared ~/.claude. */
+  claudeLivePtyBindings?: ClaudeLivePtyBindingEntry[]
   migrationUnsupportedPtyEntries: MigrationUnsupportedPtyEntry[]
   legacyPaneKeyAliasEntries: LegacyPaneKeyAliasEntry[]
   automations: Automation[]

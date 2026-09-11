@@ -11,6 +11,7 @@ import {
   getProviderUsageErrorMessage,
   getProviderUsageStatusLabel
 } from './usage-error-copy'
+import { isUsageWindowExpired } from './usage-stale-sample'
 import {
   clampUsedPercent,
   getDisplayedUsagePercentage,
@@ -125,22 +126,21 @@ function ErrorMessage({
 }): React.JSX.Element {
   const labelClass = inverted ? 'text-background/80' : 'text-foreground/85'
   const detailClass = inverted ? 'text-background/55' : 'text-muted-foreground'
-  const genericRefreshLabel = translate(
-    'auto.components.status.bar.tooltip.e740f92596',
-    'Refresh failed'
-  )
-  const staleRefreshLabel = translate(
-    'auto.components.status.bar.tooltip.a9a318b7a3',
-    'Refresh failed — showing cached data'
-  )
   const resolvedLabel =
-    stale && (!label || label === genericRefreshLabel)
-      ? staleRefreshLabel
-      : (label ?? genericRefreshLabel)
+    label ?? translate('auto.components.status.bar.tooltip.e740f92596', 'Refresh failed')
+  // Keep the precise failure name and the cached-data caveat together; the caveat alone
+  // used to replace the name, which lost the distinction this copy exists to make.
+  const displayLabel = stale
+    ? translate(
+        'auto.components.status.bar.tooltip.staleCachedLabel',
+        '{{label}} — showing cached data',
+        { label: resolvedLabel }
+      )
+    : resolvedLabel
 
   return (
     <div className="space-y-0.5">
-      <div className={`text-[11px] font-medium ${labelClass}`}>{resolvedLabel}</div>
+      <div className={`text-[11px] font-medium ${labelClass}`}>{displayLabel}</div>
       <div className={detailClass}>{message}</div>
     </div>
   )
@@ -228,20 +228,26 @@ function ProviderRateLimitWindowSection({
   }
   const usedPct = clampUsedPercent(window.usedPercent)
   const displayedPct = getDisplayedUsagePercentage(usedPct, usagePercentageDisplay)
-  const resetLabel = window.resetsAt ? formatResetCountdown(window.resetsAt - now) : null
+  // A window past its reset describes a quota period that no longer exists: no number, and
+  // no "Resets now" countdown pretending the reading is current.
+  const expired = isUsageWindowExpired(window, now)
+  const resetLabel =
+    !expired && window.resetsAt ? formatResetCountdown(window.resetsAt - now) : null
 
   return (
     <div className="space-y-1">
       <div className={`font-medium ${textClass}`}>{label}</div>
       <div className={`h-[6px] w-full overflow-hidden rounded-full ${emptyBarClass}`}>
         {/* Why: fill follows the selected percentage; color still signals consumption urgency. */}
-        <div
-          className={`h-full rounded-full ${barColor(usedPct)} transition-all duration-300`}
-          style={{ width: `${displayedPct}%` }}
-        />
+        {expired ? null : (
+          <div
+            className={`h-full rounded-full ${barColor(usedPct)} transition-all duration-300`}
+            style={{ width: `${displayedPct}%` }}
+          />
+        )}
       </div>
       <div className={`flex justify-between ${mutedClass}`}>
-        <span>{formatUsagePercentageLabel(usedPct, usagePercentageDisplay)}</span>
+        <span>{expired ? '—' : formatUsagePercentageLabel(usedPct, usagePercentageDisplay)}</span>
         {resetLabel && <span>{resetLabel}</span>}
       </div>
     </div>
@@ -363,7 +369,8 @@ export function ProviderPanel({
 
       {p.error ? (
         <ErrorMessage
-          message={p.error}
+          label={getProviderUsageStatusLabel(p)}
+          message={getProviderUsageErrorMessage(p)}
           stale={!!(p.session || p.weekly || p.fableWeekly || p.monthly)}
           inverted={inverted}
         />

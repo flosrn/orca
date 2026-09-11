@@ -3667,8 +3667,6 @@
             "2c35eca8d4": "Impossible de récupérer l'utilisation",
             "1292d4f2ee": "Indisponible",
             "7567cd1c6b": "Utilisation indisponible",
-            "a9a318b7a3": "Échec de l'actualisation — affichage des données en cache",
-            "7ad719c4bf": "Limité",
             "e740f92596": "Échec de l'actualisation",
             "8418ec448d": "L'utilisation de {{value0}} n'a pas pu être actualisée. Des sessions d'agent sont peut-être encore connectées.",
             "45198c7d95": "1 réinitialisation de limite de débit disponible",
@@ -3677,12 +3675,10 @@
             "d1e442a9e5": "Expire maintenant",
             "6cf9eaed10": "La prochaine expire dans {{value0}}",
             "20ad66aed1": "Expire dans {{value0}}",
-            "0d8d7cfe15": "En attente d'une session Claude",
             "1804cd8c3f": "Actualisation de la connexion",
             "f8f0f9d8cc": "Problème de réseau",
             "bf2e739f18": "Connexion indisponible",
             "f8b8dbed85": "Utilisation indisponible",
-            "3d3c9c0c1f": "L'utilisation de Claude s'actualisera une fois que le terminal Claude actif aura renouvelé ses identifiants.",
             "42fdd4da1d": "La connexion Claude est en cours d'actualisation. Des sessions d'agent sont peut-être encore connectées.",
             "c06c1d215d": "L'utilisation de Claude n'a pas pu être actualisée car la requête réseau a échoué.",
             "cabdc2a9e0": "Les identifiants de connexion Claude n'ont pas pu être lus.",
@@ -3690,7 +3686,21 @@
             "e2c6a4f917": "Exécutez Grok pour actualiser",
             "d1b7f509ac": "Exécutez grok dans un terminal sur l'ordinateur qui fait tourner Orca et attendez son démarrage. Si demandé, terminez la connexion, puis réessayez l'utilisation. Inutile d'envoyer un message.",
             "f90b3d7a16": "Exécutez Kimi pour actualiser",
-            "a37e8c15d4": "Exécutez kimi dans un terminal sur l'ordinateur qui fait tourner Orca et attendez son démarrage, puis réessayez l'utilisation."
+            "a37e8c15d4": "Exécutez kimi dans un terminal sur l'ordinateur qui fait tourner Orca et attendez son démarrage, puis réessayez l'utilisation.",
+            "claude": {
+              "deferredRefresh": {
+                "label": "En attente du renouvellement des identifiants",
+                "detail": "L'utilisation de Claude s'actualisera dès que ce compte aura renouvelé ses identifiants."
+              },
+              "rateLimitedRead": {
+                "label": "Actualisation limitée par le serveur",
+                "detail": "Claude a limité la lecture de l'utilisation elle-même. Cela ne signifie pas que votre quota d'abonnement est épuisé."
+              }
+            },
+            "refreshRateLimited": {
+              "label": "Actualisation limitée par le serveur"
+            },
+            "staleCachedLabel": "{{label}} — affichage des données en cache"
           },
           "SshTargetStatusRow": {
             "sshHost": "Hôte SSH"
@@ -3719,7 +3729,14 @@
             "compact": "Compact",
             "detailedTooltip": "Utilisation complète avec barres, libellés et pourcentages",
             "compactTooltip": "Utilisation condensée : uniquement la fenêtre la plus contrainte",
-            "footerDetailAria": "Détail du pied de page d'utilisation"
+            "footerDetailAria": "Détail du pied de page d'utilisation",
+            "stale": {
+              "noSample": "aucune lecture antérieure",
+              "justRead": "dernière lecture à l'instant",
+              "lastRead": "dernière lecture il y a {{age}}",
+              "retryIn": "nouvel essai dans {{countdown}}"
+            },
+            "accountOrdinal": "compte {{n}}"
           },
           "RemoteServerUpdateStatusSegment": {
             "updating": "Mise à jour de {{value0}}/{{value1}}",

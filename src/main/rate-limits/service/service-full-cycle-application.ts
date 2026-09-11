@@ -51,7 +51,10 @@ export abstract class RateLimitServiceFullCycleApplication extends RateLimitServ
             updatedAt: Date.now(),
             error:
               claudeResult.reason instanceof Error ? claudeResult.reason.message : 'Unknown error',
-            status: 'error'
+            status: 'error',
+            // Why: a lane that crashed still ran against this account; without
+            // the name, retention treats its own numbers as a stranger's.
+            usageMetadata: { authProvenance: claudeProvenance }
           } satisfies ProviderRateLimits)
 
     const codex =

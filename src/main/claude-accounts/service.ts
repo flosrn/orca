@@ -20,6 +20,7 @@ import {
   type ClaudeManagedAuthLocation
 } from './claude-managed-auth-storage'
 import type { ClaudeRuntimeAuthService } from './runtime-auth-service'
+import type { ClaudeRuntimeAuthPreparation } from './runtime-auth/runtime-auth-types'
 import type { ClaudeAccountSelectionTarget } from './runtime-selection'
 
 export type ClaudeAccountAddTarget = {
@@ -111,6 +112,16 @@ export class ClaudeAccountService {
 
   getRuntimeConfigDir(target?: ClaudeAccountSelectionTarget): string {
     return this.runtimeAuth.getRuntimeConfigDir(target)
+  }
+
+  /**
+   * The credential preparation for a structured launch, named by the config dir
+   * that launch is pinned to rather than by the current selection: a chat session
+   * created under one account must keep launching as that account while another
+   * is selected, and must be refused if its surface cannot be prepared.
+   */
+  prepareStructuredLaunchAuth(configDir: string): Promise<ClaudeRuntimeAuthPreparation> {
+    return this.runtimeAuth.prepareForClaudeLaunchOnConfigDir(configDir)
   }
 
   private serializeMutation<T>(operation: () => Promise<T>): Promise<T> {

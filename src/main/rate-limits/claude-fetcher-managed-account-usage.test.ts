@@ -105,7 +105,10 @@ describe('fetchClaudeRateLimits', () => {
     ).resolves.toMatchObject({
       provider: 'claude',
       status: 'error',
-      error: 'No credentials'
+      error: 'No credentials',
+      // Why: a result that cannot name its account is discarded by meter
+      // retention, which would then show the previous account's quota here.
+      usageMetadata: { authProvenance: 'managed:account-1' }
     })
 
     expect(netFetchMock).not.toHaveBeenCalled()
@@ -155,15 +158,25 @@ describe('fetchClaudeRateLimits', () => {
       status: 'ok',
       session: { usedPercent: 12 },
       weekly: { usedPercent: 34 },
-      fableWeekly: { usedPercent: 42, resetDescription: '2d' }
+      fableWeekly: { usedPercent: 42, resetDescription: '2d' },
+      usageMetadata: { authProvenance: 'managed:account-1' }
     })
     expect(fetchViaPty).toHaveBeenCalledWith({
       authPreparation: expect.objectContaining({
         configDir: canonicalAuthPath,
-        envPatch: { CLAUDE_CONFIG_DIR: canonicalAuthPath },
+        // Why: the preview CLI keys its Keychain lookup on the securestorage
+        // dir, so an unpinned one reads the active account's quota instead.
+        envPatch: {
+          CLAUDE_CONFIG_DIR: canonicalAuthPath,
+          CLAUDE_SECURESTORAGE_CONFIG_DIR: canonicalAuthPath
+        },
+        accountId: 'account-1',
+        configDirRoute: 'account-dir',
         provenance: 'managed:account-1:inactive-preview',
         stripAuthEnv: true
-      })
+      }),
+      networkProxySettings: undefined,
+      signal: undefined
     })
   })
 

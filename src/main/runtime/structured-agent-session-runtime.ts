@@ -72,8 +72,11 @@ export type StructuredAgentSessionRuntimeDeps = {
   resolveLaunchEnv?: () => Promise<NodeJS.ProcessEnv>
   resolveLaunchEnvOverlay?: () => Promise<Record<string, string>> | Record<string, string>
   resolveClaudeLaunchEnv?: () => Promise<Record<string, string>> | Record<string, string>
-  /** Required, and asserted at install time — an absent policy must not degrade to a guess. */
-  resolveClaudeAuthPolicy: () => Promise<ClaudeStructuredAuthPolicy> | ClaudeStructuredAuthPolicy
+  /** Required, and asserted at install time — an absent policy must not degrade to a guess.
+   *  Answered for the config dir the launching record pins, not for the active selection. */
+  resolveClaudeAuthPolicy: (input: {
+    claudeConfigDir: string
+  }) => Promise<ClaudeStructuredAuthPolicy> | ClaudeStructuredAuthPolicy
   /** Raw settings getter; the reader that fails closed around it is built here, in checked code. */
   getClaudeManagedAccountGateSettings?: () => ClaudeManagedAccountGateSettings
   resolveEnvironment?: () => Promise<NodeJS.ProcessEnv>

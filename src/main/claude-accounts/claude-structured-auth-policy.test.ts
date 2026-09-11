@@ -73,7 +73,9 @@ describe('claudeStructuredAuthPolicyForSettings', () => {
           activeClaudeManagedAccountIdsByRuntime: { host: null, wsl: {} }
         })
       )
-    ).toEqual({ stripAuthEnv: true })
+      // The account rides along so the child can hold the refresh gate for that
+      // account alone rather than for every managed account.
+    ).toEqual({ stripAuthEnv: true, accountId: 'host-a' })
   })
 
   it('strips when a host account is pinned by runtime selection', () => {
@@ -81,11 +83,14 @@ describe('claudeStructuredAuthPolicyForSettings', () => {
       claudeStructuredAuthPolicyForSettings(
         settings({ activeClaudeManagedAccountIdsByRuntime: { host: 'host-a', wsl: {} } })
       )
-    ).toEqual({ stripAuthEnv: true })
+    ).toEqual({ stripAuthEnv: true, accountId: 'host-a' })
   })
 
   it('does not strip for system auth, so an API-key-only user keeps their sign-in', () => {
-    expect(claudeStructuredAuthPolicyForSettings(settings({}))).toEqual({ stripAuthEnv: false })
+    expect(claudeStructuredAuthPolicyForSettings(settings({}))).toEqual({
+      stripAuthEnv: false,
+      accountId: null
+    })
   })
 
   it('ignores a WSL-only selection: the structured child is always a native host process', () => {
@@ -95,7 +100,8 @@ describe('claudeStructuredAuthPolicyForSettings', () => {
           activeClaudeManagedAccountIdsByRuntime: { host: null, wsl: { Ubuntu: 'wsl-b' } }
         })
       )
-    ).toEqual({ stripAuthEnv: false })
+      // A WSL account is not a surface this host child can own, so it claims none.
+    ).toEqual({ stripAuthEnv: false, accountId: null })
   })
 })
 

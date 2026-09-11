@@ -24,6 +24,7 @@ import {
 import { wslHookRelayManager } from '../agent-hooks/wsl-hook-relay-manager'
 import {
   attachClaudeLivePtyPersistence,
+  claudeLivePtyBindingForPersistedEntry,
   onLiveClaudePtysDrained,
   seedLiveClaudePtysFromPersistence
 } from '../claude-accounts/live-pty-gate'
@@ -252,7 +253,20 @@ export async function initializeReadyFoundation(): Promise<void> {
     void state.rateLimits?.refreshAfterClaudeLivePtysDrained()
   })
   const persistedClaudePtyIds = store.getClaudeLivePtySessionIds()
-  seedLiveClaudePtysFromPersistence(persistedClaudePtyIds)
+  // Why: restoring the account each surviving session was launched under keeps
+  // the refresh gate per-account across a restart. A session with no recorded
+  // binding stays unattributed, which protects the shared ~/.claude without
+  // freezing every account's refresh.
+  seedLiveClaudePtysFromPersistence(
+    persistedClaudePtyIds,
+    Object.fromEntries(
+      store
+        .getClaudeLivePtyBindings()
+        .map(
+          (binding) => [binding.sessionId, claudeLivePtyBindingForPersistedEntry(binding)] as const
+        )
+    )
+  )
   if (persistedClaudePtyIds.length > 0) {
     console.log(
       `[claude-live-pty] Seeded ${persistedClaudePtyIds.length} persisted Claude session id(s) into the refresh gate`

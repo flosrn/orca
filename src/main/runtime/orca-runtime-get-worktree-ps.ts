@@ -28,7 +28,7 @@ import { resolveStartupShell, tokenizeStartupCommand } from '../../shared/tui-ag
 import { resolveCodexStructuredAppServerArgs } from '../codex/codex-structured-app-server-args'
 import type { StructuredAgentSessionHandoffTransport } from '../native-chat/agent-session-wire/structured-agent-session-handoff-types'
 import { hostname } from 'node:os'
-import { claudeStructuredAuthPolicyForSettings } from '../claude-accounts/claude-structured-auth-policy'
+import { claudeStructuredAuthPolicyForLaunchSurface } from '../claude-accounts/claude-structured-auth-policy'
 import { probeAgentSessionProcessIdentity } from './agent-session-process-identity-probe'
 import { structuredAgentSessionTabId } from '../../shared/structured-agent-session-projection'
 
@@ -154,8 +154,14 @@ export class OrcaRuntimeWithGetWorktreePs extends OrcaRuntimeWithStructuredAgent
         resolveTuiAgentLaunchEnv('codex', this.requireStore().getSettings().agentDefaultEnv),
       resolveClaudeLaunchEnv: () =>
         resolveTuiAgentLaunchEnv('claude', this.requireStore().getSettings().agentDefaultEnv),
-      resolveClaudeAuthPolicy: () =>
-        claudeStructuredAuthPolicyForSettings(this.requireStore().getSettings()),
+      // The record's own config dir, not the selection of the moment: this both
+      // prepares that surface's credentials (the legacy-shared-grant refusal the
+      // terminal preflight applies) and states which surface it prepared, so the
+      // resolver can bind the refresh gate to the account the child really holds.
+      resolveClaudeAuthPolicy: ({ claudeConfigDir }) =>
+        claudeStructuredAuthPolicyForLaunchSurface(claudeConfigDir, (configDir) =>
+          this.accounts.prepareClaudeStructuredLaunchAuth(configDir)
+        ),
       // Same gate and same settings as agentSession.createSupport, re-read on every acquisition.
       getClaudeManagedAccountGateSettings: () => this.requireStore().getSettings(),
       // Structured chat has no agent CLI hooks, so this projection is what the first-work

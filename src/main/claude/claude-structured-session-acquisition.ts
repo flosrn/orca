@@ -202,7 +202,11 @@ export async function acquireClaudeSession({
           // account home still wins over a diverging overlay without a needless pin.
           // (`process` is shadowed by a local later in this function, so it is not named here.)
           ...claudeConfigDirEnvPatch(launch.claudeConfigDir, launch.env ? { env: launch.env } : {})
-        }
+        },
+        // Why: the child holds this account's single-use refresh token until it
+        // exits, so the gate must know which account — not merely that some
+        // Claude is live.
+        authBinding: launch.authBinding
       },
       {
         onMessage,

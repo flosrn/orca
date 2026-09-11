@@ -11,6 +11,7 @@ import {
   mergeClaudeUsageWindows,
   metadataForClaudeUsageAttempt,
   recordClaudeUsageAttempt,
+  resolveClaudeAuthProvenance,
   type ClaudeUsageAttemptState,
   warnClaudeUsageFetchFailure,
   withClaudeUsageMetadata
@@ -103,7 +104,7 @@ export async function completeClaudeOAuthUsageSuccess(input: {
     signal: input.options?.signal
   })
   if (input.options?.signal?.aborted) {
-    return abortedClaudeRateLimitResult()
+    return abortedClaudeRateLimitResult(resolveClaudeAuthProvenance(input.options.authPreparation))
   }
   return withClaudeUsageMetadata(
     limits,

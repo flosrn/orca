@@ -1,4 +1,7 @@
-import type { PersistedState } from '../../../shared/persisted-state-types'
+import type {
+  ClaudeLivePtyBindingEntry,
+  PersistedState
+} from '../../../shared/persisted-state-types'
 import type { RemovedSshTargetTombstone, SshTarget } from '../../../shared/ssh-types'
 import type { ProtectedSecretPersistence } from '../../protected-secret-persistence'
 import { sshPtyOwnerLeaseSecretSlot } from '../../protected-secret-persistence'
@@ -120,11 +123,47 @@ export function removeClaudeLivePtySessionId(
   sessionId: string
 ): void {
   const ids = operations.state.claudeLivePtySessionIds ?? []
-  if (!ids.includes(sessionId)) {
+  const bindings = operations.state.claudeLivePtyBindings ?? []
+  const nextBindings = bindings.filter((binding) => binding.sessionId !== sessionId)
+  if (!ids.includes(sessionId) && nextBindings.length === bindings.length) {
     return
   }
   operations.state.claudeLivePtySessionIds = ids.filter((id) => id !== sessionId)
+  // Why: the binding is only meaningful while the session is live; leaving it
+  // behind would re-attribute a recycled daemon session id to a dead account.
+  operations.state.claudeLivePtyBindings = nextBindings
   operations.scheduleSave()
+}
+
+export function getClaudeLivePtyBindings(state: PersistedState): ClaudeLivePtyBindingEntry[] {
+  return [...(state.claudeLivePtyBindings ?? [])]
+}
+
+export function recordClaudeLivePtyBinding(
+  operations: SshTargetStateOperations,
+  entry: ClaudeLivePtyBindingEntry
+): void {
+  if (entry.sessionId.length === 0 || entry.sessionId.length > 512) {
+    return
+  }
+  const bindings = operations.state.claudeLivePtyBindings ?? []
+  const existing = bindings.find((binding) => binding.sessionId === entry.sessionId)
+  if (
+    existing &&
+    existing.route === entry.route &&
+    (existing.accountId ?? null) === (entry.accountId ?? null)
+  ) {
+    return
+  }
+  // Why: the cap matches the session-id list, and a session's binding is fixed
+  // at spawn, so an existing row is replaced only when a recycled id is reused.
+  operations.state.claudeLivePtyBindings = [
+    ...bindings.filter((binding) => binding.sessionId !== entry.sessionId),
+    entry
+  ].slice(-MAX_CLAUDE_LIVE_PTY_SESSION_IDS)
+  // Why: same reason as addClaudeLivePtySessionId — a force-quit right after the
+  // spawn must still restore this pane's account on the next launch.
+  operations.flush()
 }
 
 export function getDeletedSshConfigAliases(state: PersistedState): string[] {

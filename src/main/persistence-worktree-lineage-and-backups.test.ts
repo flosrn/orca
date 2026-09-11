@@ -329,6 +329,57 @@ describe('Store', () => {
       expect(ids[0]).toBe('claude-session-5')
       expect(ids[199]).toBe('claude-session-204')
     })
+
+    it('persists the account each live session was launched under', async () => {
+      const store = await createStore()
+
+      store.addClaudeLivePtySessionId('claude-session-1')
+      store.recordClaudeLivePtyBinding('claude-session-1', {
+        route: 'account-dir',
+        accountId: 'account-1'
+      })
+      store.addClaudeLivePtySessionId('claude-session-2')
+      store.recordClaudeLivePtyBinding('claude-session-2', { route: 'shared-dir' })
+      // An unattributable session records nothing: the gate reads a missing row
+      // as "cannot be proven", which protects the shared credentials without
+      // claiming an account.
+      store.recordClaudeLivePtyBinding('claude-session-3', { route: 'unknown' })
+
+      const reloaded = await createStore()
+      expect(reloaded.getClaudeLivePtyBindings()).toEqual([
+        { sessionId: 'claude-session-1', route: 'account-dir', accountId: 'account-1' },
+        { sessionId: 'claude-session-2', route: 'shared-dir' }
+      ])
+
+      reloaded.removeClaudeLivePtySessionId('claude-session-1')
+      reloaded.flush()
+
+      // Why: a dead session's binding would re-attribute a recycled daemon id.
+      const reloadedAgain = await createStore()
+      expect(reloadedAgain.getClaudeLivePtyBindings()).toEqual([
+        { sessionId: 'claude-session-2', route: 'shared-dir' }
+      ])
+    })
+
+    it('drops persisted bindings that name no surface', async () => {
+      writeDataFile({
+        schemaVersion: 1,
+        claudeLivePtyBindings: [
+          { sessionId: 'valid-id', route: 'account-dir', accountId: 'account-1' },
+          { sessionId: 'no-account', route: 'account-dir' },
+          { sessionId: 'bad-route', route: 'nowhere' },
+          { sessionId: '', route: 'shared-dir' },
+          { sessionId: 'numeric-account', route: 'account-dir', accountId: 7 },
+          null
+        ]
+      })
+
+      const store = await createStore()
+
+      expect(store.getClaudeLivePtyBindings()).toEqual([
+        { sessionId: 'valid-id', route: 'account-dir', accountId: 'account-1' }
+      ])
+    })
   })
 
   // ── Rolling backups (issue #1158) ──────────────────────────────────

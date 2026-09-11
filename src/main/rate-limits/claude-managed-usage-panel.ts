@@ -1,6 +1,7 @@
 import type { ProviderRateLimits, RateLimitWindow } from '../../shared/rate-limit-types'
 import type { NetworkProxySettings } from '../../shared/network-proxy'
 import type { ClaudeRuntimeAuthPreparation } from '../claude-accounts/runtime-auth-service'
+import { hasLiveClaudePtysForAccount } from '../claude-accounts/live-pty-gate'
 import { fetchViaPty } from './claude-pty'
 import {
   readStagedClaudeManagedPreviewCredentials,
@@ -28,6 +29,8 @@ function getManagedUsagePanelAuthPreparation(
       wslLinuxConfigDir: account.wslLinuxAuthPath,
       envPatch: { CLAUDE_CONFIG_DIR: account.wslLinuxAuthPath },
       stripAuthEnv: true,
+      accountId: account.id,
+      configDirRoute: 'wsl-dir',
       provenance: `managed:${account.id}:inactive-preview`
     }
   }
@@ -36,8 +39,16 @@ function getManagedUsagePanelAuthPreparation(
     runtime: 'host',
     wslDistro: null,
     wslLinuxConfigDir: null,
-    envPatch: { CLAUDE_CONFIG_DIR: location.managedAuthPath },
+    envPatch: {
+      CLAUDE_CONFIG_DIR: location.managedAuthPath,
+      // Why: the preview CLI derives its Keychain service name from this dir.
+      // Without it, it reads whatever owns the default item and reports that
+      // account's quota under this one's name.
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: location.managedAuthPath
+    },
     stripAuthEnv: true,
+    accountId: account.id,
+    configDirRoute: 'account-dir',
     provenance: `managed:${account.id}:inactive-preview`
   }
 }
@@ -75,6 +86,13 @@ export async function fetchClaudeManagedUsagePanelSupplement(input: {
   signal?: AbortSignal
 }): Promise<ProviderRateLimits | null> {
   if (input.signal?.aborted) {
+    return null
+  }
+  // Why: this supplement runs a Claude CLI against the account's own surface,
+  // and that CLI refreshes tokens. While a session of the SAME account holds
+  // the single-use refresh token, a second rotation logs one of them out — the
+  // OAuth reading already gathered stands on its own.
+  if (hasLiveClaudePtysForAccount(input.account.id)) {
     return null
   }
   const authPreparation = getManagedUsagePanelAuthPreparation(input.account, input.location)

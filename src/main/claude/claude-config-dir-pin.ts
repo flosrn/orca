@@ -26,12 +26,15 @@ function samePath(a: string, b: string, platform: NodeJS.Platform): boolean {
 export function claudeConfigDirEnvPatch(
   accountHome: string,
   options: { env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform } = {}
-): { CLAUDE_CONFIG_DIR?: string } {
+): { CLAUDE_CONFIG_DIR?: string; CLAUDE_SECURESTORAGE_CONFIG_DIR?: string } {
   const env = options.env ?? process.env
   const platform = options.platform ?? process.platform
   const resolved = accountHome.trim()
   if (!resolved || samePath(resolved, defaultClaudeConfigDir(env), platform)) {
     return {}
   }
-  return { CLAUDE_CONFIG_DIR: resolved }
+  // Why: Claude Code 2.1.220+ derives the macOS Keychain service name from
+  // CLAUDE_SECURESTORAGE_CONFIG_DIR, so a pin that leaves it unset lets two
+  // accounts share one Keychain item — the isolation this pin exists for.
+  return { CLAUDE_CONFIG_DIR: resolved, CLAUDE_SECURESTORAGE_CONFIG_DIR: resolved }
 }

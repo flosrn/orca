@@ -4,7 +4,8 @@ import type { CanUseTool, OnUserDialog, SDKUserMessage } from '@anthropic-ai/cla
 import { spawnProcess } from '../../shared/child-process/run-process'
 import {
   markClaudeStructuredChildExited,
-  markClaudeStructuredChildSpawned
+  markClaudeStructuredChildSpawned,
+  type ClaudeLivePtyBinding
 } from '../claude-accounts/live-pty-gate'
 import { buildClaudeChildProcessEnv } from './claude-child-process-environment'
 import {
@@ -41,6 +42,10 @@ export type ClaudeStreamJsonLaunch = {
   options: ClaudeStructuredSdkOptions
   cwd: string
   env?: Record<string, string>
+  /** Which account's credentials this child owns, for the OAuth refresh gate.
+   *  Omitted by callers with no managed-account wiring, which is read as the
+   *  shared surface. */
+  authBinding?: ClaudeLivePtyBinding
 }
 
 export type ClaudeStreamJsonConnectionHandlers = {
@@ -232,7 +237,7 @@ export async function openClaudeStreamJsonConnection(
   // 'close' are attached makes that unreachable — any later throw still leaves a
   // listener that releases. Nothing between spawn and here can yield, so the child
   // cannot end before the gate is entered.
-  markClaudeStructuredChildSpawned(authGateKey)
+  markClaudeStructuredChildSpawned(authGateKey, launch.authBinding)
 
   const send = (message: Record<string, unknown>): Promise<void> => {
     if (closing || exited || terminalError || child.stdin.destroyed || !child.stdin.writable) {

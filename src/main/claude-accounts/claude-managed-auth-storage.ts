@@ -10,6 +10,7 @@ import {
   writeClaudeManagedAuthFile
 } from './managed-auth-path'
 import {
+  deleteActiveClaudeKeychainCredentialsStrict,
   deleteManagedClaudeKeychainCredentials,
   readManagedClaudeKeychainCredentials,
   writeManagedClaudeKeychainCredentials
@@ -141,6 +142,16 @@ export class ClaudeManagedAuthStorage {
   async remove(accountId: string, candidatePath: string): Promise<void> {
     try {
       const managedAuthPath = await this.assertOwned(candidatePath, accountId)
+      // Why: every sync of this account wrote its live credentials to the
+      // dir-scoped `Claude Code-credentials-<sha8(dir)>` login Keychain item.
+      // Deleting only the directory and Orca's own managed item would leave a
+      // usable refresh token behind forever — and an account later created at
+      // the same path would silently inherit it. Runs before the rmSync
+      // because the service-name aliases are derived from the directory's
+      // realpath, which needs the directory to still exist.
+      if (process.platform === 'darwin') {
+        await deleteActiveClaudeKeychainCredentialsStrict(managedAuthPath)
+      }
       rmSync(resolve(managedAuthPath, '..'), { recursive: true, force: true })
     } catch (error) {
       console.warn('[claude-accounts] Refusing to remove untrusted managed auth:', error)

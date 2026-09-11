@@ -3886,8 +3886,6 @@
             "2c35eca8d4": "Unable to fetch usage",
             "1292d4f2ee": "Unavailable",
             "7567cd1c6b": "Usage unavailable",
-            "a9a318b7a3": "Refresh failed — showing cached data",
-            "7ad719c4bf": "Limited",
             "e740f92596": "Refresh failed",
             "8418ec448d": "{{value0}} usage could not be refreshed. Agent sessions may still be signed in.",
             "45198c7d95": "1 rate-limit reset available",
@@ -3896,12 +3894,10 @@
             "d1e442a9e5": "Expires now",
             "6cf9eaed10": "Next expires in {{value0}}",
             "20ad66aed1": "Expires in {{value0}}",
-            "0d8d7cfe15": "Waiting for Claude session",
             "1804cd8c3f": "Refreshing sign-in",
             "f8f0f9d8cc": "Network issue",
             "bf2e739f18": "Sign-in unavailable",
             "f8b8dbed85": "Usage unavailable",
-            "3d3c9c0c1f": "Claude usage will refresh after the live Claude terminal rotates its credentials.",
             "42fdd4da1d": "Claude sign-in is being refreshed. Agent sessions may still be signed in.",
             "c06c1d215d": "Claude usage could not be refreshed because the network request failed.",
             "cabdc2a9e0": "Claude sign-in credentials could not be read.",
@@ -3916,7 +3912,21 @@
                 "apiKey": "MiniMax API key expired. Replace it in Settings.",
                 "cookie": "MiniMax session cookie expired. Replace it in Settings."
               }
-            }
+            },
+            "claude": {
+              "deferredRefresh": {
+                "label": "Waiting for credential refresh",
+                "detail": "Claude usage refreshes once this account finishes rotating its credentials."
+              },
+              "rateLimitedRead": {
+                "label": "Refresh rate limited",
+                "detail": "Claude throttled the usage read itself. This does not mean your subscription quota is spent."
+              }
+            },
+            "refreshRateLimited": {
+              "label": "Refresh rate limited"
+            },
+            "staleCachedLabel": "{{label}} — showing cached data"
           },
           "SshTargetStatusRow": {
             "sshHost": "SSH Host"
@@ -3945,7 +3955,14 @@
             "compact": "Compact",
             "detailedTooltip": "Full usage with bars, labels, and percentages",
             "compactTooltip": "Condensed usage: only the tightest window",
-            "footerDetailAria": "Usage footer detail"
+            "footerDetailAria": "Usage footer detail",
+            "stale": {
+              "noSample": "no earlier reading",
+              "justRead": "last read just now",
+              "lastRead": "last read {{age}} ago",
+              "retryIn": "retry in {{countdown}}"
+            },
+            "accountOrdinal": "account {{n}}"
           },
           "RemoteServerUpdateStatusSegment": {
             "updating": "Updating {{value0}}/{{value1}}",

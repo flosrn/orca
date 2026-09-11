@@ -1,9 +1,10 @@
 import { translate } from '@/i18n/i18n'
 import type { ProviderRateLimits } from '../../../../shared/rate-limit-types'
 import { getProviderUsageStatusLabel } from './usage-error-copy'
+import { isProviderRefreshFailing } from './usage-stale-sample'
 
 export type UsageRosterRowState = {
-  kind: 'usage' | 'loading' | 'sign-in' | 'unavailable' | 'error' | 'empty'
+  kind: 'usage' | 'stale-usage' | 'loading' | 'sign-in' | 'unavailable' | 'error' | 'empty'
   statusLabel: string | null
 }
 
@@ -34,8 +35,22 @@ export function getUsageRosterRowState(
   provider: ProviderRateLimits,
   hasUsage: boolean
 ): UsageRosterRowState {
+  // A revoked lane keeps its sign-in route even when an older sample is still on screen.
+  if (isConfirmedSignedOut(provider)) {
+    return {
+      kind: 'sign-in',
+      statusLabel: translate(
+        'auto.components.status.bar.UsageRosterPanel.notSignedIn',
+        'not signed in'
+      )
+    }
+  }
   if (hasUsage) {
-    return { kind: 'usage', statusLabel: null }
+    // Retained numbers from an earlier capture stay visible, but a failing refresh must be
+    // named on the row: rendering them bare would assert a reading Orca does not have.
+    return isProviderRefreshFailing(provider)
+      ? { kind: 'stale-usage', statusLabel: getProviderUsageStatusLabel(provider) }
+      : { kind: 'usage', statusLabel: null }
   }
   if (provider.status === 'idle' || provider.status === 'fetching') {
     return {
@@ -43,15 +58,6 @@ export function getUsageRosterRowState(
       statusLabel: translate(
         'auto.components.status.bar.UsageRosterPanel.loadingUsage',
         'Loading usage…'
-      )
-    }
-  }
-  if (isConfirmedSignedOut(provider)) {
-    return {
-      kind: 'sign-in',
-      statusLabel: translate(
-        'auto.components.status.bar.UsageRosterPanel.notSignedIn',
-        'not signed in'
       )
     }
   }

@@ -206,6 +206,47 @@ describe('ProviderSegment monthly window', () => {
     expect(markup).toContain('30% used Fable')
     expect(markup).not.toContain('40% used')
   })
+
+  // Why: the bar is the surface a user reads without opening anything; a retained number
+  // whose window already reset would be read there as the current period's usage.
+  it('withholds a retained percentage whose window already reset', async () => {
+    const { ProviderSegment } = await import('./StatusBar')
+    const limits: ProviderRateLimits = {
+      provider: 'claude',
+      session: windowOf(41, 300, Date.now() - 60_000),
+      weekly: null,
+      updatedAt: Date.now() - 26 * 3_600_000,
+      error: 'HTTP 429 from the Claude usage endpoint',
+      status: 'error',
+      usageMetadata: { failureKind: 'rate-limited' }
+    }
+
+    const markup = renderToStaticMarkup(
+      <ProviderSegment p={limits} compact={false} display="used" mode="verbose" />
+    )
+
+    expect(markup).not.toContain('41% used')
+    expect(markup).toContain('—')
+  })
+
+  it('still shows a retained percentage while its window is open', async () => {
+    const { ProviderSegment } = await import('./StatusBar')
+    const limits: ProviderRateLimits = {
+      provider: 'claude',
+      session: windowOf(41, 300, Date.now() + 3_600_000),
+      weekly: null,
+      updatedAt: Date.now() - 12 * 60_000,
+      error: 'HTTP 429 from the Claude usage endpoint',
+      status: 'error',
+      usageMetadata: { failureKind: 'rate-limited' }
+    }
+
+    const markup = renderToStaticMarkup(
+      <ProviderSegment p={limits} compact={false} display="used" mode="verbose" />
+    )
+
+    expect(markup).toContain('41% used')
+  })
 })
 
 describe('undefined provider window safety (crash d2c1da69 / bb74236c)', () => {

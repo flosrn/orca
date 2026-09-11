@@ -10,6 +10,15 @@ import {
 import type { CodexBarUsageSnapshot } from '../codexbar-cli-source'
 import type { CodexBarProvider } from '../codexbar-usage-mapper'
 
+// Why: the Claude auth lanes name the surface every read ran against —
+// 'system' for the user's own ~/.claude, 'managed:<account id>' for an isolated
+// account — and they name it on success, error and abort alike. Providers that
+// label only their successful reads (Grok's account/tier string) must keep
+// their retention, so identity is only enforced where silence is evidence.
+function isClaudeSurfaceProvenance(provenance: string | undefined): boolean {
+  return provenance === 'system' || provenance?.startsWith('managed:') === true
+}
+
 export abstract class RateLimitServiceResultPolicy extends RateLimitServiceFetchControl {
   protected applyStalePolicy(
     fresh: ProviderRateLimits,
@@ -42,6 +51,25 @@ export abstract class RateLimitServiceResultPolicy extends RateLimitServiceFetch
 
     // No previous data to fall back on
     if (!previous || !previousHasData) {
+      return fresh
+    }
+
+    // Why: the retained numbers keep the failing lane's own name and reset
+    // times on screen. A sample read under another account is not this
+    // account's quota, so it is discarded rather than relabelled — an account
+    // that has never returned data must look empty, not borrow its neighbour's.
+    // Two named surfaces that disagree are always a mismatch, whatever the
+    // provider. An unstamped result additionally fails closed against a named
+    // Claude surface: it cannot prove it read the same account, and retention
+    // would relabel A's quota as B's.
+    const previousProvenance = previous.usageMetadata?.authProvenance
+    const freshProvenance = fresh.usageMetadata?.authProvenance
+    if (
+      previousProvenance !== freshProvenance &&
+      ((previousProvenance && freshProvenance) ||
+        isClaudeSurfaceProvenance(previousProvenance) ||
+        isClaudeSurfaceProvenance(freshProvenance))
+    ) {
       return fresh
     }
 

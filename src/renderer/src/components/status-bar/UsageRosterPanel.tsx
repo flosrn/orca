@@ -15,6 +15,11 @@ import { barColor, formatResetCountdown, getWindowSections, ProviderIcon } from 
 import { getProviderDisplayName } from './usage-error-copy'
 import { formatPlanLabel, usageTextColorClass } from './usage-roster-formatting'
 import { getUsageRosterRowState, type UsageRosterRowState } from './usage-roster-row-state'
+import {
+  getRetainedSampleNotice,
+  getUsageRetryCountdownLabel,
+  isUsageWindowExpired
+} from './usage-stale-sample'
 import type { StatusBarUsageMode } from '../../../../shared/status-bar-usage-mode'
 import type { UsageAccountBadge, UsageBarSegment } from './usage-account-segments'
 
@@ -95,28 +100,45 @@ function UsageMetric({
   section,
   label,
   display,
-  showBar = true
+  showBar = true,
+  stale = false,
+  now
 }: {
   section: UsageSection
   label: string
   display: UsagePercentageDisplay
   showBar?: boolean
+  stale?: boolean
+  now: number
 }): React.JSX.Element {
   const used = clampUsedPercent(section.window.usedPercent)
   const shown = getDisplayedUsagePercentage(section.window.usedPercent, display)
+  // Expiry is a property of the window, not of the refresh: a period that already reset
+  // cannot be reported whatever the fetch is doing.
+  const expired = isUsageWindowExpired(section.window, now)
 
   return (
     <span data-usage-window={section.label} className="flex shrink-0 items-center gap-1.5">
       <span className="text-[10px] text-muted-foreground">{label}</span>
       {showBar ? (
         <span data-usage-bar className="h-[5px] w-7 overflow-hidden rounded-full bg-muted">
-          <span
-            className={`block h-full rounded-full ${barColor(used)}`}
-            style={{ width: `${shown}%` }}
-          />
+          {expired ? null : (
+            <span
+              className={`block h-full rounded-full ${stale ? 'bg-muted-foreground/40' : barColor(used)}`}
+              style={{ width: `${shown}%` }}
+            />
+          )}
         </span>
       ) : null}
-      <span className={`tabular-nums text-[11px] ${usageTextColorClass(used)}`}>{shown}%</span>
+      {expired ? (
+        <span className="tabular-nums text-[11px] text-muted-foreground">—</span>
+      ) : (
+        <span
+          className={`tabular-nums text-[11px] ${stale ? 'text-muted-foreground' : usageTextColorClass(used)}`}
+        >
+          {shown}%
+        </span>
+      )}
     </span>
   )
 }
@@ -140,6 +162,8 @@ export function UsageRow({
 }): React.JSX.Element {
   const sections = usedSections(p)
   const hasUsage = sections.length > 0
+  // A signed-out lane with an older sample is just as stale as a failing refresh.
+  const stale = state.kind === 'stale-usage' || (hasUsage && state.kind === 'sign-in')
   const name = getProviderDisplayName(p.provider)
   const accountLabel = account
     ? (account.email ??
@@ -148,8 +172,10 @@ export function UsageRow({
       }))
     : null
   const plan = formatPlanLabel(p.planType)
-  const reset = hasUsage ? soonestResetLabel(sections, now) : null
+  // A countdown off a retained window would read as a live measurement of the current period.
+  const reset = hasUsage && !stale ? soonestResetLabel(sections, now) : null
   const summary = mode === 'compact' ? getStatusBarUsageSection(p) : null
+  const retry = stale ? getUsageRetryCountdownLabel(p, now) : null
 
   return (
     <div data-usage-mode={mode} className="flex min-w-0 flex-1 flex-col gap-1">
@@ -173,17 +199,15 @@ export function UsageRow({
           ) : null}
           {plan ? <span className="font-normal text-muted-foreground"> · {plan}</span> : null}
         </span>
-        {!hasUsage ? (
-          <>
-            <span className="min-w-0 truncate text-[11px] text-muted-foreground">
-              {state.statusLabel}
-            </span>
-            {showSignInAction ? (
-              <span className="ml-auto shrink-0 rounded-md border border-border bg-secondary px-2.5 py-0.5 text-xs text-foreground">
-                {translate('auto.components.status.bar.StatusBar.c35af53b73', 'Sign in')}
-              </span>
-            ) : null}
-          </>
+        {state.statusLabel ? (
+          <span className="min-w-0 shrink truncate text-[11px] text-muted-foreground">
+            {state.statusLabel}
+          </span>
+        ) : null}
+        {showSignInAction ? (
+          <span className="ml-auto shrink-0 rounded-md border border-border bg-secondary px-2.5 py-0.5 text-xs text-foreground">
+            {translate('auto.components.status.bar.StatusBar.c35af53b73', 'Sign in')}
+          </span>
         ) : summary ? (
           <span className="ml-auto">
             <UsageMetric
@@ -191,6 +215,8 @@ export function UsageRow({
               label={summary.label}
               display={display}
               showBar={false}
+              stale={stale}
+              now={now}
             />
           </span>
         ) : reset ? (
@@ -205,8 +231,16 @@ export function UsageRow({
               section={section}
               label={shortLabel(p, section)}
               display={display}
+              stale={stale}
+              now={now}
             />
           ))}
+        </div>
+      ) : null}
+      {hasUsage && stale ? (
+        <div className="truncate pl-[30px] text-[10px] text-muted-foreground">
+          {getRetainedSampleNotice(p, now)}
+          {retry ? ` · ${retry}` : ''}
         </div>
       ) : null}
     </div>
@@ -243,10 +277,13 @@ export function UsageRosterPanel({
   renderRow?: (segment: UsageBarSegment, row: React.ReactNode) => React.ReactNode
 }): React.JSX.Element {
   // Why: one boundary-scheduled clock keeps every open row current without per-provider timers.
+  // Retry deadlines are in the list too: a lane whose windows have all expired would otherwise
+  // freeze `now` at mount and leave its countdown and sample age stuck.
   const now = useResetCountdownClock(
-    segments.flatMap((segment) =>
-      usedSections(segment.limits).map((section) => section.window.resetsAt)
-    )
+    segments.flatMap((segment) => [
+      ...usedSections(segment.limits).map((section) => section.window.resetsAt),
+      segment.limits.usageMetadata?.retryAtMs ?? null
+    ])
   )
   const worstByProvider = new Map<string, number>()
   for (const segment of segments) {
