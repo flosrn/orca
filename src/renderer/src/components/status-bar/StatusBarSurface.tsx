@@ -106,7 +106,7 @@ export function StatusBarSurface({
         setMenuOpen(true)
       }}
     >
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 items-center gap-3">
         {isEmptyUsageState ? (
           showEmptyUsageCta ? (
             <StatusBarUsageEmptyCta />
@@ -122,7 +122,7 @@ export function StatusBarSurface({
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="inline-flex items-center gap-3 rounded px-1 py-0.5 hover:bg-accent/70"
+                  className="inline-flex min-w-0 flex-nowrap items-center gap-3 whitespace-nowrap rounded px-1 py-0.5 hover:bg-accent/70"
                   aria-label={translate(
                     'auto.components.status.bar.UsageRosterPanel.title',
                     'Usage'

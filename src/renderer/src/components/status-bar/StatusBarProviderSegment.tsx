@@ -49,7 +49,7 @@ function WindowLabel({
   expired?: boolean
 }): React.JSX.Element {
   return (
-    <span className="tabular-nums">
+    <span className="whitespace-nowrap tabular-nums">
       {expired ? '—' : formatUsagePercentageLabel(w.usedPercent, display)}
       {showLabel ? ` ${label}` : ''}
     </span>
@@ -126,7 +126,7 @@ function VerboseProviderUsage({
         {visibleBuckets.map((bucket, index) => (
           <React.Fragment key={bucket.name}>
             {index > 0 ? <span className="text-muted-foreground">·</span> : null}
-            <span className="tabular-nums">
+            <span className="whitespace-nowrap tabular-nums">
               {bucket.name}{' '}
               {isUsageWindowExpired(bucket, now)
                 ? '—'
@@ -257,7 +257,7 @@ export function ProviderSegment({
   // Idle / initial load
   if (!p || p.status === 'idle') {
     return (
-      <span className="inline-flex items-center gap-1 text-muted-foreground">
+      <span className="inline-flex items-center gap-1 whitespace-nowrap text-muted-foreground">
         {mark}
         <span className="animate-pulse">···</span>
       </span>
@@ -269,7 +269,7 @@ export function ProviderSegment({
   // Fetching with no prior data
   if (p.status === 'fetching' && !summary) {
     return (
-      <span className="inline-flex items-center gap-1 text-muted-foreground">
+      <span className="inline-flex items-center gap-1 whitespace-nowrap text-muted-foreground">
         {mark}
         <span className="animate-pulse">···</span>
       </span>
@@ -279,17 +279,30 @@ export function ProviderSegment({
   // Unavailable (CLI not installed)
   if (p.status === 'unavailable') {
     return (
-      <span className="inline-flex items-center gap-1 text-muted-foreground/50">{mark} --</span>
+      <span className="inline-flex items-center gap-1 whitespace-nowrap text-muted-foreground/50">
+        {mark} --
+      </span>
     )
   }
 
   // Error with no data
   if (p.status === 'error' && !summary) {
     return (
-      <span className="inline-flex items-center gap-1 text-muted-foreground">
+      <span className="inline-flex items-center gap-1 whitespace-nowrap text-muted-foreground">
         {mark}
-        <AlertTriangle size={11} className="text-muted-foreground/80" />
-        {!compact && <span className="text-[11px] font-medium">{statusLabel}</span>}
+        <AlertTriangle size={11} className="shrink-0 text-muted-foreground/80" />
+        {!compact && (
+          // Why: this copy is a localized sentence ("En attente du renouvellement des
+          // identifiants"), while the bar is a single 24px row shared by every lane. Bound it
+          // tightly so a dense French roster still fits; the hover title and the Usage popover
+          // row keep the sentence in full.
+          <span
+            className="min-w-0 max-w-[72px] truncate text-[11px] font-medium"
+            title={statusLabel}
+          >
+            {statusLabel}
+          </span>
+        )}
       </span>
     )
   }
@@ -299,7 +312,7 @@ export function ProviderSegment({
   const summaryExpired = Boolean(summary && isUsageWindowExpired(summary.window, now))
 
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
       {mark}
       {mode === 'verbose' ? (
         <>
@@ -317,7 +330,7 @@ export function ProviderSegment({
           expired={summaryExpired}
         />
       ) : null}
-      {isStale && <AlertTriangle size={11} className="text-muted-foreground/80" />}
+      {isStale && <AlertTriangle size={11} className="shrink-0 text-muted-foreground/80" />}
     </span>
   )
 }
