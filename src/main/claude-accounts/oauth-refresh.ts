@@ -3,12 +3,14 @@ import { ensureElectronProxyFromEnvironment } from '../network/proxy-settings'
 import { parseRetryAfterMs } from '../rate-limits/claude-oauth-usage-error'
 import { logClaudeAuthDiagnostic } from '../rate-limits/claude-auth-diagnostics-log'
 
-// Why: the OAuth client id and token endpoint are the public Claude Code
-// values, verified against the installed `claude` binary (2.1.177) and the
-// claude-swap reference tool. Orca owns the refresh so a single-use refresh
-// token is rotated and persisted atomically, instead of being scraped back
-// after the CLI rotates it (the lossy path that strands stale tokens).
-const OAUTH_TOKEN_URL = 'https://platform.claude.com/v1/oauth/token'
+// Why: the OAuth client id is the public Claude Code value. The token host is
+// api.anthropic.com: measured 2026-09-12 from two egresses, platform.claude.com
+// and console.anthropic.com answer 429 rate_limit_error for this client id on
+// every request, even a bogus refresh token, while api.anthropic.com evaluates
+// the grant (400 invalid_grant) and serves the gateway's refreshes. Orca owns
+// the refresh so a single-use refresh token is rotated and persisted
+// atomically, instead of being scraped back after the CLI rotates it.
+const OAUTH_TOKEN_URL = 'https://api.anthropic.com/v1/oauth/token'
 const OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
 
 // Refresh slightly ahead of expiry so a token doesn't expire mid-launch. The

@@ -172,7 +172,7 @@ describe('refreshClaudeOauthCredentials', () => {
 
     expect(netFetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = netFetchMock.mock.calls[0]
-    expect(url).toBe('https://platform.claude.com/v1/oauth/token')
+    expect(url).toBe('https://api.anthropic.com/v1/oauth/token')
     expect(init.method).toBe('POST')
     expect(init.headers['Content-Type']).toBe('application/x-www-form-urlencoded')
     const body = new URLSearchParams(init.body)

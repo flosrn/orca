@@ -478,7 +478,7 @@ describe('fetchClaudeRateLimits', () => {
     expect(result.usageMetadata).toMatchObject({ failureKind: 'stale-token', source: 'oauth' })
     expect(netFetchMock).toHaveBeenCalledTimes(1)
     expect(netFetchMock).toHaveBeenCalledWith(
-      'https://platform.claude.com/v1/oauth/token',
+      'https://api.anthropic.com/v1/oauth/token',
       expect.anything()
     )
     warn.mockRestore()
@@ -544,7 +544,7 @@ describe('fetchClaudeRateLimits', () => {
     )
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     netFetchMock.mockImplementation(async (url: string) =>
-      url === 'https://platform.claude.com/v1/oauth/token'
+      url === 'https://api.anthropic.com/v1/oauth/token'
         ? { ok: false, status: 503, headers: new Headers(), json: async () => ({}) }
         : new Response(
             JSON.stringify({ five_hour: { utilization: 12 }, seven_day: { utilization: 34 } }),
