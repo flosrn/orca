@@ -2,10 +2,15 @@ name: fork nightly
 
 # Le canal fork d'Orca, entretenu tout seul. Lis README.md sur cette branche
 # d'abord : il explique pourquoi la branche par défaut ne contient pas de code,
-# quelle branche la CI possède, et par où on sort de ce dispositif.
+# quelle ref la CI possède, et par où on sort de ce dispositif.
 #
 # Ce fichier ne vit QUE sur `fork-pipeline`. `schedule` ne se déclenche que
-# depuis la branche par défaut du dépôt, et la branche patch est gelée.
+# depuis la branche par défaut du dépôt.
+#
+# La source est la branche d'intégration du fork complet. Chaque nuit épingle
+# UNE release stable d'upstream et la MERGE (jamais de rebase) : l'ascendance
+# que l'installeur exige est préservée par construction. Un conflit est
+# résolu par un humain ; aucun chemin ne force-pushe une branche.
 
 on:
   schedule:
@@ -16,46 +21,44 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: Builder même si ni upstream ni le patch n'ont bougé
+        description: Builder même si la source publiée n'a pas bougé
         type: boolean
         default: false
       source_ref:
         description: >-
           Builder CE ref de CE dépôt tel quel (branche, tag ou sha) : aucun
-          rebase, aucun push de la branche patch. Vide = nightly.
+          merge. Les gardes d'ascendance s'appliquent, et une publication
+          avance `fork-channel` comme une nightly. Vide = nightly.
         type: string
         default: ''
 
-# Lecture par défaut ; les deux jobs qui écrivent (push de `fork-channel`,
-# création de la release) demandent `contents: write` pour eux seuls.
+# Lecture par défaut ; seul le job `release` demande `contents: write`, et les
+# écritures de refs passent par le PAT (GITHUB_TOKEN n'a pas le scope
+# `workflow`, et l'arbre buildé contient les ~30 workflows d'upstream).
 permissions:
   contents: read
 
 # Pas de cancel-in-progress : un run annulé au milieu laisse un tag sans
-# artefacts, et deux runs concurrents se disputeraient le force-push.
+# artefacts, et deux runs concurrents se disputeraient l'avance des refs.
 concurrency:
   group: fork-nightly
   cancel-in-progress: false
 
 env:
-  # La branche patch. Par défaut `feat/argv-worker-start`, la branche de la PR
-  # upstream #16425 : elle ne reçoit QUE la plage du patch, jamais une
-  # personnalisation — et une garde le vérifie commit par commit.
-  #
-  # CONTRAT DE PAIRE : `PATCH_BRANCH` et `CUSTOM_BRANCH` doivent partager LA
-  # MÊME BASE amont. Le sélecteur de customs est `patch...custom` par patch-id :
-  # avancer `CUSTOM_BRANCH` sur un portage vers une base plus récente en
-  # laissant `PATCH_BRANCH` sur l'ancienne ferait entrer la churn amont de la
-  # nouvelle base dans la sélection, et rejouerait le patch en double. Les deux
-  # variables bougent donc ENSEMBLE, et une `PATCH_BRANCH` réglée sur une
-  # branche propre au fork a l'effet voulu de plus : la nuit n'écrit alors plus
-  # jamais la branche de la PR upstream.
-  PATCH_BRANCH: ${{ vars.PATCH_BRANCH || 'feat/argv-worker-start' }}
-  # Branche perso, empilée sur le patch. C'est elle que le canal build.
-  # Vide = canal nu (patch seul). Réglable SANS commit :
-  # Settings > Secrets and variables > Actions > Variables > CUSTOM_BRANCH.
-  CUSTOM_BRANCH: ${{ vars.CUSTOM_BRANCH }}
+  # LA source de vérité : la branche d'intégration du fork complet. Elle
+  # contient le fork ENTIER (personnalisations incluses) et son historique
+  # descend de tout ce que le canal a déjà publié. Réglable sans commit :
+  # Settings > Secrets and variables > Actions > Variables > SOURCE_BRANCH.
+  SOURCE_BRANCH: ${{ vars.SOURCE_BRANCH || 'fix/fork-v1.4.203' }}
+  # Le plancher d'ascendance : toute source doit le contenir, ce qui refuse
+  # avant le tag un build d'upstream nu ou une lignée abandonnée du fork.
+  FORK_BASE_REF: ${{ vars.FORK_BASE_REF || 'feat/fork-1.4.200' }}
+  # Le pointeur « dernier build publié avec succès ». Avancé en fast-forward
+  # SEUL (jamais de force) par le job `release`, après que tests et packaging
+  # soient verts. C'est lui, et rien d'autre, qui interdit une régression
+  # d'ascendance : un build qui ne le contient pas ne se publie pas.
   CHANNEL_BRANCH: fork-channel
+  UPSTREAM_REPO: stablyai/orca
   UPSTREAM_URL: https://github.com/stablyai/orca.git
   # Le Mac a mesuré que Node 22 casse le packaging de node-pty et que 24.11.1
   # passe. `engines.node` du dépôt dit « 24 », ce qui flotterait sur la dernière
@@ -64,303 +67,513 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # 1. Rejouer le patch sur upstream du jour. Le seul job qui écrit une branche.
+  # 1. Choisir la source, la vérifier, la tagger. Le seul job qui décide QUOI
+  #    est buildé. Il n'écrit aucune branche : il crée un tag immuable, et
+  #    c'est `release` qui fait avancer les branches publiées, une fois vert.
   # ---------------------------------------------------------------------------
-  rebase:
+  source:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
       contents: read
     outputs:
-      # Un run n'emprunte QU'UN des deux chemins, et les sorties d'une étape
-      # sautée sont vides : `||` choisit donc le chemin qui a tourné, sans
-      # qu'aucun job d'aval ait à savoir lequel c'était.
-      should_build: ${{ steps.manual.outputs.should_build || steps.plan.outputs.should_build }}
-      sha: ${{ steps.manual.outputs.sha || steps.rebase.outputs.sha }}
-      tag: ${{ steps.manual_tag.outputs.tag || steps.rebase.outputs.tag }}
-      version: ${{ steps.manual.outputs.version || steps.rebase.outputs.version }}
-      identity: ${{ steps.manual.outputs.identity || steps.plan.outputs.identity }}
-      upstream_sha: ${{ steps.plan.outputs.upstream_sha }}
-      patch_sha: ${{ steps.plan.outputs.patch_sha }}
-      custom_sha: ${{ steps.plan.outputs.custom_sha }}
-      # `incorporated` = la source buildée porte les commits de CUSTOM_BRANCH ;
-      # `bare` = canal nu assumé (aucune CUSTOM_BRANCH, ou branche sans commit
-      # propre). L'aval s'en sert pour exiger les gates perso : un `bare` qui
-      # serait en fait une source amputée ne sort pas d'ici — la garde de
-      # composition échoue avant, sur le chemin manuel comme la nuit.
-      custom_state: ${{ steps.guard.outputs.custom_state || steps.plan.outputs.custom_state }}
-      mode: ${{ steps.manual.outputs.active == 'true' && 'manual' || 'nightly' }}
-      source_ref: ${{ steps.manual.outputs.source_ref }}
+      should_build: ${{ steps.prepare.outputs.should_build }}
+      sha: ${{ steps.prepare.outputs.sha }}
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.prepare.outputs.version }}
+      mode: ${{ steps.inputs.outputs.mode }}
+      source_ref: ${{ steps.inputs.outputs.source_ref }}
+      # `source` = la branche d'intégration du fork ; `channel` = la pointe
+      # publiée, utilisée quand `SOURCE_BRANCH` n'existe pas (variable périmée
+      # après un bump de version, typiquement). Aucune autre valeur.
+      base_kind: ${{ steps.inputs.outputs.base_kind }}
+      # La release stable d'upstream, épinglée UNE fois par run : le merge et la
+      # garde d'ascendance lisent la même valeur, jamais deux requêtes.
+      upstream_tag: ${{ steps.prepare.outputs.upstream_tag }}
+      upstream_sha: ${{ steps.prepare.outputs.upstream_sha }}
+      upstream_version: ${{ steps.prepare.outputs.upstream_version }}
+      # Le build publié précédent (pointeur de canal, ou à défaut le commit
+      # CIBLÉ PAR LE TAG de la dernière release fork — le commit, pas la date).
+      previous_sha: ${{ steps.prepare.outputs.previous_sha }}
+      previous_origin: ${{ steps.prepare.outputs.previous_origin }}
+      # `release` n'avance `SOURCE_BRANCH` que si c'est bien d'elle que vient la
+      # source de ce run (et jamais sur le chemin manuel).
+      advance_source_branch: ${{ steps.prepare.outputs.advance_source_branch }}
     steps:
-      # ---------------------------------------------------------------------
-      # Chemin manuel : builder un ref de CE dépôt TEL QUEL.
-      #
-      # Pourquoi il existe. La nightly FABRIQUE sa source — elle rejoue le
-      # patch sur upstream, empile les customs, et force-push `PATCH_BRANCH`,
-      # qui par défaut est la branche de la PR upstream #16425. Quand la source
-      # voulue est déjà intégrée dans une branche perso, ce travail n'est pas
-      # seulement inutile : il est interdit tant que `PATCH_BRANCH` est cette
-      # branche, parce qu'il la republierait pour livrer quelque chose qui n'a
-      # rien à y faire.
-      #
-      # Ce chemin ne rejoue rien et ne pousse AUCUNE branche. Il fige le ref
-      # demandé en un sha exact, une seule fois, et pose un tag immuable sur
-      # CE sha. Tout l'aval (tests, mac, linux, release) consomme le tag et
-      # jamais le ref : si la branche bouge pendant le run, le build ne bouge
-      # pas. Les gates sont les mêmes — un build manuel n'achète aucune
-      # dispense.
-      - name: Chemin manuel - figer le ref source demandé
-        id: manual
-        if: github.event_name == 'workflow_dispatch' && inputs.source_ref != ''
+      # -----------------------------------------------------------------------
+      # Quelle source, et est-elle atteignable. Avant tout checkout : un
+      # `SOURCE_BRANCH` périmé ferait échouer `actions/checkout` sur un message
+      # qui ne dit pas quoi régler.
+      # -----------------------------------------------------------------------
+      - name: Résoudre la source demandée
+        id: inputs
         env:
-          # Le tag pointe sur un commit DÉJÀ dans ce dépôt, donc aucun objet
-          # n'est poussé — mais ce job est `contents: read` et ne peut pas
-          # créer de ref avec GITHUB_TOKEN. On réutilise le PAT de la nightly,
-          # passé par l'environnement : il n'apparaît dans aucune commande.
-          GH_TOKEN: ${{ secrets.FORK_PUSH_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          PUSH_TOKEN: ${{ secrets.FORK_PUSH_TOKEN }}
           SOURCE_REF: ${{ inputs.source_ref }}
         run: |
           set -euo pipefail
-          if [ -z "${GH_TOKEN:-}" ]; then
+
+          # Sans PAT, ce run ne peut ni tagger ni faire avancer un ref : il
+          # builderait 90 minutes pour rien. On échoue fermé, tout de suite.
+          if [ -z "${PUSH_TOKEN:-}" ]; then
             {
               echo "### Secret manquant — impossible de poser le tag de build"
               echo
               echo '```bash'
               echo "gh secret set FORK_PUSH_TOKEN --repo $GITHUB_REPOSITORY"
               echo '```'
+              echo
+              echo "PAT classic, scopes \`repo\` + \`workflow\`. GITHUB_TOKEN ne suffit pas :"
+              echo "l'arbre buildé contient les workflows d'upstream."
             } >>"$GITHUB_STEP_SUMMARY"
             echo "::error::FORK_PUSH_TOKEN absent — gh secret set FORK_PUSH_TOKEN --repo $GITHUB_REPOSITORY"
             exit 1
           fi
 
-          # Validation bornée : un NOM de ref simple, et rien d'autre. L'API
-          # interrogée plus bas ne connaît que $GITHUB_REPOSITORY — elle ne
-          # peut pas aller chercher upstream — et cette garde ferme le reste :
-          # pas d'URL, pas de `owner/repo:ref`, pas de révision calculée
-          # (`~`, `^`, `..`) dont le résultat dépendrait du moment de lecture.
-          if ! printf '%s' "$SOURCE_REF" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$'; then
-            echo "::error::source_ref refusé : « $SOURCE_REF » n'est pas un nom de ref simple de ce dépôt"
-            exit 1
-          fi
-          if printf '%s' "$SOURCE_REF" | grep -q '\.\.'; then
-            echo "::error::source_ref refusé : « $SOURCE_REF » contient '..'"
-            exit 1
+          read_remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          if [ -n "${SOURCE_REF:-}" ]; then
+            # Validation bornée : une branche, un tag ou un sha de CE dépôt, et
+            # rien d'autre. Pas d'URL, pas de `owner/repo:ref`, pas de `refs/…`
+            # (refs/pull/N/head est un ref de ce dépôt qui n'est pas à lui), pas
+            # de révision calculée (`~`, `^`, `..`) qui dépendrait du moment de
+            # la lecture.
+            if ! printf '%s' "$SOURCE_REF" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$' \
+              || printf '%s' "$SOURCE_REF" | grep -Eq '\.\.|^refs/'; then
+              echo "::error::source_ref refusé : « $SOURCE_REF » n'est ni une branche, ni un tag, ni un sha de ce dépôt"
+              exit 1
+            fi
+            {
+              echo "mode=manual"
+              echo "source_ref=$SOURCE_REF"
+              echo "base_kind=manual"
+              echo "checkout_ref=$SOURCE_REF"
+            } >>"$GITHUB_OUTPUT"
+            echo "Chemin manuel : build de « $SOURCE_REF » tel quel."
+            exit 0
           fi
 
-          # UNE seule résolution, dans CE dépôt. `commits/{ref}` accepte une
-          # branche, un tag ou un sha et rend le sha exact. Après cette ligne
-          # personne ne relit le ref : c'est ce qui tue la course « la branche
-          # avance pendant que le build tourne ».
-          sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$SOURCE_REF" --jq .sha)"
-          # Un sha complet, exactement 40 hexa, et rien d'autre. Un préfixe
-          # suivi de n'importe quoi laisserait passer une réponse tronquée ou
-          # un `null` mis en forme, et ce sha part ensuite dans un tag et dans
-          # le checkout de tous les jobs d'aval.
-          if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
-            echo "::error::« $SOURCE_REF » ne résout pas en commit de $GITHUB_REPOSITORY (reçu : « $sha »)"
-            exit 1
-          fi
-          echo "source_ref « $SOURCE_REF » figé sur $sha"
+          # Chemin nocturne. La base est la branche d'intégration du fork ; à
+          # défaut, la pointe publiée : `SOURCE_BRANCH` porte un numéro de
+          # version et DEVIENDRA périmée, et la nuit qui suit ne doit pas
+          # mourir sur une erreur de checkout. Le sha est figé ICI, une fois :
+          # tout l'aval build ce commit, même si la branche avance pendant le run.
+          # Un `ls-remote` qui échoue autrement que « ref absent » (code 2) est
+          # une erreur, jamais un repli silencieux.
+          resolve_head() { # $1 branche -> sha sur stdout ; 2 = absente
+            local out rc=0
+            out="$(git ls-remote --exit-code --heads "$read_remote" "refs/heads/$1")" || rc=$?
+            [ "$rc" -eq 0 ] || return "$rc"
+            printf '%s' "$out" | awk 'NR==1 {print $1}'
+          }
+          for base_kind in source channel; do
+            case "$base_kind" in source) branch="$SOURCE_BRANCH" ;; channel) branch="$CHANNEL_BRANCH" ;; esac
+            rc=0; head_sha="$(resolve_head "$branch")" || rc=$?
+            if [ "$rc" -eq 2 ]; then continue; fi
+            if [ "$rc" -ne 0 ] || ! printf '%s' "$head_sha" | grep -Eq '^[0-9a-f]{40}$'; then
+              echo "::error::impossible de lire $branch sur $GITHUB_REPOSITORY (code $rc) — on ne devine pas une source"
+              exit 1
+            fi
+            if [ "$base_kind" = channel ]; then
+              {
+                echo "### \`SOURCE_BRANCH\` introuvable — repli sur la pointe publiée"
+                echo
+                echo "\`$SOURCE_BRANCH\` n'existe pas sur \`$GITHUB_REPOSITORY\`. Ce run build"
+                echo "\`$CHANNEL_BRANCH\` (le dernier build publié) et **n'avance pas**"
+                echo "\`$SOURCE_BRANCH\`. Chaque nuit de repli fait avancer \`$CHANNEL_BRANCH\` seul :"
+                echo "avant de rétablir la variable, fusionne la pointe publiée dans la branche"
+                echo "d'intégration, sinon la première nuit rétablie est refusée pour perte"
+                echo "d'ascendance publiée."
+                echo
+                echo '```bash'
+                echo "git fetch origin $CHANNEL_BRANCH <branche-fork-complète>"
+                echo "git switch -c reconcile/$CHANNEL_BRANCH origin/<branche-fork-complète>"
+                echo "git merge origin/$CHANNEL_BRANCH && git push origin HEAD:<branche-fork-complète>"
+                echo "gh variable set SOURCE_BRANCH --repo $GITHUB_REPOSITORY --body <branche-fork-complète>"
+                echo '```'
+              } >>"$GITHUB_STEP_SUMMARY"
+              echo "::warning::$SOURCE_BRANCH absente — repli sur $CHANNEL_BRANCH"
+            fi
+            {
+              echo "mode=nightly"
+              echo "source_ref="
+              echo "base_kind=$base_kind"
+              echo "base_branch=$branch"
+              echo "checkout_ref=$head_sha"
+            } >>"$GITHUB_OUTPUT"
+            echo "Base : $branch figée sur $head_sha."
+            exit 0
+          done
 
-          # La version est lue à CE sha, pas sur une branche : c'est elle que
-          # electron-builder inscrira dans l'artefact.
-          version="$(gh api "repos/$GITHUB_REPOSITORY/contents/package.json?ref=$sha" \
-            -H 'Accept: application/vnd.github.raw' --jq .version)"
-          # `--jq` sur un champ absent imprime la CHAÎNE `null` : un simple
-          # `test -n` la prendrait pour une version valide et on taggerait une
-          # release nommée d'après un trou.
-          if [ -z "$version" ] || [ "$version" = "null" ]; then
-            echo "::error::package.json de $sha n'a pas de version lisible"
-            exit 1
-          fi
-
-          # Le tag N'EST PAS posé ici. Il l'est après la garde de composition,
-          # une étape plus bas : tout l'aval consomme le tag, donc le poser
-          # avant la garde publierait un ref immuable pour une source qu'on
-          # s'apprête à refuser.
           {
-            echo "active=true"
-            echo "should_build=true"
-            echo "sha=$sha"
-            echo "version=$version"
-            echo "source_ref=$SOURCE_REF"
-          } >>"$GITHUB_OUTPUT"
+            echo "### Aucune source — ni branche d'intégration, ni canal publié"
+            echo
+            echo "Ni \`$SOURCE_BRANCH\` ni \`$CHANNEL_BRANCH\` n'existent sur"
+            echo "\`$GITHUB_REPOSITORY\`. Le canal ne devine pas une source :"
+            echo
+            echo '```bash'
+            echo "gh variable set SOURCE_BRANCH --repo $GITHUB_REPOSITORY --body <branche-fork-complète>"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          echo "::error::ni $SOURCE_BRANCH ni $CHANNEL_BRANCH n'existent — aucune source"
+          exit 1
 
-          # `manual-` n'est pas hexadécimal, et la garde de fraîcheur de la
-          # nightly ne lit une identité que dans `[0-9a-f+]` : elle ne
-          # reconnaîtra pas celle-ci et rebuildera la nuit suivante. C'est le
-          # bon sens de l'erreur — un run manuel ne doit JAMAIS faire sauter
-          # une nightly. Le coût est un build nocturne de plus, une fois.
-          echo "identity=manual-${sha:0:12}" >>"$GITHUB_OUTPUT"
-
-      # Le chemin manuel prend la source TELLE QUELLE. C'est sa raison d'être,
-      # et c'est aussi ce qui a publié une fois un binaire ne contenant que le
-      # patch `argv-worker-start` : la source demandée n'embarquait aucune des
-      # personnalisations (les compteurs de quota, entre autres), et rien dans
-      # le run ne l'a dit. `CUSTOM_BRANCH` était réglée, le canal l'a ignorée
-      # en silence. Cette garde ferme ça, et rien d'autre : elle ne rejoue
-      # aucun commit, ne pousse aucune branche, et ne touche pas la sémantique
-      # « ce sha, tel quel » — elle refuse juste de tagger une source amputée.
-      - name: Chemin manuel - checkout de la source figée
+      - name: Checkout de la source
         uses: actions/checkout@v6
-        if: steps.manual.outputs.active == 'true'
         with:
           path: src
-          # Le SHA figé, jamais le ref : la garde vérifie CE QUI SERA BUILDÉ.
-          ref: ${{ steps.manual.outputs.sha }}
-          # La garde compare des patch-ids de part et d'autre d'une merge-base :
-          # un historique tronqué la rate.
+          ref: ${{ steps.inputs.outputs.checkout_ref }}
+          # Les gardes comparent des ascendances : un historique tronqué les
+          # rendrait toutes fausses (et `--is-ancestor` répondrait « non » sur
+          # un greffon).
           fetch-depth: 0
+          # Sinon checkout pose un http.extraheader avec GITHUB_TOKEN, qui prime
+          # sur les identifiants de l'URL de push : 403 github-actions[bot].
           persist-credentials: false
 
-      - name: Chemin manuel - garde de composition
-        id: guard
-        if: steps.manual.outputs.active == 'true'
+      # -----------------------------------------------------------------------
+      # Le cœur. Épingler la release stable, l'intégrer par MERGE (jamais par
+      # rebase), puis refuser de tagger toute source qui perdrait de
+      # l'ascendance déjà publiée.
+      # -----------------------------------------------------------------------
+      - name: Préparer et vérifier la source
+        id: prepare
         working-directory: src
         env:
-          # Lecture seule : un fetch de deux branches de CE dépôt.
           GH_TOKEN: ${{ github.token }}
-          BUILD_SHA: ${{ steps.manual.outputs.sha }}
-          SOURCE_REF: ${{ steps.manual.outputs.source_ref }}
+          MODE: ${{ steps.inputs.outputs.mode }}
+          BASE_KIND: ${{ steps.inputs.outputs.base_kind }}
+          BASE_BRANCH: ${{ steps.inputs.outputs.base_branch }}
+          SOURCE_REF: ${{ steps.inputs.outputs.source_ref }}
+          FORCED: ${{ github.event_name == 'workflow_dispatch' && inputs.force }}
         run: |
           set -euo pipefail
-          if [ -z "${CUSTOM_BRANCH:-}" ]; then
-            # Canal nu assumé : il n'y a aucune personnalisation à exiger.
-            echo "custom_state=bare" >>"$GITHUB_OUTPUT"
-            echo "Aucune CUSTOM_BRANCH réglée — canal nu, rien à vérifier."
-            exit 0
-          fi
-          if [ "$CUSTOM_BRANCH" = "$PATCH_BRANCH" ]; then
-            echo "::error::CUSTOM_BRANCH == PATCH_BRANCH : réglage invalide"
+          git config user.name 'orca fork pipeline'
+          git config user.email 'fork-pipeline@users.noreply.github.com'
+
+          read_remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          # `--is-ancestor` répond 0 pour un ancêtre ET pour l'égalité : c'est
+          # exactement la relation que l'installeur exige (descendant, ou égal).
+          contains() { git merge-base --is-ancestor "$1" "$2"; }
+
+          # --- 1. la release stable d'upstream, épinglée UNE fois -------------
+          # Une RELEASE, pas `upstream/main` : `main` est une pointe mouvante
+          # qui n'a rien promis. `releases/latest` est par définition la
+          # dernière non-brouillon non-prerelease ; la forme `vX.Y.Z` écarte
+          # ce qui n'est pas une release desktop. La date ne décide de rien :
+          # les gardes plus bas exigent que le résultat contienne la pointe déjà
+          # publiée, donc un choix trop vieux ne peut pas rétrograder le canal.
+          upstream_tag="$(gh api "repos/$UPSTREAM_REPO/releases/latest" --jq '.tag_name // empty')"
+          if ! printf '%s' "$upstream_tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::releases/latest de $UPSTREAM_REPO n'est pas une release desktop vX.Y.Z (« $upstream_tag ») — on ne build pas une source non épinglée"
             exit 1
           fi
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch --no-tags --quiet upstream "+refs/tags/$upstream_tag:refs/fork/stable"
+          # `^{commit}` : un tag annoté ne résout pas en commit tout seul, et
+          # toutes les gardes d'en dessous comparent des commits.
+          upstream_sha="$(git rev-parse 'refs/fork/stable^{commit}')"
+          upstream_version="$(git show 'refs/fork/stable:package.json' | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>console.log(JSON.parse(s).version??""))')"
+          echo "Release stable épinglée : $upstream_tag ($upstream_sha, version ${upstream_version:-inconnue})"
 
-          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git fetch --no-tags --quiet "$remote" \
-            "+refs/heads/$PATCH_BRANCH:refs/guard/patch" \
-            "+refs/heads/$CUSTOM_BRANCH:refs/guard/custom"
-          patch_head="$(git rev-parse refs/guard/patch)"
-          custom_sha="$(git rev-parse refs/guard/custom)"
-
-          # MÊME sélection que la nightly : les commits propres à la branche
-          # perso, par patch-id (`--cherry-pick --right-only`), pas par ancêtre
-          # commun. Ta branche peut être basée sur un patch périmé ; les commits
-          # du patch qu'elle porte encore sont reconnus et écartés.
-          mapfile -t custom_commits < <(
-            git rev-list --reverse --no-merges --cherry-pick --right-only \
-              "$patch_head...$custom_sha"
-          )
-          if [ "${#custom_commits[@]}" -eq 0 ]; then
-            # Une branche perso encore vide n'est pas une erreur — même
-            # tolérance que la nightly.
-            echo "custom_state=bare" >>"$GITHUB_OUTPUT"
-            echo "$CUSTOM_BRANCH n'a aucun commit propre — canal nu."
-            exit 0
-          fi
-
-          # UN seul signal : le PATCH-ID. `git cherry <source> <perso> <patch>`
-          # marque `-` un commit dont un équivalent par patch-id est déjà dans
-          # la source, `+` un commit absent. C'est ce qui rend la garde
-          # indifférente au chemin — rebase, cherry-pick, branche
-          # d'intégration : le sha change, le patch-id non. Une ascendance de
-          # sha (`merge-base`, `--contains`) refuserait au contraire toute
-          # source rebasée, c'est-à-dire le cas normal.
-          #
-          # Et rien d'autre. Reconnaître un commit au SUJET, ou à n'importe
-          # quel signal approchant, rouvrirait exactement le contournement
-          # silencieux qu'on ferme ici : deux commits peuvent porter le même
-          # sujet et n'avoir aucun contenu en commun. La garde refuse par
-          # défaut, et le refus est actionnable.
-          #
-          # Conséquence à connaître : un commit perso RÉADAPTÉ pour une base
-          # majeure (conflit résolu à la main, API amont renommée) a un
-          # patch-id différent, et la garde le déclare absent — correctement,
-          # parce qu'elle ne peut pas savoir que le portage est fidèle. Le
-          # réglage n'est pas de relâcher la garde : c'est de faire pointer
-          # `CUSTOM_BRANCH` sur la branche qui porte VRAIMENT tes
-          # personnalisations pour cette base. Une `CUSTOM_BRANCH` restée sur
-          # l'état d'avant le portage est la dérive à corriger, pas un faux
-          # positif de la garde.
-          selected=" ${custom_commits[*]} "
-          missing=()
-          while read -r mark commit; do
-            case "$selected" in
-              *" $commit "*) ;;
-              *) continue ;;
-            esac
-            if [ "$mark" = "+" ]; then
-              missing+=("$commit")
-            fi
-          done < <(git cherry "$BUILD_SHA" "$custom_sha" "$patch_head")
-
-          if [ "${#missing[@]}" -gt 0 ]; then
+          # --- 2. le plancher d'ascendance du fork ---------------------------
+          if git fetch --no-tags --quiet "$read_remote" "+refs/heads/$FORK_BASE_REF:refs/fork/base" 2>/dev/null; then
+            :
+          elif git fetch --no-tags --quiet "$read_remote" "+refs/tags/$FORK_BASE_REF:refs/fork/base" 2>/dev/null; then
+            :
+          else
             {
-              echo "### Source refusée — ${#missing[@]} personnalisation(s) absente(s)"
+              echo "### \`FORK_BASE_REF\` introuvable"
               echo
-              echo "\`source_ref\` = \`$SOURCE_REF\` (\`$BUILD_SHA\`) ne contient pas"
-              echo "tout \`$CUSTOM_BRANCH\` (\`${custom_sha:0:12}\`, ${#custom_commits[@]} commit(s) propre(s))."
-              echo "Publier ça livrerait un binaire sans ces changements — c'est"
-              echo "exactement la panne que cette garde existe pour empêcher."
-              echo
-              echo "Absents (aucun équivalent par patch-id dans la source) :"
-              echo '```'
-              for commit in "${missing[@]}"; do
-                git log -1 --format='%H %s' "$commit"
-              done
-              echo '```'
-              echo
-              echo "Trois sorties, selon ce qui est vrai :"
+              echo "\`$FORK_BASE_REF\` n'est ni une branche ni un tag de"
+              echo "\`$GITHUB_REPOSITORY\`. Cette ref est le plancher qui prouve qu'une"
+              echo "source est bien ce fork : sans elle, la garde ne garde rien, donc"
+              echo "le run s'arrête ici plutôt que de publier sans plancher."
               echo
               echo '```bash'
-              echo "# 1. la source devait contenir tes customs : build la branche qui les porte"
-              echo "gh workflow run fork-nightly.yml --repo $GITHUB_REPOSITORY --ref fork-pipeline \\"
-              echo "  -f source_ref=\$(git rev-parse $CUSTOM_BRANCH)"
-              echo
-              echo "# 2. tes customs ont été RÉADAPTÉES sur une base majeure (patch-id différent) :"
-              echo "#    fais pointer CUSTOM_BRANCH sur la branche qui les porte pour cette base,"
-              echo "#    puis relance — la garde compare alors la source à ce qu'elle contient."
-              echo "gh variable set CUSTOM_BRANCH --repo $GITHUB_REPOSITORY --body <branche-portée>"
-              echo
-              echo "# 3. ou laisser la nightly fabriquer la source (elle empile $CUSTOM_BRANCH) :"
-              echo "gh workflow run fork-nightly.yml --repo $GITHUB_REPOSITORY --ref fork-pipeline -f force=true"
+              echo "gh variable set FORK_BASE_REF --repo $GITHUB_REPOSITORY --body <branche-ou-tag-de-base>"
               echo '```'
-              echo
-              echo "Assumer un canal nu se règle explicitement, pas par omission :"
-              echo "\`gh variable delete CUSTOM_BRANCH --repo $GITHUB_REPOSITORY\`."
             } >>"$GITHUB_STEP_SUMMARY"
-            echo "::error::source refusée : ${#missing[@]}/${#custom_commits[@]} commit(s) de $CUSTOM_BRANCH absent(s) de $SOURCE_REF — aucun tag posé"
+            echo "::error::FORK_BASE_REF « $FORK_BASE_REF » introuvable sur $GITHUB_REPOSITORY"
+            exit 1
+          fi
+          fork_base_sha="$(git rev-parse 'refs/fork/base^{commit}')"
+
+          # --- 3. les builds publiés, la référence à ne pas perdre --------------
+          # Le pointeur de canal n'avance qu'en fast-forward : il ne peut pas
+          # mentir sur ce qui a été publié. Un `ls-remote` qui échoue autrement
+          # que « ref absent » (code 2) est une erreur : jamais un repli qui
+          # désarmerait la garde. Sans pointeur (premier run du dispositif),
+          # la référence est CHAQUE release fork publiée, lue au commit que son
+          # tag désigne — pas la plus récente par date, ni par nom : le
+          # build doit les contenir toutes.
+          previous_sha=""
+          previous_origin="none"
+          previous_all=""
+          rc=0
+          git ls-remote --exit-code --heads "$read_remote" "refs/heads/$CHANNEL_BRANCH" >/dev/null || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            git fetch --no-tags --quiet "$read_remote" "+refs/heads/$CHANNEL_BRANCH:refs/fork/prev"
+            previous_sha="$(git rev-parse 'refs/fork/prev^{commit}')"
+            previous_origin="branch:$CHANNEL_BRANCH"
+            previous_all="$previous_sha"
+          elif [ "$rc" -eq 2 ]; then
+            # Affectation, pas substitution de processus : un `gh` qui échoue
+            # arrête le run au lieu de rendre une liste vide.
+            release_list="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 --exclude-drafts \
+              --json tagName --jq '.[] | .tagName | select(startswith("fork-"))')"
+            mapfile -t release_tags <<<"$release_list"
+            [ -n "$release_list" ] || release_tags=()
+            for release_tag in "${release_tags[@]}"; do
+              git fetch --no-tags --quiet "$read_remote" "+refs/tags/$release_tag:refs/fork/prev-$release_tag"
+              sha="$(git rev-parse "refs/fork/prev-$release_tag^{commit}")"
+              previous_all="$previous_all${previous_all:+ }$sha"
+              # La plus haute par ascendance sert de résumé ; la garde, elle, lit la liste.
+              if [ -z "$previous_sha" ] || contains "$previous_sha" "$sha"; then
+                previous_sha="$sha"; previous_origin="tag:$release_tag"
+              fi
+            done
+          else
+            echo "::error::impossible de lire $CHANNEL_BRANCH sur $GITHUB_REPOSITORY (code $rc) — la garde d'ascendance publiée ne peut pas être évaluée"
+            exit 1
+          fi
+          if [ -n "$previous_sha" ]; then
+            echo "Build publié précédent : $previous_sha (via $previous_origin)"
+          else
+            echo "Aucun build fork publié : ce run amorce le canal."
+          fi
+
+          # --- 4. intégrer la release stable ---------------------------------
+          # MERGE, pas rebase. Le rebase réécrit les SHA, donc le résultat n'est
+          # jamais un descendant du build précédent : c'est précisément ce qui
+          # cassait la mise à jour. Le merge, lui, contient les deux parents —
+          # la lignée du fork ET celle de la release — par construction.
+          advance_source_branch=false
+          if [ "$MODE" = "manual" ]; then
+            build_sha="$(git rev-parse HEAD)"
+            echo "Chemin manuel : aucune intégration, la source est prise telle quelle ($build_sha)."
+          else
+            base_sha="$(git rev-parse HEAD)"
+            if contains "$upstream_sha" "$base_sha"; then
+              echo "$upstream_tag est déjà intégré dans la base ($base_sha) — rien à merger."
+              build_sha="$base_sha"
+            else
+              # Pas de `-X ours`, pas de `-X theirs`, pas de `-s ours`. Une
+              # stratégie qui choisit un côté résout le conflit en JETANT du
+              # code que personne n'a relu : soit le correctif amont, soit une
+              # personnalisation. Le conflit est un travail humain de 5–15 min,
+              # une fois par release ; le silence d'une résolution automatique
+              # coûterait un binaire amputé qu'aucun gate ne peut voir.
+              set +e
+              git merge --no-ff --no-edit \
+                -m "merge: upstream $upstream_tag into ${BASE_BRANCH}" refs/fork/stable
+              merge_status=$?
+              set -e
+              if [ $merge_status -ne 0 ]; then
+                unresolved="$(git diff --name-only --diff-filter=U || true)"
+                {
+                  echo "### Conflit d'intégration — résolution humaine requise"
+                  echo
+                  echo "\`$upstream_tag\` (\`${upstream_sha:0:12}\`) ne s'intègre pas tout seul dans"
+                  echo "\`$SOURCE_BRANCH\` (\`${base_sha:0:12}\`). **Rien n'a été publié** : pas de"
+                  echo "merge, pas de tag, pas de release, et aucun ref n'a bougé."
+                  echo
+                  echo "Fichiers en conflit :"
+                  echo '```'
+                  if [ -n "$unresolved" ]; then echo "$unresolved"; else echo "(aucun chemin listé — voir le log du run)"; fi
+                  echo '```'
+                  echo
+                  echo "Résous-le sur la branche d'intégration, en local :"
+                  echo
+                  echo '```bash'
+                  echo "git fetch origin $SOURCE_BRANCH"
+                  echo "git fetch $UPSTREAM_URL refs/tags/$upstream_tag:refs/tags/$upstream_tag"
+                  echo "git switch -c integrate/$upstream_tag origin/$SOURCE_BRANCH"
+                  echo "git merge $upstream_tag   # résous les fichiers ci-dessus, puis commit"
+                  echo "git push origin HEAD:$SOURCE_BRANCH   # fast-forward, jamais --force"
+                  echo '```'
+                  echo
+                  echo "La nuit suivante repart de ce merge : \`$upstream_tag\` y est déjà"
+                  echo "intégré, donc elle n'a plus rien à fusionner."
+                } >>"$GITHUB_STEP_SUMMARY"
+                echo "::error::conflit d'intégration $upstream_tag dans $SOURCE_BRANCH sur : $(echo "$unresolved" | tr '\n' ' ')"
+                git merge --abort || true
+                exit 1
+              fi
+              build_sha="$(git rev-parse HEAD)"
+              echo "Merge $upstream_tag dans $SOURCE_BRANCH : $build_sha"
+            fi
+            # Le résultat contient la tête de `SOURCE_BRANCH` : l'avancer est un
+            # fast-forward. Sur le repli `channel`, on ne crée pas une branche
+            # nommée d'après une variable périmée.
+            if [ "$BASE_KIND" = "source" ]; then
+              advance_source_branch=true
+            fi
+          fi
+
+          # --- 5. les gardes d'ascendance, avant tout tag ---------------------
+          # Elles s'appliquent aux DEUX chemins : un dispatch manuel n'achète
+          # aucune dispense. Chacune est une relation d'ascendance sur des
+          # commits — aucune date, aucun horodatage de tag, aucun nom de ref.
+          if ! contains "$fork_base_sha" "$build_sha"; then
+            {
+              echo "### Source refusée — ce n'est pas ce fork"
+              echo
+              echo "La source (\`${build_sha:0:12}\`) ne contient pas \`$FORK_BASE_REF\`"
+              echo "(\`${fork_base_sha:0:12}\`), le plancher d'ascendance du fork."
+              echo
+              echo "Ce que ça veut dire en pratique : soit la source appartient à une"
+              echo "**lignée abandonnée** (l'ancienne lignée patch, entièrement"
+              echo "superposée par le port actuel), soit c'est un build d'upstream"
+              echo "sans les personnalisations. Les deux publieraient un binaire qui"
+              echo "n'est pas le fork qu'on installe."
+              echo
+              echo '```bash'
+              echo "# builder le fork complet :"
+              echo "gh workflow run fork-nightly.yml --repo $GITHUB_REPOSITORY --ref fork-pipeline"
+              echo
+              echo "# ou, si le plancher a légitimement changé de nom :"
+              echo "gh variable set FORK_BASE_REF --repo $GITHUB_REPOSITORY --body <nouvelle-base>"
+              echo '```'
+            } >>"$GITHUB_STEP_SUMMARY"
+            echo "::error::source refusée : ${build_sha:0:12} ne contient pas FORK_BASE_REF $FORK_BASE_REF — aucun tag posé"
             exit 1
           fi
 
-          echo "custom_state=incorporated" >>"$GITHUB_OUTPUT"
-          echo "Composition OK : ${#custom_commits[@]} commit(s) de $CUSTOM_BRANCH présent(s) dans $BUILD_SHA."
-          {
-            echo "### Composition vérifiée"
-            echo
-            echo "- source : \`$SOURCE_REF\` (\`${BUILD_SHA:0:12}\`)"
-            echo "- \`$CUSTOM_BRANCH\` : \`${custom_sha:0:12}\`, ${#custom_commits[@]} commit(s) propre(s), tous présents par patch-id"
-          } >>"$GITHUB_STEP_SUMMARY"
+          if ! contains "$upstream_sha" "$build_sha"; then
+            {
+              echo "### Source refusée — la release stable n'est pas dedans"
+              echo
+              echo "La source (\`${build_sha:0:12}\`) ne contient pas \`$upstream_tag\`"
+              echo "(\`${upstream_sha:0:12}\`), la dernière release stable d'upstream."
+              echo
+              echo "Un canal qui publie une source antérieure à la stable courante"
+              echo "installe une régression d'upstream sous un tag plus récent."
+              echo
+              echo '```bash'
+              echo "# intégrer la stable dans la branche fork, puis relancer :"
+              echo "git fetch origin $SOURCE_BRANCH"
+              echo "git fetch $UPSTREAM_URL refs/tags/$upstream_tag:refs/tags/$upstream_tag"
+              echo "git switch -c integrate/$upstream_tag origin/$SOURCE_BRANCH"
+              echo "git merge $upstream_tag && git push origin HEAD:$SOURCE_BRANCH"
+              echo '```'
+            } >>"$GITHUB_STEP_SUMMARY"
+            echo "::error::source refusée : ${build_sha:0:12} ne contient pas $upstream_tag — aucun tag posé"
+            exit 1
+          fi
 
-      - name: Chemin manuel - poser le tag de build
-        id: manual_tag
-        if: steps.manual.outputs.active == 'true'
+          lost=""
+          for sha in $previous_all; do
+            contains "$sha" "$build_sha" || lost="$lost${lost:+ }${sha:0:12}"
+          done
+          if [ -n "$lost" ]; then
+            {
+              echo "### Source refusée — elle perdrait de l'ascendance publiée"
+              echo
+              echo "Build(s) publié(s) que la source (\`${build_sha:0:12}\`) ne contient pas :"
+              echo "\`$lost\` (référence via \`$previous_origin\`)."
+              echo
+              echo "L'installeur exige une preuve d'ascendance stricte : descendant, ou"
+              echo "égal. Publier ça livrerait un build qu'aucune machine déjà à jour ne"
+              echo "pourrait installer, et qui ferait disparaître du code déjà livré."
+              echo "**Aucun ref n'a bougé, aucun tag n'a été posé.**"
+              echo
+              echo "Deux lignées qui avancent en parallèle se réconcilient par un merge,"
+              echo "explicitement, à la main — jamais par un force-push de la CI :"
+              echo
+              echo '```bash'
+              echo "git fetch origin $SOURCE_BRANCH $CHANNEL_BRANCH"
+              echo "git switch -c reconcile/$CHANNEL_BRANCH origin/$SOURCE_BRANCH"
+              echo "git merge origin/$CHANNEL_BRANCH   # ou chaque commit ci-dessus si le canal n'existe pas"
+              echo "git push origin HEAD:$SOURCE_BRANCH"
+              echo '```'
+            } >>"$GITHUB_STEP_SUMMARY"
+            echo "::error::source refusée : ${build_sha:0:12} ne descend pas des builds publiés $lost — aucun tag posé"
+            exit 1
+          fi
+
+          # --- 6. fraîcheur : par SHA, pas par date --------------------------
+          # Rien à faire seulement si ce commit exact est déjà publié — le
+          # pointeur de canal ne suffit pas : il avance avant que la release
+          # existe, et une release qui a échoué doit être retentée. Un dispatch
+          # manuel est par définition une décision de builder.
+          should_build=true
+          if [ "$MODE" = "nightly" ] && [ "$FORCED" != "true" ] && [ -n "$previous_sha" ] \
+            && [ "$build_sha" = "$previous_sha" ] \
+            && gh release list --repo "$GITHUB_REPOSITORY" --limit 30 --exclude-drafts --json tagName \
+                 --jq '.[] | .tagName' | grep -q -- "-${build_sha:0:12}\$"; then
+            should_build=false
+          fi
+
+          version="$(node -p "require('./package.json').version")"
+          # La version part dans $GITHUB_OUTPUT et dans les notes de release :
+          # une forme bornée, ou rien.
+          if ! printf '%s' "$version" | grep -Eq '^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$'; then
+            echo "::error::package.json de $build_sha n'a pas de version lisible (« $version »)"
+            exit 1
+          fi
+          # On ne fait pas échouer là-dessus : le fork peut légitimement porter
+          # une version à lui. Mais un écart non dit ferait croire qu'une
+          # release stable est embarquée alors que le bump ne l'est pas.
+          if [ -n "$upstream_version" ] && [ "$version" != "$upstream_version" ]; then
+            echo "::warning::version de la source ($version) ≠ version de $upstream_tag ($upstream_version)"
+          fi
+
+          {
+            echo "should_build=$should_build"
+            echo "sha=$build_sha"
+            echo "version=$version"
+            echo "upstream_tag=$upstream_tag"
+            echo "upstream_sha=$upstream_sha"
+            echo "upstream_version=$upstream_version"
+            echo "previous_sha=$previous_sha"
+            echo "previous_origin=$previous_origin"
+            echo "advance_source_branch=$advance_source_branch"
+          } >>"$GITHUB_OUTPUT"
+
+          {
+            echo "### Source retenue"
+            echo
+            echo "- mode : \`$MODE\`${SOURCE_REF:+ (\`$SOURCE_REF\`)}"
+            echo "- base : \`$BASE_KIND\` — \`$SOURCE_BRANCH\` / \`$CHANNEL_BRANCH\`"
+            echo "- release stable épinglée : \`$upstream_tag\` (\`${upstream_sha:0:12}\`)"
+            echo "- plancher fork : \`$FORK_BASE_REF\` (\`${fork_base_sha:0:12}\`) — contenu"
+            echo "- build publié précédent : \`${previous_sha:-aucun}\`${previous_sha:+ (via \`$previous_origin\`) — contenu}"
+            echo "- source buildée : \`$build_sha\` (version \`$version\`)"
+            echo "- build : \`$should_build\`"
+          } >>"$GITHUB_STEP_SUMMARY"
+          if [ "$should_build" != "true" ]; then
+            echo "Identique au build publié — rien à faire."
+          fi
+
+      # -----------------------------------------------------------------------
+      # Le tag immuable. Tout l'aval consomme le TAG, jamais une branche : si
+      # une branche bouge pendant le run, le build ne bouge pas. Le tag est
+      # aussi ce qui garde vivant le commit de merge tant qu'aucun ref ne le
+      # pointe (les refs avancent dans `release`, une fois vert).
+      # -----------------------------------------------------------------------
+      - name: Poser le tag de build
+        id: tag
+        if: steps.prepare.outputs.should_build == 'true'
+        working-directory: src
         env:
-          # Le tag pointe sur un commit DÉJÀ dans ce dépôt, donc aucun objet
-          # n'est poussé — mais ce job est `contents: read` et ne peut pas
-          # créer de ref avec GITHUB_TOKEN. On réutilise le PAT de la nightly,
-          # passé par l'environnement : il n'apparaît dans aucune commande.
-          GH_TOKEN: ${{ secrets.FORK_PUSH_TOKEN }}
-          SHA: ${{ steps.manual.outputs.sha }}
-          VERSION: ${{ steps.manual.outputs.version }}
-          SOURCE_REF: ${{ steps.manual.outputs.source_ref }}
-          CUSTOM_STATE: ${{ steps.guard.outputs.custom_state }}
+          FORK_PUSH_TOKEN: ${{ secrets.FORK_PUSH_TOKEN }}
+          SHA: ${{ steps.prepare.outputs.sha }}
+          VERSION: ${{ steps.prepare.outputs.version }}
         run: |
           set -euo pipefail
           sha="$SHA"
-          # Même forme de tag que la nightly : update.sh et versions.yml n'ont
-          # qu'un `kind` à connaître, et surtout pas deux conventions.
+          # Même forme de tag que jusqu'ici : `update.sh` et `versions.yml`
+          # n'ont qu'un `kind` à connaître, et surtout pas deux conventions.
+          # L'horodatage du NOM est décoratif — aucune garde ne le lit.
           tag="fork-$(date -u +%Y%m%d-%H%M)-${sha:0:12}"
-          if existing="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq .object.sha 2>/dev/null)"; then
+          # Construit depuis $GITHUB_REPOSITORY : ce job ne peut écrire que sur
+          # CE dépôt. Le remote `upstream` ne sert qu'au fetch.
+          remote="https://x-access-token:${FORK_PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          existing="$(git ls-remote --tags "$remote" "refs/tags/$tag" | awk '{print $1}')"
+          if [ -n "$existing" ]; then
             # Idempotent si c'est le MÊME sha (relance d'un run) ; sinon on
             # refuse d'écraser un tag que des artefacts référencent peut-être.
             if [ "$existing" != "$sha" ]; then
@@ -369,320 +582,26 @@ jobs:
             fi
             echo "Tag $tag déjà posé sur ce sha — réutilisé."
           else
-            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
-              -f "ref=refs/tags/$tag" -f "sha=$sha" --silent
+            # Un push de tag, jamais de branche, jamais de --force.
+            git push "$remote" "$sha:refs/tags/$tag"
             echo "Tag $tag créé sur $sha."
           fi
           echo "tag=$tag" >>"$GITHUB_OUTPUT"
           {
-            echo "### Chemin manuel — source figée"
-            echo
-            echo "- ref demandé : \`$SOURCE_REF\`"
-            echo "- sha figé : \`$sha\`"
-            echo "- tag immuable : \`$tag\`"
-            echo "- version : \`$VERSION\`"
-            echo "- personnalisations : \`$CUSTOM_STATE\`"
-            echo
-            echo "Aucun rebase, aucun push de \`$PATCH_BRANCH\`."
+            echo "- tag immuable : \`$tag\` (version \`$VERSION\`)"
           } >>"$GITHUB_STEP_SUMMARY"
 
-      - name: Checkout la branche de pilotage (cache rerere)
-        uses: actions/checkout@v6
-        if: steps.manual.outputs.active != 'true'
-        with:
-          path: pipeline
-          # Ce checkout ne pousse rien ; ne pas laisser traîner son credential.
-          persist-credentials: false
-
-      - name: Checkout la branche patch
-        uses: actions/checkout@v6
-        if: steps.manual.outputs.active != 'true'
-        with:
-          path: src
-          ref: ${{ env.PATCH_BRANCH }}
-          # Le rebase a besoin de l'historique complet pour trouver la
-          # merge-base avec upstream : une profondeur tronquée la rate.
-          fetch-depth: 0
-          # Sinon checkout pose un http.extraheader avec GITHUB_TOKEN, qui prime
-          # sur les identifiants de l'URL de push : 403 github-actions[bot].
-          persist-credentials: false
-
-      # Décider AVANT de builder : upstream est souvent immobile la nuit, et
-      # rebuilder un couple (upstream, patch) déjà publié coûte deux runners et
-      # ajoute un tag qui ne dit rien de neuf.
-      - name: Y a-t-il quelque chose de neuf
-        id: plan
-        if: steps.manual.outputs.active != 'true'
-        working-directory: src
-        env:
-          GH_TOKEN: ${{ github.token }}
-          FORCED: ${{ github.event_name == 'workflow_dispatch' && inputs.force }}
-        run: |
-          set -euo pipefail
-          git remote add upstream "$UPSTREAM_URL"
-          git fetch --no-tags --quiet upstream main
-          upstream_sha="$(git rev-parse upstream/main)"
-          patch_sha="$(git rev-parse HEAD)"
-          # L'identité NE PEUT PAS être le sha de la branche patch : ce job la
-          # rebase et la force-push, donc son sha bouge chaque nuit même quand
-          # rien n'a changé, et la détection de fraîcheur rebuilderait tous les
-          # jours pour rien. `patch-id --stable` digère le CONTENU du patch : il
-          # ne bouge que si le patch ou son contexte bouge vraiment.
-          base="$(git merge-base upstream/main HEAD)"
-          patch_id="$(git diff "$base"..HEAD | git patch-id --stable | cut -d' ' -f1)"
-          identity="${upstream_sha:0:12}+${patch_id:0:12}"
-
-          # La branche perso entre dans l'identité. Sans ça, un commit de
-          # personnalisation ne déclencherait AUCUN build : le couple
-          # (upstream, patch) n'aurait pas bougé et la fraîcheur conclurait
-          # « rien de neuf » — le canal ignorerait silencieusement ton travail.
-          #
-          # `--cherry-pick --right-only` sélectionne les commits propres à la
-          # branche perso PAR PATCH-ID, pas par ancêtre commun. C'est ce qui
-          # rend le canal indifférent à la base sur laquelle tu travailles :
-          # `merge-base` remonterait trop loin dès que ta branche est basée sur
-          # un patch d'avant-hier, et les commits du patch seraient rejoués en
-          # double. Ici ils sont reconnus comme déjà présents et écartés.
-          #
-          # `--no-merges` : `cherry-pick` ne sait pas rejouer un commit de
-          # merge. Garde ta branche perso linéaire (rebase, pas merge).
-          custom_sha=""
-          if [ -n "${CUSTOM_BRANCH:-}" ]; then
-            if [ "$CUSTOM_BRANCH" = "$PATCH_BRANCH" ]; then
-              echo "::error::CUSTOM_BRANCH == PATCH_BRANCH : tes commits partiraient dans la PR upstream"
-              exit 1
-            fi
-            git fetch --no-tags --quiet origin "$CUSTOM_BRANCH"
-            custom_sha="$(git rev-parse FETCH_HEAD)"
-            custom_id="$(
-              git rev-list --reverse --no-merges --cherry-pick --right-only \
-                "$patch_sha...$custom_sha" \
-                | while read -r c; do
-                    git show "$c" | git patch-id --stable | cut -d' ' -f1
-                  done \
-                | sha256sum | cut -c1-12
-            )"
-            n="$(git rev-list --count --no-merges --cherry-pick --right-only "$patch_sha...$custom_sha")"
-            if [ "$n" -eq 0 ]; then
-              # Une branche perso encore vide n'est pas une erreur : c'est
-              # l'état normal entre « je crée la branche » et « je commite ».
-              # La faire échouer imposerait un ordre à respecter, donc
-              # exactement la prise de tête que ce canal doit éviter.
-              echo "$CUSTOM_BRANCH n'a encore aucun commit propre — canal nu ce soir."
-              custom_sha=""
-            else
-              identity="$identity+$custom_id"
-              echo "Branche perso : $CUSTOM_BRANCH @ ${custom_sha:0:12} — $n commit(s) propre(s)"
-            fi
-          else
-            echo "Canal nu : aucune CUSTOM_BRANCH réglée."
-          fi
-          {
-            echo "upstream_sha=$upstream_sha"
-            echo "patch_sha=$patch_sha"
-            echo "custom_sha=$custom_sha"
-            echo "identity=$identity"
-            # La nuit, la source est FABRIQUÉE : le job de rebase empile
-            # littéralement ces commits, donc `custom_sha` non vide vaut preuve
-            # d'incorporation. Sur le chemin manuel, la source est donnée et
-            # c'est la garde de composition qui répond à la même question.
-            if [ -n "$custom_sha" ]; then
-              echo "custom_state=incorporated"
-            else
-              echo "custom_state=bare"
-            fi
-          } >>"$GITHUB_OUTPUT"
-
-          if [ "$FORCED" = "true" ]; then
-            echo "should_build=true" >>"$GITHUB_OUTPUT"
-            echo "Dispatch forcé : on build $identity."
-            exit 0
-          fi
-
-          # L'identité du couple est inscrite dans le corps de la release
-          # précédente. Les drafts sont exclus : un draft n'a jamais été
-          # consommé, donc le traiter comme « déjà publié » sauterait un build
-          # qui n'a en réalité jamais abouti.
-          last="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 20 --exclude-drafts \
-            --json tagName --jq '[.[] | select(.tagName | startswith("fork-"))][0].tagName // empty')"
-          if [ -z "$last" ]; then
-            echo "should_build=true" >>"$GITHUB_OUTPUT"
-            echo "Aucune release fork antérieure : on build $identity."
-            exit 0
-          fi
-          previous="$(gh release view "$last" --repo "$GITHUB_REPOSITORY" --json body \
-            --jq '.body | capture("source-identity: `(?<id>[0-9a-f+]+)`") | .id' 2>/dev/null || true)"
-          if [ "$previous" = "$identity" ]; then
-            echo "should_build=false" >>"$GITHUB_OUTPUT"
-            echo "$last porte déjà $identity — rien n'a bougé, on s'arrête."
-          else
-            echo "should_build=true" >>"$GITHUB_OUTPUT"
-            echo "$last portait ${previous:-<illisible>}, maintenant $identity — on build."
-          fi
-
-      - name: Rejouer le patch, puis les personnalisations
-        id: rebase
-        if: steps.manual.outputs.active != 'true' && steps.plan.outputs.should_build == 'true'
-        working-directory: src
-        env:
-          UPSTREAM_SHA: ${{ steps.plan.outputs.upstream_sha }}
-          CUSTOM_SHA: ${{ steps.plan.outputs.custom_sha }}
-          FORK_PUSH_TOKEN: ${{ secrets.FORK_PUSH_TOKEN }}
-        run: |
-          set -euo pipefail
-          git config user.name 'orca fork pipeline'
-          git config user.email 'fork-pipeline@users.noreply.github.com'
-
-          # rerere rejoue une résolution qu'un HUMAIN a déjà faite sur les mêmes
-          # hunks — il n'invente rien. Sans le cache, tout conflit arrête le run,
-          # ce qui est le comportement voulu par défaut.
-          git config rerere.enabled true
-          git config rerere.autoUpdate true
-          mkdir -p .git/rr-cache
-          if [ -d ../pipeline/rerere-cache ] && [ -n "$(ls -A ../pipeline/rerere-cache)" ]; then
-            cp -R ../pipeline/rerere-cache/. .git/rr-cache/
-            echo "rerere: $(find .git/rr-cache -name postimage\* | wc -l) résolution(s) chargée(s)."
-          else
-            echo "rerere: aucun cache publié."
-          fi
-
-          patch_head="$(git rev-parse HEAD)"
-
-          # Rejoue une plage sur HEAD. $1 nomme l'étage, pour que le message de
-          # conflit dise À QUI est le travail : un conflit dans le patch et un
-          # conflit dans tes customs ne se résolvent pas au même endroit.
-          replay() {
-            stage="$1"
-            shift
-            set +e
-            git cherry-pick -x "$@"
-            status=$?
-            while [ $status -ne 0 ]; do
-              unresolved="$(git diff --name-only --diff-filter=U)"
-              if [ -n "$unresolved" ]; then
-                set -e
-                {
-                  echo "### Conflit de rebase — étage \`$stage\` — résolution humaine requise"
-                  echo
-                  echo "Cet étage ne se rejoue plus tel quel sur \`upstream/main\` (\`$UPSTREAM_SHA\`)."
-                  echo
-                  echo "Fichiers en conflit :"
-                  echo '```'
-                  echo "$unresolved"
-                  echo '```'
-                  echo "Résous-le une fois en local et publie la résolution dans \`rerere-cache/\` :"
-                  echo "les runs suivants la rejoueront seuls (mode opératoire dans le README de \`fork-pipeline\`)."
-                } >>"$GITHUB_STEP_SUMMARY"
-                echo "::error::conflit de rebase ($stage) sur : $(echo "$unresolved" | tr '\n' ' ')"
-                exit 1
-              fi
-              # Rien en conflit mais rien à committer non plus : la résolution a
-              # rendu ce commit vide (upstream a déjà pris ce morceau). On saute.
-              if git diff --cached --quiet; then
-                git cherry-pick --skip
-              else
-                git -c core.editor=true cherry-pick --continue
-              fi
-              status=$?
-            done
-            set -e
-          }
-
-          # --- étage 1 : le patch, et RIEN de plus ---------------------------
-          # Pas de merge, pas de squash, pas d'ajout — la surface du patch est
-          # gelée et cette plage est ce qui le garantit. Ce SHA, et lui seul,
-          # part sur `PATCH_BRANCH`.
-          base="$(git merge-base "$UPSTREAM_SHA" "$patch_head")"
-          mapfile -t patch_commits < <(git rev-list --reverse "$base..$patch_head")
-          echo "Base commune : $base"
-          echo "Commits du patch : ${#patch_commits[@]}"
-          git log --oneline --no-decorate "$base..$patch_head"
-          if [ "${#patch_commits[@]}" -eq 0 ]; then
-            echo "::error::la branche patch n'ajoute aucun commit à sa base — rien à rejouer"
-            exit 1
-          fi
-          git checkout -B "$CHANNEL_BRANCH" "$UPSTREAM_SHA"
-          replay patch "${patch_commits[@]}"
-          patch_sha="$(git rev-parse HEAD)"
-
-          # Garde : la branche patch ne doit JAMAIS porter autre chose que le
-          # patch. Le compte est exact — un commit qui fuirait ferait dépasser.
-          # Il peut être inférieur : un commit rendu vide par upstream est sauté.
-          got="$(git rev-list --count "$UPSTREAM_SHA..$patch_sha")"
-          if [ "$got" -gt "${#patch_commits[@]}" ]; then
-            echo "::error::$got commits sur la branche PR pour ${#patch_commits[@]} attendus — fuite, on ne pousse rien"
-            exit 1
-          fi
-
-          # --- étage 2 : tes personnalisations, empilées ---------------------
-          # Sélection par PATCH-ID (`--cherry-pick --right-only`), pas par
-          # ancêtre commun : ta branche peut être basée sur n'importe quel état
-          # du patch, même vieux de plusieurs jours. Les commits du patch qu'elle
-          # porte déjà sont reconnus et écartés au lieu d'être rejoués en double.
-          #
-          # Ta branche n'est JAMAIS réécrite par ce job. C'est la tienne : si le
-          # pipeline la force-pushait, ta copie locale divergerait chaque nuit et
-          # tu devrais réconcilier avant chaque commit. Le résultat du rebase ne
-          # vit que dans le tag immuable de la release.
-          build_sha="$patch_sha"
-          if [ -n "${CUSTOM_SHA:-}" ]; then
-            mapfile -t custom_commits < <(
-              git rev-list --reverse --no-merges --cherry-pick --right-only \
-                "$patch_head...$CUSTOM_SHA"
-            )
-            echo "Commits perso : ${#custom_commits[@]}"
-            git log --oneline --no-decorate --no-walk "${custom_commits[@]}"
-            replay perso "${custom_commits[@]}"
-            build_sha="$(git rev-parse HEAD)"
-          fi
-
-          sha="$build_sha"
-          version="$(node -p "require('./package.json').version")"
-          tag="fork-$(date -u +%Y%m%d-%H%M)-${sha:0:12}"
-          {
-            echo "sha=$sha"
-            echo "tag=$tag"
-            echo "version=$version"
-          } >>"$GITHUB_OUTPUT"
-          echo "Buildé depuis $sha (version $version), tag prévu $tag."
-
-          # GITHUB_TOKEN n'a pas le scope `workflow`, et l'arbre rejoué contient
-          # les ~30 workflows d'upstream : ni la branche ni le tag ne passent
-          # sans PAT. On échoue fermé.
-          if [ -z "${FORK_PUSH_TOKEN:-}" ]; then
-            {
-              echo "### Secret manquant — impossible de pousser le SHA rejoué"
-              echo
-              echo '```bash'
-              echo "gh secret set FORK_PUSH_TOKEN --repo $GITHUB_REPOSITORY"
-              echo '```'
-              echo
-              echo "PAT classic, scopes \`repo\` + \`workflow\`. GITHUB_TOKEN ne suffit pas."
-            } >>"$GITHUB_STEP_SUMMARY"
-            echo "::error::FORK_PUSH_TOKEN absent — gh secret set FORK_PUSH_TOKEN --repo $GITHUB_REPOSITORY"
-            exit 1
-          fi
-          # Construit depuis $GITHUB_REPOSITORY : ce job ne peut pousser que sur
-          # CE dépôt. Le remote `upstream` ajouté plus haut ne sert qu'au fetch.
-          remote="https://x-access-token:${FORK_PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-
-          git push --force "$remote" "$patch_sha:refs/heads/$PATCH_BRANCH"
-          # Le même SHA, immuable, pour que la release soit taggée sur l'arbre
-          # exact qui a été testé et buildé.
-          git push "$remote" "$sha:refs/tags/$tag"
-
   # ---------------------------------------------------------------------------
-  # 2. Les deux répertoires que le patch touche, le typecheck complet, et le
-  #    gate renderer : l'app construite doit booter sans qu'un error boundary
-  #    tire. Les suites unitaires mockent le store ; un sélecteur qui alloue
+  # 2. Les tests ciblés, le typecheck complet, et les deux gates qui gardent ce
+  #    qu'on livre : l'app construite doit booter sans qu'un error boundary
+  #    tire, et les compteurs de quota perso doivent être dans la source et
+  #    passer. Les suites unitaires mockent le store ; un sélecteur qui alloue
   #    son snapshot (React #185, build 6feef259b9f5 : barre d'état vide, 4
-  #    crashs/s) ne se voit qu'en app réelle. Le spec appartient au canal,
-  #    pas à la branche perso : il garde ce qu'on livre, quelles que soient
-  #    les branches.
+  #    crashs/s) ne se voit qu'en app réelle.
   # ---------------------------------------------------------------------------
   test:
-    needs: rebase
-    if: needs.rebase.outputs.should_build == 'true'
+    needs: source
+    if: needs.source.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -690,7 +609,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.rebase.outputs.tag }}
+          ref: ${{ needs.source.outputs.tag }}
           persist-credentials: false
       - uses: pnpm/action-setup@v6
         with:
@@ -709,16 +628,17 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Typecheck
         run: pnpm run typecheck
-      # Ciblé, pas la suite entière : le patch ne touche que ces deux arbres
-      # (12 fichiers), et une suite complète de ~2000 tests transformerait une
-      # boucle nocturne en source de faux rouges venus d'ailleurs.
+      # Ciblé, pas la suite entière : une suite complète de ~2000 tests
+      # transformerait une boucle nocturne en source de faux rouges venus
+      # d'ailleurs. Si tu customises ailleurs, élargis cette liste — sinon tu
+      # build vert sur du code que rien n'exerce.
       - name: Tests orchestration + rpc
         run: |
           node config/scripts/ensure-native-runtime.mjs --runtime=node
           pnpm exec vitest run --config config/vitest.config.ts \
             src/main/runtime/orchestration src/main/runtime/rpc
 
-      - name: Checkout la branche de pilotage (gate renderer)
+      - name: Checkout la branche de pilotage (gates)
         uses: actions/checkout@v6
         with:
           path: pipeline
@@ -734,15 +654,14 @@ jobs:
             pnpm exec playwright test tests/e2e/renderer-boot-crash-free.spec.ts \
               --config tests/playwright.config.ts --project electron-headless --workers=1
 
-      # Le gate ci-dessus ne prouve que « ça boote ». C'est précisément ce qui
-      # a laissé publier un binaire vert et amputé : sans les compteurs de
-      # quota, l'app boote parfaitement. Ce gate-ci exécute les specs que la
-      # source doit porter pour que les compteurs perso comptent comme livrés.
-      # Ils appartiennent à la SOURCE, pas au canal : un spec de canal qui
-      # réimplémenterait l'attente dériverait de l'app. `custom_state` décide
-      # s'il s'applique — un canal nu assumé n'a aucun compteur perso à porter.
+      # Le gate ci-dessus ne prouve que « ça boote ». C'est précisément ce qui a
+      # laissé publier un binaire vert et amputé : sans les compteurs de quota,
+      # l'app boote parfaitement. Ce gate-ci exécute les specs que la source
+      # doit porter. Il n'a PLUS de condition : la source de ce canal est le
+      # fork complet, donc elle porte toujours les personnalisations. Un `if:`
+      # ici rouvrirait le trou — c'est un état calculé qui décidait s'il faut
+      # vérifier, et c'est cet état-là qui s'était trompé.
       - name: Gate perso - les compteurs de quota sont dans la source
-        if: needs.rebase.outputs.custom_state == 'incorporated'
         run: |
           set -euo pipefail
           specs=()
@@ -766,7 +685,7 @@ jobs:
             {
               echo "### Source refusée — le spec des compteurs perso n'est pas dedans"
               echo
-              echo "\`custom_state\` = \`incorporated\`, donc la source est censée porter"
+              echo "La source de ce canal est le fork complet : elle est censée porter"
               echo "les personnalisations. Ces specs sont absents de l'arbre buildé :"
               echo '```'
               for spec in "${absent[@]}"; do
@@ -795,9 +714,14 @@ jobs:
   # 3a. macOS arm64, NON signé. La signature est refaite sur le Mac de Flo par
   #     update.sh, avec un certificat local dont la clé privée ne bouge pas :
   #     c'est lui qui porte les grants TCC, aucune CI ne peut le remplacer.
+  #
+  # Pas de `pnpm install:release` (`--cpu=current,x64,arm64`) : ce job packe
+  # arm64 sur un runner arm64, donc aucun slice croisé n'est nécessaire. Le
+  # contrat est là si un jour ce canal package les deux arches depuis un seul
+  # runner — c'est à ce moment-là qu'il faudra l'utiliser, pas avant.
   # ---------------------------------------------------------------------------
   build-mac:
-    needs: [rebase, test]
+    needs: [source, test]
     runs-on: macos-15
     timeout-minutes: 90
     env:
@@ -808,11 +732,11 @@ jobs:
       # branche du WORKFLOW. Un artefact prétendait donc être buildé depuis un
       # commit de README. On inscrit le sha de la source réellement buildée,
       # celui que le tag porte.
-      ORCA_BUILD_COMMIT: ${{ needs.rebase.outputs.sha }}
+      ORCA_BUILD_COMMIT: ${{ needs.source.outputs.sha }}
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.rebase.outputs.tag }}
+          ref: ${{ needs.source.outputs.tag }}
           persist-credentials: false
       - uses: pnpm/action-setup@v6
         with:
@@ -855,7 +779,7 @@ jobs:
       - name: Config electron-builder du canal fork
         run: |
           cat >config/electron-builder.fork.config.cjs <<'EOF'
-          // Généré par fork-nightly.yml, jamais commité sur la branche patch.
+          // Généré par fork-nightly.yml, jamais commité sur la branche source.
           // Voir le README de `fork-pipeline`.
           const base = require('./electron-builder.config.cjs')
           module.exports = {
@@ -886,16 +810,22 @@ jobs:
           set -euo pipefail
           zip="dist/orca-macos-arm64.zip"
           test -f "$zip" || { echo "::error::$zip absent"; ls -la dist; exit 1; }
-          if unzip -l "$zip" | grep -q 'app-update\.yml'; then
+          # Liste en variable : `… | grep -q` sous pipefail rend le SIGPIPE du
+          # producteur sur une correspondance, donc « présent » passait vert.
+          entries="$(unzip -Z1 "$zip")"
+          case "$entries" in *app-update.yml*)
             echo "::error::app-update.yml présent dans $zip — le build s'auto-updaterait vers l'officiel"
-            exit 1
-          fi
+            exit 1 ;;
+          esac
           echo "OK: pas d'app-update.yml. $(du -h "$zip")"
       - name: L'artefact dit de quelle source il vient
         env:
-          EXPECTED_SHA: ${{ needs.rebase.outputs.sha }}
+          EXPECTED_SHA: ${{ needs.source.outputs.sha }}
         run: |
           set -euo pipefail
+          # L'inscription dans l'artefact et l'attendu viennent du même output
+          # de job : on prouve aussi que l'arbre buildé EST ce commit.
+          [ "$(git rev-parse HEAD)" = "$EXPECTED_SHA" ] || { echo "::error::le checkout n'est pas $EXPECTED_SHA"; exit 1; }
           zip="dist/orca-macos-arm64.zip"
           # Le chemin exact dépend de `productName` ; on cherche le manifeste
           # où qu'il soit dans le bundle plutôt que de figer `Orca.app/`. `awk`
@@ -910,7 +840,7 @@ jobs:
           commit="$(unzip -p "$zip" "$entry" | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>console.log(JSON.parse(s).commit??""))')"
           if [ "$commit" != "$EXPECTED_SHA" ]; then
             {
-              echo "### Provenance de l'artefact incorrecte"
+              echo "### Provenance de l'artefact macOS incorrecte"
               echo
               echo "- attendu (source buildée, taggée) : \`$EXPECTED_SHA\`"
               echo "- inscrit dans \`$entry\` : \`$commit\`"
@@ -918,7 +848,7 @@ jobs:
               echo "\`ORCA_BUILD_COMMIT\` n'a pas atteint \`afterPack\` : sans lui la"
               echo "config retombe sur \`GITHUB_SHA\`, le sha de \`fork-pipeline\`."
             } >>"$GITHUB_STEP_SUMMARY"
-            echo "::error::provenance : l'artefact annonce « $commit » au lieu de $EXPECTED_SHA"
+            echo "::error::provenance mac : l'artefact annonce « $commit » au lieu de $EXPECTED_SHA"
             exit 1
           fi
           echo "OK: l'artefact s'annonce buildé depuis $commit."
@@ -938,19 +868,28 @@ jobs:
   # `afterPack` du packager — `verifyLinuxGlibcFloor`, dans
   # config/electron-builder.config.cjs — que la config dérivée hérite via
   # `...base` : un natif compilé contre un symbole plus récent fait échouer le
-  # packaging, sur n'importe quel runner. Le conteneur 20.04 d'upstream sert à
-  # un job de TESTS (`skill-sharing-linux-floor-release-gate`), pas au build.
+  # packaging, sur n'importe quel runner.
+  #
+  # PROVENANCE : `afterPack` d'upstream n'écrit `orca-local-build.json` que
+  # pour `darwin` (mesuré : `if (context.electronPlatformName === 'darwin')`).
+  # Le `.deb` ne disait donc RIEN de sa source — seul le zip mac était vérifié,
+  # et un paquet Linux buildé depuis n'importe quoi passait le contrôle en ne
+  # portant aucune affirmation. La config dérivée du canal enveloppe donc
+  # `afterPack` pour stamper `resources/orca-fork-build.json`, et une étape le
+  # relit dans le paquet. Le stamp vit dans la config générée, jamais dans la
+  # source : le comportement de l'app n'est pas modifié.
   # ---------------------------------------------------------------------------
   build-linux:
-    needs: [rebase, test]
+    needs: [source, test]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
       NODE_OPTIONS: --max-old-space-size=4096
+      ORCA_BUILD_COMMIT: ${{ needs.source.outputs.sha }}
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.rebase.outputs.tag }}
+          ref: ${{ needs.source.outputs.tag }}
           persist-credentials: false
       - uses: pnpm/action-setup@v6
         with:
@@ -988,13 +927,39 @@ jobs:
         run: |
           cat >config/electron-builder.fork.config.cjs <<'EOF'
           // Généré par fork-nightly.yml, jamais commité. Voir README de fork-pipeline.
+          const { writeFileSync } = require('node:fs')
+          const { join } = require('node:path')
           const base = require('./electron-builder.config.cjs')
           module.exports = {
             ...base,
             // publish: null => aucun app-update.yml dans le paquet.
-            publish: null
+            publish: null,
+            // `afterPack` d'upstream ne stampe la provenance que sur darwin.
+            // On garde le sien INTACT (glibc floor, prune, vérifs) et on
+            // ajoute le seul fichier qui manquait, pour que le .deb dise de
+            // quelle source il vient et qu'une étape puisse le contredire.
+            afterPack: async (context) => {
+              await base.afterPack(context)
+              if (context.electronPlatformName !== 'linux') return
+              const archByEnum = { 1: 'x64', 3: 'arm64' }
+              writeFileSync(
+                join(context.appOutDir, 'resources', 'orca-fork-build.json'),
+                `${JSON.stringify(
+                  {
+                    formatVersion: 1,
+                    commit: process.env.ORCA_BUILD_COMMIT || '',
+                    version: context.packager.appInfo.version,
+                    architecture: archByEnum[context.arch] || String(context.arch)
+                  },
+                  null,
+                  2
+                )}\n`,
+                'utf8'
+              )
+            }
           }
           EOF
+          cat config/electron-builder.fork.config.cjs
       - name: Package (.deb amd64)
         run: |
           node config/scripts/ensure-native-runtime.mjs --runtime=electron
@@ -1003,11 +968,46 @@ jobs:
         run: |
           set -euo pipefail
           deb="$(ls dist/*.deb)"
-          if dpkg-deb -c "$deb" | grep -q 'app-update\.yml'; then
+          # Liste en variable : `… | grep -q` sous pipefail rend le SIGPIPE du
+          # producteur sur une correspondance, donc « présent » passait vert.
+          entries="$(dpkg-deb -c "$deb")"
+          case "$entries" in *app-update.yml*)
             echo "::error::app-update.yml présent dans $deb"
+            exit 1 ;;
+          esac
+          echo "OK: pas d'app-update.yml. $(du -h "$deb")"
+      - name: L'artefact dit de quelle source il vient
+        env:
+          EXPECTED_SHA: ${{ needs.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # L'inscription dans l'artefact et l'attendu viennent du même output
+          # de job : on prouve aussi que l'arbre buildé EST ce commit.
+          [ "$(git rev-parse HEAD)" = "$EXPECTED_SHA" ] || { echo "::error::le checkout n'est pas $EXPECTED_SHA"; exit 1; }
+          deb="$(ls dist/*.deb)"
+          dpkg-deb --fsys-tarfile "$deb" >"$RUNNER_TEMP/fsys.tar"
+          # `awk` et non `grep | head` : sous `set -euo pipefail`, un manifeste
+          # absent sortirait sur le code de grep AVANT le diagnostic.
+          entry="$(tar -tf "$RUNNER_TEMP/fsys.tar" | awk '/resources\/orca-fork-build\.json$/ && !found { print; found=1 }')"
+          if [ -z "$entry" ]; then
+            echo "::error::orca-fork-build.json absent de $deb — le paquet ne dit pas de quelle source il vient"
             exit 1
           fi
-          echo "OK: pas d'app-update.yml. $(du -h "$deb")"
+          commit="$(tar -xOf "$RUNNER_TEMP/fsys.tar" "$entry" | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>console.log(JSON.parse(s).commit??""))')"
+          if [ "$commit" != "$EXPECTED_SHA" ]; then
+            {
+              echo "### Provenance de l'artefact Linux incorrecte"
+              echo
+              echo "- attendu (source buildée, taggée) : \`$EXPECTED_SHA\`"
+              echo "- inscrit dans \`$entry\` : \`$commit\`"
+              echo
+              echo "\`ORCA_BUILD_COMMIT\` n'a pas atteint l'\`afterPack\` de la config"
+              echo "dérivée du canal."
+            } >>"$GITHUB_STEP_SUMMARY"
+            echo "::error::provenance linux : le paquet annonce « $commit » au lieu de $EXPECTED_SHA"
+            exit 1
+          fi
+          echo "OK: le paquet s'annonce buildé depuis $commit."
       - uses: actions/upload-artifact@v7
         with:
           name: linux-amd64
@@ -1016,11 +1016,23 @@ jobs:
           retention-days: 7
 
   # ---------------------------------------------------------------------------
-  # 4. Une release taggée, avec un sha256 par artefact. update.sh et
-  #    sync-toolchain.ts vérifient ces sommes avant d'installer quoi que ce soit.
+  # 4. Publier : d'abord faire avancer les refs publiés en FAST-FORWARD, puis
+  #    la release taggée avec un sha256 par artefact.
+  #
+  # L'ORDRE COMPTE. Les refs d'abord : si une lignée concurrente a avancé
+  # pendant ces 90 minutes, l'avance est refusée par le serveur (force=false)
+  # et ce job échoue AVANT de créer la release — « une avance conflictuelle ne
+  # publie rien ». L'inverse publierait une release dont le canal ne pourrait
+  # plus prouver l'ascendance.
+  # ---------------------------------------------------------------------------
+  # 4. Publier, dans cet ordre : la release en BROUILLON avec ses artefacts
+  #    (invisible à l'installeur, qui exclut les brouillons), puis l'avance des
+  #    refs en FAST-FORWARD seul, puis la publication. Une avance refusée ne
+  #    publie rien, et un ref avancé sans release visible est retenté la nuit
+  #    suivante (la fraîcheur exige une release publiée, pas le pointeur).
   # ---------------------------------------------------------------------------
   release:
-    needs: [rebase, test, build-mac, build-linux]
+    needs: [source, test, build-mac, build-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -1030,22 +1042,20 @@ jobs:
         with:
           path: assets
           merge-multiple: true
-      - name: Publier la release
+
+      - name: Préparer la release (brouillon)
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.rebase.outputs.tag }}
-          SHA: ${{ needs.rebase.outputs.sha }}
-          VERSION: ${{ needs.rebase.outputs.version }}
-          IDENTITY: ${{ needs.rebase.outputs.identity }}
-          UPSTREAM_SHA: ${{ needs.rebase.outputs.upstream_sha }}
-          PATCH_SHA: ${{ needs.rebase.outputs.patch_sha }}
-          MODE: ${{ needs.rebase.outputs.mode }}
-          SOURCE_REF: ${{ needs.rebase.outputs.source_ref }}
-          # `incorporated` / `bare` : lire une release et savoir si elle porte
-          # les personnalisations. La release amputée du 1c642148c488 ne le
-          # disait nulle part.
-          CUSTOM_STATE: ${{ needs.rebase.outputs.custom_state }}
-          CUSTOM_BRANCH_NAME: ${{ env.CUSTOM_BRANCH }}
+          TAG: ${{ needs.source.outputs.tag }}
+          SHA: ${{ needs.source.outputs.sha }}
+          VERSION: ${{ needs.source.outputs.version }}
+          MODE: ${{ needs.source.outputs.mode }}
+          SOURCE_REF: ${{ needs.source.outputs.source_ref }}
+          BASE_KIND: ${{ needs.source.outputs.base_kind }}
+          UPSTREAM_TAG: ${{ needs.source.outputs.upstream_tag }}
+          UPSTREAM_SHA: ${{ needs.source.outputs.upstream_sha }}
+          PREVIOUS_SHA: ${{ needs.source.outputs.previous_sha }}
+          PREVIOUS_ORIGIN: ${{ needs.source.outputs.previous_origin }}
         run: |
           set -euo pipefail
           cd assets
@@ -1060,40 +1070,32 @@ jobs:
           test -n "$mac_sha" && test -n "$deb_sha"
 
           # Hors du répertoire d'assets : tout ce qui traîne dedans finirait
-          # attaché à la release.
-          #
-          # Rien n'est indenté sous le `if` : ces heredocs sont déjà à la
-          # colonne 0 du script une fois le bloc YAML dépouillé, et un
-          # terminateur décalé ne fermerait plus rien.
+          # attaché à la release. Les heredocs sont à la colonne 0 du script
+          # une fois le bloc YAML dépouillé : un terminateur décalé ne fermerait
+          # plus rien.
           if [ "$MODE" = "manual" ]; then
           cat >"$RUNNER_TEMP/notes.md" <<EOF
           Build **manuel** du canal fork : le ref \`$SOURCE_REF\` de ce dépôt,
-          buildé tel quel. Pas de rebase, et la branche patch n'a pas été
-          touchée.
+          buildé tel quel. Les gardes d'ascendance se sont appliquées quand même.
 
           - source : \`$SOURCE_REF\` figé sur \`$SHA\`
-          - personnalisations : \`$CUSTOM_STATE\` (\`${CUSTOM_BRANCH_NAME:-aucune}\`)
-          - version electron-builder : \`$VERSION\`
-          - source-identity: \`$IDENTITY\`
           EOF
           else
           cat >"$RUNNER_TEMP/notes.md" <<EOF
-          Build automatique du canal fork — la branche patch rejouée sur
-          \`upstream/main\` du jour, puis les personnalisations empilées.
+          Build automatique du canal fork : la dernière release stable d'upstream
+          **mergée** dans la branche d'intégration du fork — ascendance préservée,
+          aucun rebase, aucun force-push.
 
-          - upstream : \`$UPSTREAM_SHA\`
-          - patch : \`$PATCH_SHA\`
-          - personnalisations : \`$CUSTOM_STATE\` (\`${CUSTOM_BRANCH_NAME:-aucune}\`)
-          - résultat : \`$SHA\` (branche \`fork-channel\`)
-          - version electron-builder : \`$VERSION\`
-          - source-identity: \`$IDENTITY\`
+          - base : \`$BASE_KIND\`
           EOF
           fi
-
-          # Les sommes et le mode d'emploi d'installation ne dépendent pas du
-          # chemin : un artefact manuel se vérifie et s'installe exactement
-          # comme un artefact nocturne.
           cat >>"$RUNNER_TEMP/notes.md" <<EOF
+          - release stable upstream contenue : \`$UPSTREAM_TAG\` (\`$UPSTREAM_SHA\`)
+          - build publié précédent, contenu : \`${PREVIOUS_SHA:-aucun}\` (\`$PREVIOUS_ORIGIN\`)
+          - personnalisations : fork complet, gates perso exécutés
+          - résultat : \`$SHA\` (\`fork-channel\` avancé en fast-forward sur ce commit)
+          - version electron-builder : \`$VERSION\`
+          - source-commit: \`$SHA\`
 
           | artefact | sha256 |
           | --- | --- |
@@ -1109,19 +1111,125 @@ jobs:
           vérifie le sha256 épinglé dans \`agent/versions.yml\`.
           EOF
 
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+          # Relance d'un run : un BROUILLON du même tag est repris, jamais
+          # dupliqué ; une release déjà publiée fait échouer `create`, à raison.
+          if [ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null)" = "true" ]; then
+            gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes
+          fi
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft \
             --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" \
             "orca-macos-arm64.zip" "$deb_name" SHA256SUMS
+          # Les trois artefacts doivent être là avant qu'un ref bouge.
+          count="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | length')"
+          [ "$count" -eq 3 ] || { echo "::error::brouillon $TAG : $count artefact(s) au lieu de 3"; exit 1; }
+
+      - name: Avancer les refs publiés (fast-forward seul)
+        env:
+          # Le PAT, pas GITHUB_TOKEN : l'arbre poussé contient les workflows
+          # d'upstream, et GITHUB_TOKEN n'a pas le scope `workflow`. Le commit
+          # existe déjà dans le dépôt (le tag le pointe), donc aucun objet n'est
+          # transféré : ce sont deux mises à jour de ref, côté serveur.
+          GH_TOKEN: ${{ secrets.FORK_PUSH_TOKEN }}
+          SHA: ${{ needs.source.outputs.sha }}
+          ADVANCE_SOURCE: ${{ needs.source.outputs.advance_source_branch }}
+          BASE_KIND: ${{ needs.source.outputs.base_kind }}
+        run: |
+          set -euo pipefail
+          # `force=false` = le serveur n'accepte QUE le fast-forward. C'est la
+          # même garantie qu'un `git push` sans `--force`, sans clone ni objet
+          # à transférer. Aucun chemin de ce workflow ne peut force-pusher.
+          advance() {
+            branch="$1"
+            if current="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" --jq .object.sha 2>/dev/null)"; then
+              if [ "$current" = "$SHA" ]; then
+                echo "$branch pointe déjà $SHA."
+                return 0
+              fi
+              if ! gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch" \
+                -F force=false -f "sha=$SHA" --silent; then
+                {
+                  echo "### Avance refusée — \`$branch\` a bougé pendant le run"
+                  echo
+                  echo "\`$branch\` est sur \`$current\`, et \`$SHA\` n'en est pas un"
+                  echo "descendant. L'avance n'est jamais forcée : **rien n'a été publié**"
+                  echo "(la release reste un brouillon, retiré par le job cleanup). Réconcilie"
+                  echo "les deux lignées par un merge explicite, puis relance."
+                  echo
+                  echo '```bash'
+                  echo "git fetch origin $branch"
+                  echo "git switch -c reconcile/$branch origin/$branch"
+                  echo "git merge $SHA && git push origin HEAD:$branch"
+                  echo '```'
+                } >>"$GITHUB_STEP_SUMMARY"
+                echo "::error::avance de $branch refusée (non fast-forward depuis $current) — aucune release publiée"
+                exit 1
+              fi
+              echo "$branch avancé de $current à $SHA."
+            else
+              gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+                -f "ref=refs/heads/$branch" -f "sha=$SHA" --silent
+              echo "$branch créé sur $SHA."
+            fi
+          }
+          # La branche d'intégration d'abord (jamais sur le chemin manuel, ni
+          # sur le repli `channel`) : si son avance est refusée, le pointeur de
+          # canal n'a pas bougé et « rien n'a été publié » reste vrai.
+          if [ "$ADVANCE_SOURCE" = "true" ]; then
+            advance "$SOURCE_BRANCH"
+          else
+            echo "$SOURCE_BRANCH non touchée (source = $BASE_KIND)."
+          fi
+          # Le pointeur du canal : c'est lui que la prochaine nuit lira comme
+          # « dernier build publié », et ce fast-forward est ce qui rend
+          # impossible une régression d'ascendance.
+          advance "$CHANNEL_BRANCH"
+
+      - name: Publier la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.source.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
           echo "Release $TAG publiée." >>"$GITHUB_STEP_SUMMARY"
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url --jq .url >>"$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------------
-  # 5. L'alerte. Elle ne rattrape rien : elle dit qu'une main humaine est
-  #    nécessaire, le jour où le rebase ou le build cède.
+  # 5. Un run rouge ne laisse pas de tag orphelin ni de brouillon : le tag ne
+  #    gardait vivant le commit de merge que pour ce run, et une release
+  #    brouillon inachevée ne doit pas être reprise par erreur.
+  # ---------------------------------------------------------------------------
+  cleanup:
+    needs: [source, test, build-mac, build-linux, release]
+    if: (failure() || cancelled()) && needs.source.outputs.tag != '' && needs.release.result != 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Retirer le tag et le brouillon du run
+        env:
+          GH_TOKEN: ${{ secrets.FORK_PUSH_TOKEN }}
+          TAG: ${{ needs.source.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then echo "::warning::FORK_PUSH_TOKEN absent — tag $TAG laissé en place"; exit 0; fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null | grep -q true; then
+            gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes
+            echo "Brouillon $TAG supprimé."
+          fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG publiée : tag conservé."
+            exit 0
+          fi
+          gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG" --silent && echo "Tag $TAG supprimé."
+
+  # ---------------------------------------------------------------------------
+  # 6. L'alerte. Elle ne rattrape rien : elle dit qu'une main humaine est
+  #    nécessaire, le jour où l'intégration ou le build cède — ou qu'un run a
+  #    été annulé, ce qui est une nuit silencieuse au même titre.
   # ---------------------------------------------------------------------------
   alert:
-    needs: [rebase, test, build-mac, build-linux, release]
-    if: failure()
+    needs: [source, test, build-mac, build-linux, release]
+    if: failure() || cancelled()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -1130,7 +1238,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          REBASE: ${{ needs.rebase.result }}
+          SOURCE: ${{ needs.source.result }}
           TESTS: ${{ needs.test.result }}
           MAC: ${{ needs.build-mac.result }}
           LINUX: ${{ needs.build-linux.result }}
@@ -1138,11 +1246,15 @@ jobs:
         run: |
           set -euo pipefail
           text="Orca fork nightly ÉCHEC
-          rebase=$REBASE tests=$TESTS mac=$MAC linux=$LINUX release=$RELEASE
+          source=$SOURCE tests=$TESTS mac=$MAC linux=$LINUX release=$RELEASE
           $RUN_URL"
-          if [ "$REBASE" = "failure" ]; then
+          if [ "$SOURCE" = "failure" ]; then
             text="$text
-          Probable conflit de rebase : le résumé du run liste les fichiers."
+          Source refusée ou conflit d'intégration : le résumé du run liste les fichiers et la commande."
+          fi
+          if [ "$RELEASE" = "failure" ]; then
+            text="$text
+          Publication refusée (avance non fast-forward ?) : rien n'a été publié, brouillon retiré."
           fi
           # Un canal d'alerte non branché ne vaut pas mieux que pas d'alerte : il
           # vaut moins, parce qu'il donne l'illusion d'une surveillance. On le dit
