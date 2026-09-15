@@ -21,6 +21,8 @@ type MainOwnedUIState =
   | 'starNagAgentValueMomentAppVersion'
   | 'agentsShowSearch'
   | 'dismissedUnexpectedSignoutVersion'
+  | '_codexBarStatusBarDefaultAdded'
+  | 'statusBarItems'
 const _uiUpdateParity: AssertNoMissingKeys<
   Omit<PersistedUIState, MainOwnedUIState>,
   z.infer<UiUpdateFieldsSchema>
