@@ -1,6 +1,6 @@
 import { omitPairingLocalUiFields } from '../../../../shared/pairing-local-ui-fields'
 import type { PersistedUIState } from '../../../../shared/persisted-ui-state-types'
-import { defineMethod } from '../core'
+import { defineMethod, type RpcMethod } from '../core'
 import {
   NativeChatSessionOptionsMutation,
   PRBotAuthorOverrideUpdate,
@@ -12,7 +12,7 @@ import { FeatureInteractionIdParam, UiUpdate } from './client-ui-schemas'
 
 import { TerminalQuickCommandsUpdate } from './terminal-quick-command-rpc-schema'
 
-export const CLIENT_UI_METHODS = [
+export const CLIENT_UI_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'settings.get',
     params: null,
