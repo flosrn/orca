@@ -1,8 +1,8 @@
-import { defineMethod, type RpcMethod } from '../core'
+import { defineMethod } from '../core'
 import { getRemoteServerUpdaterSnapshot } from '../../remote-server-updater'
 import { getLongPollCapacityReport } from '../../runtime-rpc/runtime-rpc-long-poll-capacity'
 
-export const STATUS_METHODS: RpcMethod[] = [
+export const STATUS_METHODS = [
   defineMethod({
     name: 'status.get',
     params: null,

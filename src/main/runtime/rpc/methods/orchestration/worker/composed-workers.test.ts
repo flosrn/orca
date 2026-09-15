@@ -558,9 +558,18 @@ describe('orchestration RPC methods', () => {
       )
     })
 
-    it.each(['codex-update-prompt', 'codex-trust-workspace'] as const)(
+    // Why ours' expectation with theirs' table: codex carries its brief in argv here, so a
+    // blocked screen is evidence rather than a failed start — but the receipt still reaches the
+    // user verbatim, and an older host keeps publishing the codex-* token, so it names the
+    // neutral spelling exactly as 1.4.203's CLI does. The third row is the token this build's
+    // own detector publishes.
+    it.each([
+      ['codex-update-prompt', 'codex-update-prompt (agent-update-prompt)'],
+      ['codex-trust-workspace', 'codex-trust-workspace (agent-trust-workspace)'],
+      ['agent-trust-workspace', 'agent-trust-workspace']
+    ] as const)(
       'reports a blocked startup screen without failing the ready dispatch for %s',
-      async (blockedReason) => {
+      async (blockedReason, expectedReason) => {
         setup()
         mockCurrentWorkerStart()
         vi.mocked(runtime.waitForTerminal).mockResolvedValueOnce({
@@ -590,7 +599,7 @@ describe('orchestration RPC methods', () => {
           expect(insertMessage).toHaveBeenCalledWith(
             expect.objectContaining({
               priority: 'high',
-              subject: expect.stringContaining(`startup blocked: ${blockedReason}`)
+              subject: expect.stringContaining(`startup blocked: ${expectedReason}`)
             })
           )
         })
@@ -599,6 +608,36 @@ describe('orchestration RPC methods', () => {
         expect(runtime.sendTerminalAgentPrompt).not.toHaveBeenCalled()
       }
     )
+
+    // Why the paste path keeps 1.4.203's failure: a stdin-after-start agent has NOT received its
+    // brief when the blocked screen renders, so there is no delivered capability to preserve and
+    // reporting ready would be untruthful. The argv case above is the only one that stands.
+    it('returns a truthful readiness failure for a paste-path agent', async () => {
+      setup()
+      mockCurrentWorkerStart()
+      vi.mocked(runtime.waitForTerminal).mockResolvedValueOnce({
+        handle: 'term_worker',
+        condition: 'tui-idle',
+        satisfied: false,
+        status: 'running',
+        exitCode: null,
+        blockedReason: 'codex-trust-workspace'
+      })
+      const task = db.createTask({ spec: 'blocked startup prompt' })
+
+      const result = (await call('orchestration.workerStart', {
+        task: task.id,
+        from: 'term_coord',
+        agent: 'goose'
+      })) as { state: string; failedStage: string; lastError: string }
+
+      expect(result).toMatchObject({
+        state: 'failed',
+        failedStage: 'agent_readiness',
+        lastError: 'Agent startup blocked: codex-trust-workspace (agent-trust-workspace)'
+      })
+      expect(runtime.sendTerminalAgentPrompt).not.toHaveBeenCalled()
+    })
 
     it('creates a child worktree agent-first with setup run by default', async () => {
       setup()

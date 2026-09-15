@@ -3,6 +3,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import type { TuiAgent } from '../../../../../../shared/tui-agent'
 import type { AgentLaunchPreferences } from '../../../../../../shared/agent-session-host-authority'
 import { TUI_AGENT_CONFIG } from '../../../../../../shared/tui-agent-config'
+import { describeTerminalWaitBlockedReason } from '../../../../../../shared/terminal-wait-blocked-reason-legacy-alias'
 import { buildDispatchPreamble } from '../../../../orchestration/preamble'
 import type { OrchestrationDb } from '../../../../orchestration/db'
 import type { OrcaRuntimeService } from '../../../../orca-runtime'
@@ -223,7 +224,7 @@ function monitorArgvStartupBlocked(args: {
         runId: args.runId,
         from: `dispatch:${args.dispatchId}`,
         to: `run:${args.runId}`,
-        subject: `Worker ${args.dispatchId} startup blocked: ${wait.blockedReason}`,
+        subject: `Worker ${args.dispatchId} startup blocked: ${describeTerminalWaitBlockedReason(wait.blockedReason)}`,
         type: 'status',
         priority: 'high',
         payload: JSON.stringify({

@@ -14,8 +14,8 @@ export type ClaudeRuntimePaths = {
 export class ClaudeRuntimePathResolver {
   getRuntimePaths(): ClaudeRuntimePaths {
     const inheritedConfigDir = this.resolveInheritedSharedConfigDir()
+    // Why: disabled Claude still reaches this resolver through background usage refreshes.
     const configDir = inheritedConfigDir || join(homedir(), '.claude')
-    mkdirSync(configDir, { recursive: true })
 
     return {
       configDir,
@@ -59,6 +59,10 @@ export class ClaudeRuntimePathResolver {
    * Deliberately ignores an inherited CLAUDE_CONFIG_DIR: a pinned account is
    * the launch's config dir, so a nested Orca's ambient value must not redirect
    * one account's credentials onto another surface.
+   *
+   * Unlike the shared surface above this still materializes the directory: an
+   * account dir is only reached once the account resolved as Orca-owned, so it
+   * already exists and no disabled-Claude background refresh can create it.
    */
   getAccountRuntimePaths(configDir: string): ClaudeRuntimePaths {
     mkdirSync(configDir, { recursive: true })

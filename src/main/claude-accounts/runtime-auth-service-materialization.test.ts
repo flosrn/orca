@@ -75,6 +75,8 @@ describe('ClaudeRuntimeAuthService', () => {
 
     expect(readAccountRuntimeCredentials(managedAuthPath)).toBe(managedCredentials)
 
+    // Why: resolving paths creates no directories, so materializing is what has
+    // to put the account's credentials back on its own surface.
     rmSync(accountRuntimeCredentialsPath(managedAuthPath), { force: true })
     await service.prepareForClaudeLaunch()
 
