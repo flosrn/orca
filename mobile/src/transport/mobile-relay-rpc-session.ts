@@ -13,6 +13,7 @@ import { RelayDialStageTracker, type RelayDialStageSource } from './relay-dial-s
 import { RelayPendingRequests } from './relay-pending-requests'
 import { RpcSessionLivenessWatchdog } from './rpc-session-liveness-watchdog'
 import { settleMobileRuntimeCapabilities } from './mobile-runtime-capability-negotiation'
+import type { RelayHostCloseReason } from '../../../src/shared/relay-host-close-reason'
 import type { RpcClient } from './rpc-client'
 import type { ConnectionLogSink, ConnectionState, RpcResponse } from './types'
 
@@ -40,6 +41,7 @@ export function connectMobileRelayRpcSession(args: {
   desktopPublicKeyB64: string
   requestTimeoutMs?: number
   createSocket?: (url: string) => WebSocket
+  onHostCloseReason?: (reason: RelayHostCloseReason) => void
   onLog?: ConnectionLogSink
 }): MobileRelayRpcSession {
   const requestTimeoutMs = args.requestTimeoutMs ?? 30_000
@@ -69,6 +71,7 @@ export function connectMobileRelayRpcSession(args: {
     deviceToken: args.deviceToken,
     desktopPublicKeyB64: args.desktopPublicKeyB64,
     createSocket: args.createSocket,
+    onHostCloseReason: args.onHostCloseReason,
     onOpen: () => dialStage.advance('awaiting-hello'),
     onHello: (hello) => {
       if (
@@ -213,12 +216,14 @@ export function connectMobileRelayRpcSession(args: {
         // Why: the frame was written long ago — the desktop may have processed it.
         reject(markRpcDeliveryUnknown(new Error(`relay RPC timed out: ${method}`)))
       }, timeoutMs)
-      pending.track(id, { resolve, reject, timer })
+      pending.track(id, { resolve, reject, timer, written: false })
       if (!sendFrame({ id, method, params })) {
         clearTimeout(timer)
         pending.drop(id)
         reject(new Error('relay E2EE channel not ready'))
+        return
       }
+      pending.markWritten(id)
     })
   }
 
@@ -291,6 +296,7 @@ export function connectMobileRelayRpcSession(args: {
     closed = true
     failure = error
     livenessWatchdog.stop(livenessIdentity)
+    streams.clear()
     link.close()
     pending.rejectAll(error)
     publishState(error instanceof MobileE2EEAuthenticationError ? 'auth-failed' : 'disconnected')

@@ -136,6 +136,36 @@ describe('mobile relay RPC session', () => {
   })
   afterEach(() => vi.useRealTimers())
 
+  it('releases stream listeners on failure even when close follows it', async () => {
+    const { session } = await authenticateSession()
+    const listener = vi.fn()
+    session.subscribe('runtime.clientEvents.subscribe', {}, listener)
+    await Promise.resolve()
+    const request = JSON.parse(fakes.sendText.mock.calls[0]![0] as string) as { id: string }
+    fakes.linkOptions!.onText(
+      JSON.stringify({
+        id: request.id,
+        ok: true,
+        streaming: true,
+        result: { type: 'ready', subscriptionId: 'server-events' },
+        _meta: { runtimeId: 'runtime-1' }
+      })
+    )
+    expect(listener).toHaveBeenCalledTimes(1)
+    fakes.linkOptions!.onError(new Error('relay lost'))
+    session.close()
+    fakes.linkOptions!.onText(
+      JSON.stringify({
+        id: request.id,
+        ok: true,
+        streaming: true,
+        result: { type: 'event' },
+        _meta: { runtimeId: 'runtime-1' }
+      })
+    )
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
   it('requires exact resume observations and confirms by request ID before becoming connected', async () => {
     const { session, confirmationRequest, capabilityRequest } = await authenticateSession()
 
@@ -290,6 +320,21 @@ describe('mobile relay RPC session', () => {
     // The frame reached the wire, so the failure must read as delivery-unknown.
     await expect(pending.catch((error: unknown) => isRpcDeliveryUnknown(error))).resolves.toBe(true)
     expect(session.getState()).toBe('disconnected')
+  })
+
+  it('keeps a synchronous pre-write relay failure definite', async () => {
+    const { session } = await authenticateSession()
+    fakes.sendText.mockImplementationOnce(() => {
+      fakes.linkOptions!.onError(new Error('relay outbound overflow'))
+      return false
+    })
+
+    const error = await session
+      .sendRequest('terminal.send', { terminal: 'term', text: 'hi' })
+      .catch((cause: unknown) => cause)
+
+    expect((error as Error).message).toBe('relay outbound overflow')
+    expect(isRpcDeliveryUnknown(error)).toBe(false)
   })
 
   it('marks in-flight requests delivery-unknown when the session closes', async () => {

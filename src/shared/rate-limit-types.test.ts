@@ -20,6 +20,7 @@ describe('RateLimitState', () => {
       clinepass: null,
       qwencloud: null,
       minimaxCookieConfigured: false,
+      minimaxApiKeyConfigured: false,
       grokAuthConfigured: false,
       codexbarAvailable: false,
       claudeTarget: { runtime: 'host', wslDistro: null },
@@ -31,5 +32,6 @@ describe('RateLimitState', () => {
     expect(state.antigravity).toBeNull()
     expect(state.minimax).toBeNull()
     expect(state.minimaxCookieConfigured).toBe(false)
+    expect(state.minimaxApiKeyConfigured).toBe(false)
   })
 })

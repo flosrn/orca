@@ -1,6 +1,7 @@
 import { isValidTerminalTabId } from '../../../../shared/terminal-tab-id'
 import { ptyOwnership, ptyIncarnationById, deletePtyOwnership } from '../provider/ownership-state'
 import { ptySizes } from '../delivery/visibility-state'
+import { commitRuntimePtySize } from './spawn-commit-pty-size'
 import {
   shouldSkipCodexHomeEnvForWindowsShell,
   recordCodexPaneAccountForSpawn,
@@ -33,6 +34,7 @@ import { createTerminalSessionStateSaveFailureMessage } from '../../../../shared
 import { clearProviderPtyState } from '../provider/state-cleanup'
 import { resolvePaneSpawnReservation } from '../pane/spawn-reservation'
 import { admitProviderReattachLaunchIdentity } from '../pane/launch-authority'
+import { spawnCommitBindingOrigin } from '../../../persistence/loading-store/pty-binding-span'
 import type { RuntimePtySpawnState } from './spawn-state'
 
 export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
@@ -57,6 +59,9 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
     })
   }
   if (ctx.result.agentSessionEnsure?.disposition === 'adopted') {
+    // Why: an adoption is an attach to a live owner by definition, but the SSH relay's adopted
+    // reply omits isReattach; derive it once so the size commit and the reservation agree.
+    const adoptedResult = { ...ctx.result, isReattach: true }
     const owner = ctx.result.agentSessionEnsure.owner
     ptyOwnership.set(ctx.result.id, args.connectionId ?? ptyOwnership.get(ctx.result.id) ?? null)
     ctx.deps.runtime?.registerPreAllocatedHandleForPty(ctx.result.id, owner.surface.terminalHandle)
@@ -86,13 +91,17 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
         ...(ctx.env ? { launchEnv: ctx.env } : {})
       })
     }
+    // Why: this branch returns before the normal commit site; without this the cache keeps
+    // whatever the caller requested.
+    commitRuntimePtySize(ctx, adoptedResult)
     // Why: the adopted branch returns before the normal settle site, so the
     // reservation must be resolved here or every later spawn for this pane
     // awaits a promise that never settles.
-    resolvePaneSpawnReservation(ctx.paneSpawnReservationKey, ctx.paneSpawnReservation, {
-      ...ctx.result,
-      isReattach: true
-    })
+    resolvePaneSpawnReservation(
+      ctx.paneSpawnReservationKey,
+      ctx.paneSpawnReservation,
+      adoptedResult
+    )
     return {
       id: ctx.result.id,
       ...(ctx.result.incarnationId ? { incarnationId: ctx.result.incarnationId } : {}),
@@ -125,7 +134,7 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
   if (!ctx.hostSessionBinding) {
     persistSshLease()
   }
-  ptySizes.set(ctx.result.id, { cols: args.cols, rows: args.rows })
+  commitRuntimePtySize(ctx, ctx.result)
   if (ctx.effectiveSessionAppId !== undefined && ctx.effectiveSessionAppId !== ctx.result.id) {
     ptySizes.delete(ctx.effectiveSessionAppId)
   }
@@ -151,7 +160,8 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
         ...(ctx.cwd ? { startupCwd: ctx.cwd } : {}),
         ...(ctx.hostSessionBinding.expectedSourceBinding
           ? { expectedSourceBinding: ctx.hostSessionBinding.expectedSourceBinding }
-          : {})
+          : {}),
+        origin: spawnCommitBindingOrigin(ctx.result, ctx.hostSessionBinding.expectedSourceBinding)
       }
       const persisted = args.connectionId
         ? ctx.hostSessionBinding.store.persistPtyBinding(
