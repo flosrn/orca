@@ -301,49 +301,36 @@ jobs:
           fi
           fork_base_sha="$(git rev-parse 'refs/fork/base^{commit}')"
 
-          # --- 3. les builds publiés, la référence à ne pas perdre --------------
+          # --- 3. le build publié, la référence à ne pas perdre ----------------
           # Le pointeur de canal n'avance qu'en fast-forward : il ne peut pas
-          # mentir sur ce qui a été publié. Un `ls-remote` qui échoue autrement
-          # que « ref absent » (code 2) est une erreur : jamais un repli qui
-          # désarmerait la garde. Sans pointeur (premier run du dispositif),
-          # la référence est CHAQUE release fork publiée, lue au commit que son
-          # tag désigne — pas la plus récente par date, ni par nom : le
-          # build doit les contenir toutes.
-          previous_sha=""
-          previous_origin="none"
-          previous_all=""
+          # mentir sur ce qui a été publié. Il est posé UNE fois à la main sur
+          # le commit du build installé — la CI ne le devine pas depuis la liste
+          # des releases : les anciennes releases rebasées ne descendent de
+          # rien, et une date ne prouve rien. Un `ls-remote` qui échoue autrement
+          # que « ref absent » (code 2) est une erreur, jamais un repli.
           rc=0
           git ls-remote --exit-code --heads "$read_remote" "refs/heads/$CHANNEL_BRANCH" >/dev/null || rc=$?
-          if [ "$rc" -eq 0 ]; then
-            git fetch --no-tags --quiet "$read_remote" "+refs/heads/$CHANNEL_BRANCH:refs/fork/prev"
-            previous_sha="$(git rev-parse 'refs/fork/prev^{commit}')"
-            previous_origin="branch:$CHANNEL_BRANCH"
-            previous_all="$previous_sha"
-          elif [ "$rc" -eq 2 ]; then
-            # Affectation, pas substitution de processus : un `gh` qui échoue
-            # arrête le run au lieu de rendre une liste vide.
-            release_list="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 --exclude-drafts \
-              --json tagName --jq '.[] | .tagName | select(startswith("fork-"))')"
-            mapfile -t release_tags <<<"$release_list"
-            [ -n "$release_list" ] || release_tags=()
-            for release_tag in "${release_tags[@]}"; do
-              git fetch --no-tags --quiet "$read_remote" "+refs/tags/$release_tag:refs/fork/prev-$release_tag"
-              sha="$(git rev-parse "refs/fork/prev-$release_tag^{commit}")"
-              previous_all="$previous_all${previous_all:+ }$sha"
-              # La plus haute par ascendance sert de résumé ; la garde, elle, lit la liste.
-              if [ -z "$previous_sha" ] || contains "$previous_sha" "$sha"; then
-                previous_sha="$sha"; previous_origin="tag:$release_tag"
-              fi
-            done
-          else
+          if [ "$rc" -eq 2 ]; then
+            {
+              echo "### \`$CHANNEL_BRANCH\` absent — le canal n'est pas amorcé"
+              echo
+              echo "Pose-le une fois sur le commit du build INSTALLÉ (lu dans"
+              echo "\`/Applications/Orca.app/Contents/Resources/fork-channel.txt\`, ligne \`sha=\`) :"
+              echo
+              echo '```bash'
+              echo "gh api --method POST repos/$GITHUB_REPOSITORY/git/refs -f ref=refs/heads/$CHANNEL_BRANCH -f sha=<sha-installé>"
+              echo '```'
+            } >>"$GITHUB_STEP_SUMMARY"
+            echo "::error::$CHANNEL_BRANCH absent sur $GITHUB_REPOSITORY — pose-le sur le commit du build installé (résumé du run)"
+            exit 1
+          elif [ "$rc" -ne 0 ]; then
             echo "::error::impossible de lire $CHANNEL_BRANCH sur $GITHUB_REPOSITORY (code $rc) — la garde d'ascendance publiée ne peut pas être évaluée"
             exit 1
           fi
-          if [ -n "$previous_sha" ]; then
-            echo "Build publié précédent : $previous_sha (via $previous_origin)"
-          else
-            echo "Aucun build fork publié : ce run amorce le canal."
-          fi
+          git fetch --no-tags --quiet "$read_remote" "+refs/heads/$CHANNEL_BRANCH:refs/fork/prev"
+          previous_sha="$(git rev-parse 'refs/fork/prev^{commit}')"
+          previous_origin="branch:$CHANNEL_BRANCH"
+          echo "Build publié précédent : $previous_sha (via $previous_origin)"
 
           # --- 4. intégrer la release stable ---------------------------------
           # MERGE, pas rebase. Le rebase réécrit les SHA, donc le résultat n'est
@@ -464,16 +451,12 @@ jobs:
             exit 1
           fi
 
-          lost=""
-          for sha in $previous_all; do
-            contains "$sha" "$build_sha" || lost="$lost${lost:+ }${sha:0:12}"
-          done
-          if [ -n "$lost" ]; then
+          if ! contains "$previous_sha" "$build_sha"; then
             {
               echo "### Source refusée — elle perdrait de l'ascendance publiée"
               echo
-              echo "Build(s) publié(s) que la source (\`${build_sha:0:12}\`) ne contient pas :"
-              echo "\`$lost\` (référence via \`$previous_origin\`)."
+              echo "Le build publié (\`${previous_sha:0:12}\`, via \`$previous_origin\`) n'est **pas**"
+              echo "un ancêtre de la source (\`${build_sha:0:12}\`)."
               echo
               echo "L'installeur exige une preuve d'ascendance stricte : descendant, ou"
               echo "égal. Publier ça livrerait un build qu'aucune machine déjà à jour ne"
@@ -490,7 +473,7 @@ jobs:
               echo "git push origin HEAD:$SOURCE_BRANCH"
               echo '```'
             } >>"$GITHUB_STEP_SUMMARY"
-            echo "::error::source refusée : ${build_sha:0:12} ne descend pas des builds publiés $lost — aucun tag posé"
+            echo "::error::source refusée : ${build_sha:0:12} ne descend pas du build publié ${previous_sha:0:12} — aucun tag posé"
             exit 1
           fi
 
@@ -500,8 +483,7 @@ jobs:
           # existe, et une release qui a échoué doit être retentée. Un dispatch
           # manuel est par définition une décision de builder.
           should_build=true
-          if [ "$MODE" = "nightly" ] && [ "$FORCED" != "true" ] && [ -n "$previous_sha" ] \
-            && [ "$build_sha" = "$previous_sha" ] \
+          if [ "$MODE" = "nightly" ] && [ "$FORCED" != "true" ] && [ "$build_sha" = "$previous_sha" ] \
             && gh release list --repo "$GITHUB_REPOSITORY" --limit 30 --exclude-drafts --json tagName \
                  --jq '.[] | .tagName' | grep -q -- "-${build_sha:0:12}\$"; then
             should_build=false
@@ -540,7 +522,7 @@ jobs:
             echo "- base : \`$BASE_KIND\` — \`$SOURCE_BRANCH\` / \`$CHANNEL_BRANCH\`"
             echo "- release stable épinglée : \`$upstream_tag\` (\`${upstream_sha:0:12}\`)"
             echo "- plancher fork : \`$FORK_BASE_REF\` (\`${fork_base_sha:0:12}\`) — contenu"
-            echo "- build publié précédent : \`${previous_sha:-aucun}\`${previous_sha:+ (via \`$previous_origin\`) — contenu}"
+            echo "- build publié précédent : \`${previous_sha:0:12}\` (via \`$previous_origin\`) — contenu"
             echo "- source buildée : \`$build_sha\` (version \`$version\`)"
             echo "- build : \`$should_build\`"
           } >>"$GITHUB_STEP_SUMMARY"
@@ -1212,7 +1194,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${GH_TOKEN:-}" ]; then echo "::warning::FORK_PUSH_TOKEN absent — tag $TAG laissé en place"; exit 0; fi
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null | grep -q true; then
+          if [ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null)" = "true" ]; then
             gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes
             echo "Brouillon $TAG supprimé."
           fi

@@ -21,12 +21,14 @@ voulu : la page d'accueil du fork dit ce que ce dépôt est.
 | `main` | miroir d'`upstream/main`, jamais modifié | `gh repo sync` |
 | `$SOURCE_BRANCH` (variable, défaut `fix/fork-v1.4.203`) | **la branche d'intégration du fork complet** : upstream + toutes les personnalisations | un humain pour le contenu ; la CI l'avance en **fast-forward** après un merge nocturne vert |
 | `$FORK_BASE_REF` (variable, défaut `feat/fork-1.4.200`) | le plancher d'ascendance : toute source publiée doit le contenir | personne |
-| `fork-channel` | le dernier build publié avec succès, avancé en **fast-forward seul** | **la CI seule** |
+| `fork-channel` | le dernier build publié avec succès, avancé en **fast-forward seul**. Posé une fois à la main sur le commit du build installé ; jamais deviné | **la CI seule** ensuite |
 | tags `fork-<AAAAMMJJ>-<HHMM>-<sha12>` | le SHA exact buildé et publié, immuable | **la CI seule** |
 
 ```bash
 gh variable set SOURCE_BRANCH --repo flosrn/orca --body fix/fork-v1.4.203
 gh variable set FORK_BASE_REF --repo flosrn/orca --body feat/fork-1.4.200   # optionnel
+# amorçage, une fois : le sha= de /Applications/Orca.app/Contents/Resources/fork-channel.txt
+gh api --method POST repos/flosrn/orca/git/refs -f ref=refs/heads/fork-channel -f sha=<sha-installé>
 ```
 
 ## Ce que la nightly fait (`.github/workflows/fork-nightly.yml`)
@@ -38,8 +40,7 @@ gh variable set FORK_BASE_REF --repo flosrn/orca --body feat/fork-1.4.200   # op
    le tag :
    - la source contient `$FORK_BASE_REF` (ni upstream nu, ni lignée abandonnée) ;
    - la source contient la release stable épinglée ;
-   - la source contient **chaque** build déjà publié (`fork-channel`, ou à
-     défaut le commit de chaque Release `fork-*`).
+   - la source contient le build publié (`fork-channel`).
    Rien à faire seulement si ce commit exact est déjà publié en Release.
    Sinon : tag immuable `fork-*` sur le SHA.
 2. **test** — `pnpm typecheck`, vitest sur `src/main/runtime/orchestration` et
