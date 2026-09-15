@@ -483,10 +483,11 @@ jobs:
           # existe, et une release qui a échoué doit être retentée. Un dispatch
           # manuel est par définition une décision de builder.
           should_build=true
-          if [ "$MODE" = "nightly" ] && [ "$FORCED" != "true" ] && [ "$build_sha" = "$previous_sha" ] \
-            && gh release list --repo "$GITHUB_REPOSITORY" --limit 30 --exclude-drafts --json tagName \
-                 --jq '.[] | .tagName' | grep -q -- "-${build_sha:0:12}\$"; then
-            should_build=false
+          if [ "$MODE" = "nightly" ] && [ "$FORCED" != "true" ] && [ "$build_sha" = "$previous_sha" ]; then
+            # Liste en variable : un `| grep -q` sous pipefail peut rendre le
+            # SIGPIPE de gh et faire rebuilder un commit déjà publié.
+            published="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 --exclude-drafts --json tagName --jq '.[] | .tagName')"
+            case "$published" in *"-${build_sha:0:12}"*) should_build=false ;; esac
           fi
 
           version="$(node -p "require('./package.json').version")"
