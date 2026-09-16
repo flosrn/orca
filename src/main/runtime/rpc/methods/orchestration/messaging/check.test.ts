@@ -565,7 +565,8 @@ describe('orchestration RPC methods', () => {
 
       expect(result.messages[0]).toMatchObject({
         subject: 'plumbing',
-        delivery_contract: 'current_delivery'
+        delivery_contract: 'current_delivery',
+        sender_attribution: 'pane'
       })
       for (const column of [
         'read',
