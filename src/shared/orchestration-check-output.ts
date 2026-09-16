@@ -5,6 +5,8 @@ export type OrchestrationMessageSummary = {
   run_id?: string
   delivery_contract?: 'legacy_direct' | 'current_delivery' | 'audit_only'
   from_handle: string
+  /** Runtime witness verdict; the private pane key is never part of a receipt. */
+  sender_attribution?: 'pane' | 'unattributed'
   to_handle?: string
   subject?: string
   type?: string

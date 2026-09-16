@@ -26,6 +26,19 @@ coordinator inbox.
 An empty wait or timeout is a checkpoint. Continue rolling waits until every
 expected Dispatch settles. Heartbeat or visible activity means alive, not done.
 
+### Sender attribution in JSON receipts
+
+Message receipts from `check`, `send`, and `reply` carry `sender_attribution`:
+`pane` means the runtime stored a pane witness for the sender; `unattributed`
+means it did not. This verdict identifies provenance, not permission to perform
+an action or proof that a reply destination is still live. A dispatch can have
+separate lifecycle authority without a pane witness.
+
+These receipts omit `sender_pane_key` and delivery bookkeeping; the diagnostic
+`inbox` command still exposes raw rows. Read the top-level receipt verdict, never
+a similarly named field inside `payload`.
+Older runtimes may omit the verdict; absence is unknown, not an attributed sender.
+
 ## Addresses
 
 Use a stable Dispatch address for attempt-specific coordinator guidance:
