@@ -26,7 +26,7 @@ import { agentHookServer } from '../agent-hooks/server'
 import { isAgentStatusHooksEnabled } from '../agent-hooks/managed-agent-hook-controls'
 import {
   buildManagedHookDetectionCommands,
-  detectedManagedHookAgents
+  readManagedHookDetectionResult
 } from '../agent-hooks/managed-hook-detection-commands'
 import {
   AGENT_HOOK_INSTALL_MANAGED_HOOKS_METHOD,
@@ -447,6 +447,14 @@ export class SshRelaySession {
       remoteHome: env.remoteHome,
       hostPlatform: env.hostPlatform
     }
+  }
+
+  async requestSessionSearch(method: string, params: Record<string, unknown>): Promise<unknown> {
+    const mux = this.mux
+    if (!mux || mux.isDisposed() || this._state !== 'ready') {
+      throw new Error('SSH relay is not ready')
+    }
+    return mux.request(method, params, { timeoutMs: 15_000 })
   }
 
   async requestAiVaultSessionList(
@@ -1370,17 +1378,20 @@ export class SshRelaySession {
 
     try {
       const store = this.store as { getSettings?: Store['getSettings'] }
-      const detected = (await mux.request('preflight.detectAgents', {
-        commands: buildManagedHookDetectionCommands(store.getSettings?.() ?? null, 'linux')
-      })) as { agents?: unknown }
-      const agents = detectedManagedHookAgents(detected?.agents)
+      const detected = readManagedHookDetectionResult(
+        await mux.request('preflight.detectAgents', {
+          commands: buildManagedHookDetectionCommands(store.getSettings?.() ?? null, 'linux')
+        })
+      )
+      const agents = detected.agents
       if (agents.length === 0 || (shouldContinue && !shouldContinue())) {
         return
       }
       const hostKeyFingerprint = this.requireReadyConnection().getHostKeyFingerprint?.()
       const params = {
         ...(hostKeyFingerprint ? { hostKeyFingerprint } : {}),
-        agents
+        agents,
+        ...(detected.claudeVersion ? { claudeVersion: detected.claudeVersion } : {})
       }
       const result = (await mux.request(AGENT_HOOK_INSTALL_MANAGED_HOOKS_METHOD, params)) as {
         errors?: unknown
@@ -2754,7 +2765,8 @@ export class SshRelaySession {
         ptyId: appPtyId,
         incarnationId,
         ...(mayCreate ? {} : { mayCreate: false }),
-        mayReviveRetiredSurface: false
+        mayReviveRetiredSurface: false,
+        origin: 'relay_reattach'
       })
       if (bound === false) {
         // Topology absence alone is not authority to kill a process, but neither refusal may

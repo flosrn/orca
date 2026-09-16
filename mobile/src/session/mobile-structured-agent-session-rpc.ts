@@ -22,7 +22,7 @@ export type StructuredAgentSessionMutationCallResult<TValue> =
   | { status: 'accepted'; value: TValue }
   | { status: 'refused'; code: AgentSessionWireRefusalCode; message: string }
   | { status: 'failed'; message: string }
-  | { status: 'unknown' }
+  | { status: 'unknown'; hostReportedOperationUnknown?: boolean }
 
 export type StructuredAgentSessionMutationResult<TValue> =
   | { status: 'accepted'; value: TValue; sameFence: boolean }
@@ -169,7 +169,7 @@ export async function requestStructuredAgentSessionMutation<TValue>(args: {
       (method === 'agentSession.cancel' || method === 'agentSession.conversationCommand') &&
       result.refusal.code === 'agent_session_operation_unknown'
     ) {
-      return { status: 'unknown' }
+      return { status: 'unknown', hostReportedOperationUnknown: true }
     }
     return result.ok
       ? { status: 'accepted', value: result.value }

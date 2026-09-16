@@ -257,7 +257,7 @@ export function useMobileStructuredAgentSession(args: {
       fields,
       clientOperationId
     }).then((result) => {
-      if (result.status !== 'unknown') {
+      if (result.status !== 'unknown' || result.hostReportedOperationUnknown === true) {
         operationIdsRef.current.delete(key)
       }
       if (result.status === 'unknown') {
