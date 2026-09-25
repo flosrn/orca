@@ -743,6 +743,8 @@ jobs:
           max_attempts: 3
           retry_wait_seconds: 30
           command: pnpm install --frozen-lockfile
+      # `build:release` bundle l'app web mobile depuis v1.4.210 ; mobile/ est un projet pnpm à part.
+      - uses: ./.github/actions/install-mobile-dependencies
       # local-build-switch.ts:25 refuse un build dont la version égale celle qui
       # tourne. Exportée pour les étapes suivantes : lue au require() de la config.
       - name: Version unique pour le canal local-build
@@ -900,6 +902,8 @@ jobs:
           max_attempts: 3
           retry_wait_seconds: 30
           command: pnpm install --frozen-lockfile
+      # `build:release` bundle l'app web mobile depuis v1.4.210 ; mobile/ est un projet pnpm à part.
+      - uses: ./.github/actions/install-mobile-dependencies
       # `build:release` vérifie le provider computer-use Linux en important les
       # bindings AT-SPI, absents des runners Ubuntu par défaut.
       - name: Dépendances du provider computer-use Linux
