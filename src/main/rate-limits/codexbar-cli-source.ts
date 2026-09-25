@@ -13,7 +13,7 @@ import {
 const CODEXBAR_BINARY = 'codexbar'
 
 /**
- * Per-provider ceiling. Measured 2026-08-27: C‍linePass ~2.3s, C‍ursor ~4s, Qwen Cloud ~3s, with
+ * Per-provider ceiling. Measured 2026-08-27: C‍ursor ~4s, Qwen Cloud ~3s, with
  * Claude the slowest at ~7.9s. CodexBar reaches out to provider dashboards, so the budget has to
  * cover a cold web fetch — but it must stay under the poll interval or a slow provider would pin
  * a fetch across cycles.
@@ -107,7 +107,7 @@ export type CodexBarUsageSnapshot = {
  * Read every CodexBar-backed provider in one pass.
  *
  * Parallel, not serial: each provider costs its own network round trip, and measured serially the
- * three add up to roughly the sum of their latencies instead of the slowest one.
+ * two add up to roughly the sum of their latencies instead of the slowest one.
  */
 export async function fetchCodexBarUsage(
   options: { signal?: AbortSignal } = {}

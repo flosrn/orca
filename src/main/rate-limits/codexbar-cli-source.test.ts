@@ -21,7 +21,7 @@ function processResult(overrides: Partial<ProcessResult> = {}): ProcessResult {
 
 const WEEKLY_PAYLOAD = JSON.stringify([
   {
-    provider: 'clinepass',
+    provider: 'qwencloud',
     source: 'api',
     usage: { secondary: { usedPercent: 38, windowMinutes: 10080 } }
   }
@@ -38,8 +38,8 @@ describe('fetchCodexBarUsage', () => {
 
     const snapshot = await fetchCodexBarUsage()
 
-    // An absent CLI is not a provider failure: the three meters must stay off the bar entirely
-    // rather than render three error rows for software the user never installed.
+    // An absent CLI is not a provider failure: the two meters must stay off the bar entirely
+    // rather than render two error rows for software the user never installed.
     expect(snapshot.binaryPath).toBeNull()
     expect(snapshot.results).toEqual({})
     expect(mocks.runProcess).not.toHaveBeenCalled()
@@ -61,12 +61,12 @@ describe('fetchCodexBarUsage', () => {
 
     const snapshot = await fetchCodexBarUsage()
 
-    expect(mocks.runProcess).toHaveBeenCalledTimes(3)
+    expect(mocks.runProcess).toHaveBeenCalledTimes(2)
     const requested = mocks.runProcess.mock.calls.map(([spec]) => {
       return spec.args?.[spec.args.indexOf('--provider') + 1]
     })
-    expect(requested).toEqual(['cursor', 'clinepass', 'qwen-cloud'])
-    expect(Object.keys(snapshot.results)).toEqual(['cursor', 'clinepass', 'qwencloud'])
+    expect(requested).toEqual(['cursor', 'qwen-cloud'])
+    expect(Object.keys(snapshot.results)).toEqual(['cursor', 'qwencloud'])
   })
 
   it('always spawns the resolved absolute path, not the bare command name', async () => {
@@ -99,7 +99,6 @@ describe('fetchCodexBarUsage', () => {
     const snapshot = await fetchCodexBarUsage()
 
     expect(snapshot.results.cursor?.limits.status).toBe('error')
-    expect(snapshot.results.clinepass?.limits.status).toBe('ok')
     expect(snapshot.results.qwencloud?.limits.status).toBe('ok')
   })
 })
@@ -122,7 +121,7 @@ describe('fetchCodexBarProvider', () => {
   it('maps a timeout to a network failure', async () => {
     mocks.runProcess.mockResolvedValue(processResult({ timedOut: true, code: null }))
 
-    const { limits } = await fetchCodexBarProvider('clinepass', '/usr/bin/codexbar')
+    const { limits } = await fetchCodexBarProvider('qwencloud', '/usr/bin/codexbar')
 
     expect(limits.status).toBe('error')
     expect(limits.usageMetadata?.failureKind).toBe('network')

@@ -18,7 +18,7 @@ export type UsageProviderSettings = Pick<
   minimaxCookieConfigured: boolean
   minimaxApiKeyConfigured: boolean
   grokAuthConfigured: boolean
-  // Why: the three codexbar-metered providers share one durable signal — the
+  // Why: the two codexbar-metered providers share one durable signal — the
   // presence of the codexbar binary. There is no per-provider credential.
   codexbarAvailable: boolean
 }
@@ -35,7 +35,6 @@ type UsageProviderSnapshots = {
   // Why: optional — with no codexbar binary main never emits these keys, and
   // callers that predate them stay valid.
   cursor?: ProviderRateLimits | null | undefined
-  clinepass?: ProviderRateLimits | null | undefined
   qwencloud?: ProviderRateLimits | null | undefined
 }
 
@@ -123,7 +122,7 @@ export function hasUsageProviderSettingsForProvider(
   if (providerId === 'grok') {
     return settings.grokAuthConfigured === true
   }
-  if (providerId === 'cursor' || providerId === 'clinepass' || providerId === 'qwencloud') {
+  if (providerId === 'cursor' || providerId === 'qwencloud') {
     return settings.codexbarAvailable === true
   }
   return false
@@ -176,7 +175,6 @@ export function isUsageEmptyState(
   const codexBarSnapshotsPending =
     settings.codexbarAvailable === true &&
     (isProviderSnapshotPending(providers.cursor) ||
-      isProviderSnapshotPending(providers.clinepass) ||
       isProviderSnapshotPending(providers.qwencloud))
   if (
     isProviderSnapshotPending(providers.claude) ||
@@ -202,7 +200,6 @@ export function isUsageEmptyState(
     !isProviderConfigured(providers.minimax) &&
     !isProviderConfigured(providers.grok) &&
     !isProviderConfigured(providers.cursor) &&
-    !isProviderConfigured(providers.clinepass) &&
     !isProviderConfigured(providers.qwencloud)
   )
 }

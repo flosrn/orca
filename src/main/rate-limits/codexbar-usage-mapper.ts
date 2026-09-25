@@ -8,11 +8,11 @@ import type {
 /**
  * Providers Orca meters through the CodexBar CLI.
  *
- * Why these three and not CodexBar's full ~80: Claude, Codex and Grok already have native
+ * Why these two and not CodexBar's full ~80: Claude, Codex and Grok already have native
  * fetchers whose numbers are per-account, and a second CodexBar row for them would double-count
- * one subscription. These three have no native fetcher at all.
+ * one subscription. These two have no native fetcher at all.
  */
-export const CODEXBAR_PROVIDERS = ['cursor', 'clinepass', 'qwencloud'] as const
+export const CODEXBAR_PROVIDERS = ['cursor', 'qwencloud'] as const
 
 export type CodexBarProvider = (typeof CODEXBAR_PROVIDERS)[number]
 
@@ -25,7 +25,6 @@ export type CodexBarProvider = (typeof CODEXBAR_PROVIDERS)[number]
  */
 export const CODEXBAR_PROVIDER_CLI_ARGUMENT: Record<CodexBarProvider, string> = {
   cursor: 'cursor',
-  clinepass: 'clinepass',
   qwencloud: 'qwen-cloud'
 }
 
@@ -37,8 +36,8 @@ const WEEKLY_WINDOW_MINUTES = 10_080
  * Every field is optional on purpose: this is an external binary on the user's machine that
  * updates independently of Orca, so the decoder validates rather than trusts. `primary`,
  * `secondary` and `tertiary` are CodexBar's window slots — their durations vary per provider
- * (C‍linePass 5h/7d/30d, C‍ursor 31d/31d/31d, Qwen Cloud 7d only), so the window a slot means is
- * read from `windowMinutes`, never from the slot's name.
+ * (C‍ursor 31d/31d/31d, Qwen Cloud a single 30d primary), so the window a slot means is read
+ * from `windowMinutes`, never from the slot's name.
  */
 type CodexBarWindowPayload = {
   usedPercent?: unknown
@@ -145,8 +144,8 @@ function mapExtraBuckets(value: unknown): RateLimitBucket[] {
 /**
  * Sort CodexBar's three unnamed slots into Orca's named windows by measured duration.
  *
- * Why duration and not slot name: `primary` is a 5h session for C‍linePass but a 31-day pool for
- * C‍ursor. Anything at or under a week that is not exactly a week counts as the session window,
+ * Why duration and not slot name: a slot's duration differs per provider and CodexBar release
+ * (Qwen Cloud's `primary` went from 7d to 30d in CodexBar 0.66). Anything at or under a week that is not exactly a week counts as the session window,
  * a week is weekly, and anything longer is monthly. Two slots that classify the same way keep
  * the higher-used one, since the pill must report the binding constraint.
  */

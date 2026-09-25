@@ -141,7 +141,6 @@ describe('createUISlice hydratePersistedUI', () => {
       'antigravity',
       'grok',
       'cursor',
-      'clinepass',
       'qwencloud'
     ])
     expect(setUI).toHaveBeenCalledWith({
@@ -154,7 +153,6 @@ describe('createUISlice hydratePersistedUI', () => {
         'antigravity',
         'grok',
         'cursor',
-        'clinepass',
         'qwencloud'
       ],
       _portsStatusBarDefaultAdded: true,
@@ -185,6 +183,26 @@ describe('createUISlice hydratePersistedUI', () => {
 
     expect(store.getState().statusBarItems).toEqual(['claude', 'resource-usage'])
     expect(setUI).not.toHaveBeenCalled()
+  })
+
+  it('drops the retired ClinePass item from an older persisted status bar', () => {
+    vi.stubGlobal('window', { api: { ui: { set: vi.fn().mockResolvedValue(undefined) } } })
+    const store = createUIStore()
+
+    store.getState().hydratePersistedUI(
+      makePersistedUI({
+        // Read as the on-disk JSON is: the type no longer admits the retired id.
+        statusBarItems: JSON.parse('["claude", "cursor", "clinepass", "qwencloud"]'),
+        _portsStatusBarDefaultAdded: true,
+        _kimiStatusBarDefaultAdded: true,
+        _minimaxStatusBarDefaultAdded: true,
+        _antigravityStatusBarDefaultAdded: true,
+        _grokStatusBarDefaultAdded: true,
+        _codexBarStatusBarDefaultAdded: true
+      })
+    )
+
+    expect(store.getState().statusBarItems).toEqual(['claude', 'cursor', 'qwencloud'])
   })
 
   it('persists and hydrates the usage percentage display preference', () => {

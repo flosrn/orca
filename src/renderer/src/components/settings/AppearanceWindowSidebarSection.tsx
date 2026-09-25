@@ -55,7 +55,6 @@ function recordStatusBarToggleInteraction(
     id === 'minimax' ||
     id === 'grok' ||
     id === 'cursor' ||
-    id === 'clinepass' ||
     id === 'qwencloud'
   ) {
     recordFeatureInteraction('usage-tracking')

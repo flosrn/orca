@@ -49,11 +49,11 @@ const CURSOR_PAYLOAD = JSON.stringify([
   }
 ])
 
-// ClinePass is the only one of the three that reports all three horizons at once.
-const CLINEPASS_PAYLOAD = JSON.stringify([
+// Synthetic: no metered provider reports all three horizons at once, but the classifier must.
+const THREE_HORIZON_PAYLOAD = JSON.stringify([
   {
     source: 'api',
-    provider: 'clinepass',
+    provider: 'cursor',
     usage: {
       loginMethod: 'API key',
       primary: { windowMinutes: 300, usedPercent: 96, resetsAt: '2026-08-27T12:24:48Z' },
@@ -86,9 +86,9 @@ const QWENCLOUD_PAYLOAD = JSON.stringify([
 
 describe('mapCodexBarUsage', () => {
   it('classifies windows by measured duration, not by slot name', () => {
-    const { limits } = mapCodexBarUsage('clinepass', CLINEPASS_PAYLOAD)
+    const { limits } = mapCodexBarUsage('cursor', THREE_HORIZON_PAYLOAD)
 
-    // `primary` is a 5h session here but a 31-day pool for Cursor, so the slot name decides nothing.
+    // `primary` is a 5h session here but a 31-day pool in real Cursor data, so the slot name decides nothing.
     expect(limits.session?.windowMinutes).toBe(300)
     expect(limits.session?.usedPercent).toBe(96)
     expect(limits.weekly?.windowMinutes).toBe(10080)
@@ -203,6 +203,5 @@ describe('mapCodexBarUsage', () => {
     // CodexBar accepts `qwen-cloud` on the command line but reports `qwencloud` in the payload.
     expect(CODEXBAR_PROVIDER_CLI_ARGUMENT.qwencloud).toBe('qwen-cloud')
     expect(CODEXBAR_PROVIDER_CLI_ARGUMENT.cursor).toBe('cursor')
-    expect(CODEXBAR_PROVIDER_CLI_ARGUMENT.clinepass).toBe('clinepass')
   })
 })

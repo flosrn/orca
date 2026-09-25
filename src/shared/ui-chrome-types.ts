@@ -63,7 +63,6 @@ export type StatusBarItem =
   | 'minimax'
   | 'grok'
   | 'cursor'
-  | 'clinepass'
   | 'qwencloud'
   | 'ssh'
   | 'resource-usage'

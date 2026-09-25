@@ -103,9 +103,6 @@ export function ProviderIcon({ provider }: { provider: string }): React.JSX.Elem
   if (provider === 'cursor') {
     return <AgentIcon agent="cursor" size={13} />
   }
-  if (provider === 'clinepass') {
-    return <AgentIcon agent="cline" size={13} />
-  }
   if (provider === 'qwencloud') {
     return <AgentIcon agent="qwen-code" size={13} />
   }

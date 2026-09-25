@@ -227,16 +227,37 @@ export function presetToQuery(presetId: TaskViewPresetId | null): string {
   }
 }
 
+// Why: persisted UI can still list a retired item; hydration drops what this build no longer renders.
+const KNOWN_STATUS_BAR_ITEMS: Record<StatusBarItem, true> = {
+  claude: true,
+  codex: true,
+  gemini: true,
+  antigravity: true,
+  'opencode-go': true,
+  kimi: true,
+  minimax: true,
+  grok: true,
+  cursor: true,
+  qwencloud: true,
+  ssh: true,
+  'resource-usage': true,
+  ports: true
+}
+
+function isKnownStatusBarItem(id: string): id is StatusBarItem {
+  return Object.hasOwn(KNOWN_STATUS_BAR_ITEMS, id)
+}
+
 export function migrateStatusBarItems(items: readonly string[] | undefined): StatusBarItem[] {
   const source = items ?? DEFAULT_STATUS_BAR_ITEMS
-  const out: string[] = []
+  const out: StatusBarItem[] = []
   for (const id of source) {
     const mapped = id === 'memory' || id === 'sessions' ? 'resource-usage' : id
-    if (!out.includes(mapped)) {
+    if (isKnownStatusBarItem(mapped) && !out.includes(mapped)) {
       out.push(mapped)
     }
   }
-  return out as StatusBarItem[]
+  return out
 }
 
 export function hydrateUnexpectedSignoutDismissal(

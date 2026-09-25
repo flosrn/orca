@@ -96,8 +96,6 @@ function getProviderLetter(provider: ProviderRateLimits['provider']): string {
       return 'X'
     case 'cursor':
       return 'U'
-    case 'clinepass':
-      return 'P'
     case 'qwencloud':
       return 'Q'
   }

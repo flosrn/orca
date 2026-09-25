@@ -294,9 +294,9 @@ const SEGMENT_LINE_MAX_PX = 20
 const STATUS_LABEL_MAX_PX = 74
 
 /**
- * Proves the densest realistic roster stays on one line in a verbose locale: eight lanes — two
- * Claude accounts and Qwen all failing with no cached window, plus two Codex accounts, Grok,
- * Cursor and ClinePass still reporting — rendered in French at a real 1568px window.
+ * Proves the densest realistic roster stays on one line in a verbose locale: seven lanes — two
+ * Claude accounts and Qwen all failing with no cached window, plus two Codex accounts, Grok
+ * and Cursor still reporting — rendered in French at a real 1568px window.
  *
  * Why this fixture: French status copy ("En attente du renouvellement des identifiants") is four
  * times the English "Refresh failed", and the bar's label had no width bound, so the flex row
@@ -359,7 +359,7 @@ test('keeps a dense French roster on a single status-bar line', async ({
       status: 'error' as const,
       ...(failureKind ? { usageMetadata: { failureKind } } : {})
     })
-    const metered = (provider: 'codex' | 'grok' | 'cursor' | 'clinepass', usedPercent: number) => ({
+    const metered = (provider: 'codex' | 'grok' | 'cursor', usedPercent: number) => ({
       provider,
       session: session(usedPercent),
       weekly: null,
@@ -369,7 +369,7 @@ test('keeps a dense French roster on a single status-bar line', async ({
     })
     store.setState({
       detectedAgentIds: ['claude', 'codex', 'grok'],
-      statusBarItems: ['claude', 'codex', 'grok', 'cursor', 'clinepass', 'qwencloud'],
+      statusBarItems: ['claude', 'codex', 'grok', 'cursor', 'qwencloud'],
       statusBarUsageMode: 'verbose',
       settings: {
         ...previous.settings,
@@ -433,7 +433,6 @@ test('keeps a dense French roster on a single status-bar line', async ({
         minimax: null,
         grok: metered('grok', 12),
         cursor: metered('cursor', 71),
-        clinepass: metered('clinepass', 5),
         qwencloud: failing('qwencloud', 'HTTP 500 from the Qwen usage endpoint'),
         grokAuthConfigured: true,
         codexbarAvailable: true,
@@ -463,9 +462,9 @@ test('keeps a dense French roster on a single status-bar line', async ({
 
   const usageTrigger = orcaPage.getByRole('button', { name: 'Utilisation', exact: true })
   await expect(usageTrigger).toBeVisible()
-  // Two Claude lanes, two Codex lanes, Grok, Cursor, ClinePass, Qwen.
+  // Two Claude lanes, two Codex lanes, Grok, Cursor, Qwen.
   const segments = usageTrigger.locator(':scope > span')
-  await expect(segments).toHaveCount(8)
+  await expect(segments).toHaveCount(7)
 
   // The regression in one number: the row's own height. A wrapped label made the trigger taller
   // than the bar it lives in.

@@ -101,7 +101,7 @@ export function useStatusBarController(floatingTerminalOpen: boolean) {
   }
 
   const { claude, codex, gemini, opencodeGo, kimi, antigravity, minimax, grok } = rateLimits
-  const { cursor, clinepass, qwencloud } = rateLimits
+  const { cursor, qwencloud } = rateLimits
 
   // Why: a bar is earned by a live snapshot or durable Settings setup; detection-gating hides per-CLI bars when the agent isn't on PATH.
   // Why: Antigravity has no persisted credential, so a checked status item + detected CLI is the durable "show its slot" signal.
@@ -154,12 +154,10 @@ export function useStatusBarController(floatingTerminalOpen: boolean) {
   // Why: OpenCode Go is web/cookie-auth, not a CLI on PATH, so detection-gating doesn't apply.
   const visibleOpencodeGo = getVisibleUsageProvider('opencode-go', opencodeGo, usageSettings)
   const showOpencodeGo = visibleOpencodeGo !== null && statusBarItems.includes('opencode-go')
-  // Why: codexbar meters these three from one external binary, not a CLI on PATH, so detection-gating doesn't apply.
+  // Why: codexbar meters these two from one external binary, not a CLI on PATH, so detection-gating doesn't apply.
   const visibleCursor = getVisibleUsageProvider('cursor', cursor, usageSettings)
-  const visibleClinePass = getVisibleUsageProvider('clinepass', clinepass, usageSettings)
   const visibleQwenCloud = getVisibleUsageProvider('qwencloud', qwencloud, usageSettings)
   const showCursor = visibleCursor !== null && statusBarItems.includes('cursor')
-  const showClinePass = visibleClinePass !== null && statusBarItems.includes('clinepass')
   const showQwenCloud = visibleQwenCloud !== null && statusBarItems.includes('qwencloud')
   const showSsh = statusBarItems.includes('ssh')
   const showResourceUsage = statusBarItems.includes('resource-usage')
@@ -177,7 +175,6 @@ export function useStatusBarController(floatingTerminalOpen: boolean) {
     showMiniMax ||
     showGrok ||
     showCursor ||
-    showClinePass ||
     showQwenCloud
   const anyVisible = hasVisibleUsageMeters || showResourceUsage
   // Why: include Settings so durable managed accounts count — a configured user isn't shown the empty state while snapshots hydrate.
@@ -192,7 +189,6 @@ export function useStatusBarController(floatingTerminalOpen: boolean) {
       minimax,
       grok,
       cursor,
-      clinepass,
       qwencloud
     },
     usageSettings
@@ -209,7 +205,6 @@ export function useStatusBarController(floatingTerminalOpen: boolean) {
     minimax?.status === 'fetching' ||
     grok?.status === 'fetching' ||
     cursor?.status === 'fetching' ||
-    clinepass?.status === 'fetching' ||
     qwencloud?.status === 'fetching'
 
   const compact = containerWidth < 900
@@ -231,7 +226,6 @@ export function useStatusBarController(floatingTerminalOpen: boolean) {
     showMiniMax ? visibleMiniMax : null,
     showGrok ? visibleGrok : null,
     showCursor ? visibleCursor : null,
-    showClinePass ? visibleClinePass : null,
     showQwenCloud ? visibleQwenCloud : null
   ].filter((p): p is ProviderRateLimits => p !== null)
   const usageBarSegments = buildStatusBarUsageBarSegments({

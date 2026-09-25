@@ -124,7 +124,6 @@ export abstract class RateLimitServiceResultPolicy extends RateLimitServiceFetch
       | 'grok'
       | 'antigravity'
       | 'cursor'
-      | 'clinepass'
       | 'qwencloud'
   ): ProviderRateLimits {
     if (!current) {
@@ -145,20 +144,18 @@ export abstract class RateLimitServiceResultPolicy extends RateLimitServiceFetch
   }
 
   // Why: mark fetching only once the binary is known present, else hosts without CodexBar get
-  // three chips that never settle.
+  // two chips that never settle.
   protected withCodexBarFetchingStatus(
     previous: InternalRateLimitState
-  ): Pick<InternalRateLimitState, 'cursor' | 'clinepass' | 'qwencloud'> {
+  ): Pick<InternalRateLimitState, 'cursor' | 'qwencloud'> {
     if (!this.codexbarAvailable) {
       return {
         cursor: previous.cursor,
-        clinepass: previous.clinepass,
         qwencloud: previous.qwencloud
       }
     }
     return {
       cursor: this.withFetchingStatus(previous.cursor, 'cursor'),
-      clinepass: this.withFetchingStatus(previous.clinepass, 'clinepass'),
       qwencloud: this.withFetchingStatus(previous.qwencloud, 'qwencloud')
     }
   }
@@ -183,7 +180,6 @@ export abstract class RateLimitServiceResultPolicy extends RateLimitServiceFetch
     this.updateState({
       ...this.state,
       cursor: apply('cursor', previousState.cursor),
-      clinepass: apply('clinepass', previousState.clinepass),
       qwencloud: apply('qwencloud', previousState.qwencloud)
     })
   }

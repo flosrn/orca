@@ -22,7 +22,6 @@ export function getUsageProviderAccountsSectionId(
       // Why: Orca must not mutate Kimi's CLI-owned credential lifecycle.
       return null
     case 'cursor':
-    case 'clinepass':
     case 'qwencloud':
       // Why: codexbar-metered providers are read-only — Orca owns no sign-in for them.
       return null

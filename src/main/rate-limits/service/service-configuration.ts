@@ -136,7 +136,7 @@ export abstract class RateLimitServiceConfiguration extends RateLimitServiceAcco
       minimaxCookieConfigured: hasMiniMaxSessionCookie(),
       minimaxApiKeyConfigured: hasMiniMaxApiKey(),
       grokAuthConfigured: this.grokAuthConfigured,
-      // Why: absence of the shared binary is the single reason all three CodexBar meters can't
+      // Why: absence of the shared binary is the single reason both CodexBar meters can't
       // report; the renderer treats it as "unconfigured", not as a failure.
       codexbarAvailable: this.codexbarAvailable,
       claudeTarget: this.claudeFetchTarget,

@@ -9,8 +9,8 @@ const DEFAULT_ON_STATUS_BAR_ITEMS = [
   ['_minimaxStatusBarDefaultAdded', ['minimax']],
   ['_antigravityStatusBarDefaultAdded', ['antigravity']],
   ['_grokStatusBarDefaultAdded', ['grok']],
-  // Why: the three CodexBar-metered providers share one durable signal (the codexbar binary), hence one flag.
-  ['_codexBarStatusBarDefaultAdded', ['cursor', 'clinepass', 'qwencloud']]
+  // Why: the two CodexBar-metered providers share one durable signal (the codexbar binary), hence one flag.
+  ['_codexBarStatusBarDefaultAdded', ['cursor', 'qwencloud']]
 ] as const satisfies readonly (readonly [keyof PersistedUIState, readonly StatusBarItem[]])[]
 
 export function hydrateStatusBarItems(ui: PersistedUIState): StatusBarItem[] {

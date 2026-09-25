@@ -36,7 +36,6 @@
         "antigravityToggleDescription": "Muestra el uso de suscripción de Antigravity para el espacio de trabajo activo.",
         "grokToggleDescription": "Muestra el uso de créditos de suscripción de Grok cuando has iniciado sesión con Grok CLI.",
         "cursorToggleDescription": "Muestra el uso de suscripción de Cursor informado por la CLI de CodexBar.",
-        "clinePassToggleDescription": "Muestra el uso de suscripción de ClinePass informado por la CLI de CodexBar.",
         "qwenCloudToggleDescription": "Muestra el uso de suscripción de Qwen Cloud informado por la CLI de CodexBar."
       },
       "menuBarIcon": {
@@ -3332,7 +3331,6 @@
             "grokUsageAria": "Abrir detalles de uso de Grok",
             "grokUsageMenu": "Uso de Grok",
             "cursorUsageMenu": "Uso de Cursor",
-            "clinePassUsageMenu": "Uso de ClinePass",
             "qwenCloudUsageMenu": "Uso de Qwen Cloud",
             "floatingTerminalNewActivity": "{{label}}, nueva actividad",
             "codexSignInSuccess": "Sesión iniciada en Codex",
@@ -7996,10 +7994,6 @@
             "a3f1c07d92": "Uso de Cursor",
             "d7a4b13c85": "Muestra el uso de suscripción de Cursor en la barra de estado.",
             "e8b5c24d96": "cursor",
-            "b4e2d18a63": "Uso de ClinePass",
-            "f9c6d35ea7": "Muestra el uso de suscripción de ClinePass en la barra de estado.",
-            "0ad7e46fb8": "clinepass",
-            "1be8f570c9": "cline",
             "c5d3e29b74": "Uso de Qwen Cloud",
             "3da17692eb": "Muestra el uso de suscripción de Qwen Cloud en la barra de estado.",
             "4eb287a3fc": "qwen",

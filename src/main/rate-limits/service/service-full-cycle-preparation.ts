@@ -42,7 +42,7 @@ export type FetchAllCyclePrepared = {
   grokResultPromise: Promise<
     { status: 'fulfilled'; value: ProviderRateLimits } | { status: 'rejected'; reason: unknown }
   >
-  // Why: one batch reads all three CodexBar providers in parallel; started here so its CLI
+  // Why: one batch reads both CodexBar providers in parallel; started here so its CLI
   // round trips overlap the HTTP fetches instead of adding to the cycle's latency.
   codexBarSnapshotPromise: Promise<CodexBarUsageSnapshot>
 }

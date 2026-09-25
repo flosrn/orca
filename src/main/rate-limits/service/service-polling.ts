@@ -80,7 +80,6 @@ export abstract class RateLimitServicePolling extends RateLimitServiceFetchQueue
       grok: this.state.grok,
       antigravity: this.state.antigravity,
       cursor: this.state.cursor,
-      clinepass: this.state.clinepass,
       qwencloud: this.state.qwencloud
     }
     return Object.entries(byProvider)
@@ -91,7 +90,7 @@ export abstract class RateLimitServicePolling extends RateLimitServiceFetchQueue
       .filter(
         ({ provider }) =>
           this.codexbarAvailable ||
-          (provider !== 'cursor' && provider !== 'clinepass' && provider !== 'qwencloud')
+          (provider !== 'cursor' && provider !== 'qwencloud')
       )
   }
 

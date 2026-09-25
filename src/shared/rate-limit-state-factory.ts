@@ -12,7 +12,6 @@ export function createEmptyRateLimitState(overrides: Partial<RateLimitState> = {
     minimax: null,
     grok: null,
     cursor: null,
-    clinepass: null,
     qwencloud: null,
     minimaxCookieConfigured: false,
     minimaxApiKeyConfigured: false,

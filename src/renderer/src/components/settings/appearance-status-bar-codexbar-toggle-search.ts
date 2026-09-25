@@ -11,7 +11,7 @@ export type StatusBarToggleSearchEntry = {
 }
 
 // Extracted rather than inlined in appearance-status-bar-search.ts: that file sits at the
-// max-lines budget, and all three providers are metered by the one CodexBar CLI anyway.
+// max-lines budget, and both providers are metered by the one CodexBar CLI anyway.
 export function getCodexBarStatusBarToggleSearchEntries(): readonly StatusBarToggleSearchEntry[] {
   const statusBarKeyword = translateSearchKeyword(
     'auto.components.settings.appearance.search.896eb53fd4',
@@ -50,29 +50,6 @@ export function getCodexBarStatusBarToggleSearchEntries(): readonly StatusBarTog
       toggleDescription: translate(
         'settings.appearance.statusBar.cursorToggleDescription',
         'Show Cursor subscription usage reported by the CodexBar CLI.'
-      )
-    },
-    {
-      id: 'clinepass',
-      title: translate('auto.components.settings.appearance.search.b4e2d18a63', 'ClinePass Usage'),
-      description: translate(
-        'auto.components.settings.appearance.search.f9c6d35ea7',
-        'Show ClinePass subscription usage in the status bar.'
-      ),
-      keywords: [
-        ...statusBarKeyword,
-        ...translateSearchKeyword(
-          'auto.components.settings.appearance.search.0ad7e46fb8',
-          'clinepass'
-        ),
-        ...translateSearchKeyword('auto.components.settings.appearance.search.1be8f570c9', 'cline'),
-        ...usageKeyword,
-        ...subscriptionKeyword,
-        ...codexbarKeyword
-      ],
-      toggleDescription: translate(
-        'settings.appearance.statusBar.clinePassToggleDescription',
-        'Show ClinePass subscription usage reported by the CodexBar CLI.'
       )
     },
     {

@@ -34,12 +34,11 @@ export abstract class RateLimitServiceState {
     minimax: null,
     grok: null,
     cursor: null,
-    clinepass: null,
     qwencloud: null
   }
   protected grokAuthConfigured = readGrokAuthSession().status === 'ok'
   // Why: probing the binary is async (PATH lookup), so it can only be known from the first fetch
-  // cycle onward; false keeps the three CodexBar meters off the bar until then.
+  // cycle onward; false keeps the two CodexBar meters off the bar until then.
   protected codexbarAvailable = false
   protected pollInterval: number = DEFAULT_POLL_MS
   protected timer: ReturnType<typeof setInterval> | null = null
@@ -55,7 +54,6 @@ export abstract class RateLimitServiceState {
     grok: 0,
     antigravity: 0,
     cursor: 0,
-    clinepass: 0,
     qwencloud: 0
   }
   // Why: consecutive failures drive exponential backoff of the fast activation-retry lane; reset on any success/unavailable result.
@@ -69,7 +67,6 @@ export abstract class RateLimitServiceState {
     grok: 0,
     antigravity: 0,
     cursor: 0,
-    clinepass: 0,
     qwencloud: 0
   }
   protected mainWindow: BrowserWindow | null = null

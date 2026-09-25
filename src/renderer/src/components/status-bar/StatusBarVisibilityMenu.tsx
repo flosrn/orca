@@ -144,16 +144,6 @@ export function StatusBarVisibilityMenu({
           {translate('auto.components.status.bar.StatusBar.cursorUsageMenu', 'Cursor Usage')}
         </DropdownMenuCheckboxItem>
         <DropdownMenuCheckboxItem
-          checked={statusBarItems.includes('clinepass')}
-          onCheckedChange={() => {
-            recordFeatureInteraction('usage-tracking')
-            toggleStatusBarItem('clinepass')
-          }}
-        >
-          <AgentIcon agent="cline" size={14} />
-          {translate('auto.components.status.bar.StatusBar.clinePassUsageMenu', 'ClinePass Usage')}
-        </DropdownMenuCheckboxItem>
-        <DropdownMenuCheckboxItem
           checked={statusBarItems.includes('qwencloud')}
           onCheckedChange={() => {
             recordFeatureInteraction('usage-tracking')

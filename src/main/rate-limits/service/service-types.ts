@@ -129,7 +129,6 @@ export type InternalRateLimitState = {
   minimax: ProviderRateLimits | null
   grok: ProviderRateLimits | null
   cursor: ProviderRateLimits | null
-  clinepass: ProviderRateLimits | null
   qwencloud: ProviderRateLimits | null
 }
 

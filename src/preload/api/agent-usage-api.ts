@@ -55,7 +55,7 @@ export type RateLimitsApi = {
   fetchInactiveCodexAccounts: () => Promise<void>
   refreshMiniMax: () => Promise<RateLimitState>
   refreshGrok: () => Promise<RateLimitState>
-  /** One CodexBar CLI meters Cursor, ClinePass and Qwen Cloud, so a single refresh covers all three. */
+  /** One CodexBar CLI meters Cursor and Qwen Cloud, so a single refresh covers both. */
   refreshCodexBar: () => Promise<RateLimitState>
   onUpdate: (callback: (state: RateLimitState) => void) => () => void
 }

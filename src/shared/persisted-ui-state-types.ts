@@ -118,7 +118,7 @@ export type PersistedUIState = {
   _antigravityStatusBarDefaultAdded?: boolean
   /** One-shot migration flag for adding the default-on Grok status item. */
   _grokStatusBarDefaultAdded?: boolean
-  /** One-shot migration flag for adding the default-on CodexBar status items (Cursor, ClinePass, Qwen Cloud). */
+  /** One-shot migration flag for adding the default-on CodexBar status items (Cursor, Qwen Cloud). */
   _codexBarStatusBarDefaultAdded?: boolean
   statusBarItems: StatusBarItem[]
   statusBarVisible: boolean

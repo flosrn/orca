@@ -70,7 +70,6 @@ export const StatusBarItem = z.enum([
   'minimax',
   'grok',
   'cursor',
-  'clinepass',
   'qwencloud',
   'ssh',
   'resource-usage',

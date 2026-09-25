@@ -36,7 +36,6 @@
         "antigravityToggleDescription": "アクティブなワークスペースの Antigravity サブスクリプション使用量を表示します。",
         "grokToggleDescription": "Grok CLI でサインインしている場合に Grok サブスクリプションのクレジット使用量を表示します。",
         "cursorToggleDescription": "CodexBar CLI から取得した Cursor サブスクリプション使用量を表示します。",
-        "clinePassToggleDescription": "CodexBar CLI から取得した ClinePass サブスクリプション使用量を表示します。",
         "qwenCloudToggleDescription": "CodexBar CLI から取得した Qwen Cloud サブスクリプション使用量を表示します。"
       },
       "menuBarIcon": {
@@ -3332,7 +3331,6 @@
             "grokUsageAria": "Grok の使用状況詳細を開く",
             "grokUsageMenu": "Grok の使用状況",
             "cursorUsageMenu": "Cursor の使用状況",
-            "clinePassUsageMenu": "ClinePass の使用状況",
             "qwenCloudUsageMenu": "Qwen Cloud の使用状況",
             "floatingTerminalNewActivity": "{{label}}、新規アクティビティ",
             "codexSignInSuccess": "Codex にサインインしました",
@@ -8018,10 +8016,6 @@
             "a3f1c07d92": "Cursor の使用状況",
             "d7a4b13c85": "ステータスバーに Cursor サブスクリプション使用量を表示します。",
             "e8b5c24d96": "cursor",
-            "b4e2d18a63": "ClinePass の使用状況",
-            "f9c6d35ea7": "ステータスバーに ClinePass サブスクリプション使用量を表示します。",
-            "0ad7e46fb8": "clinepass",
-            "1be8f570c9": "cline",
             "c5d3e29b74": "Qwen Cloud の使用状況",
             "3da17692eb": "ステータスバーに Qwen Cloud サブスクリプション使用量を表示します。",
             "4eb287a3fc": "qwen",
