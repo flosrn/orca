@@ -115,6 +115,7 @@ export function useStatusBarController(floatingTerminalOpen: boolean) {
     antigravityUsageConfigured,
     minimaxCookieConfigured: rateLimits.minimaxCookieConfigured,
     minimaxApiKeyConfigured: rateLimits.minimaxApiKeyConfigured,
+    opencodeGoApiKeyConfigured: rateLimits.opencodeGoApiKeyConfigured,
     grokAuthConfigured: rateLimits.grokAuthConfigured,
     codexbarAvailable: rateLimits.codexbarAvailable
   }

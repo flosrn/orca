@@ -40,6 +40,7 @@ export abstract class RateLimitServiceState {
   // Why: probing the binary is async (PATH lookup), so it can only be known from the first fetch
   // cycle onward; false keeps the two CodexBar meters off the bar until then.
   protected codexbarAvailable = false
+  protected openCodeGoApiKeyConfigured = false
   protected pollInterval: number = DEFAULT_POLL_MS
   protected timer: ReturnType<typeof setInterval> | null = null
   protected deferredStartupRefreshTimer: ReturnType<typeof setTimeout> | null = null

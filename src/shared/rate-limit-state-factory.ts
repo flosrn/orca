@@ -15,6 +15,7 @@ export function createEmptyRateLimitState(overrides: Partial<RateLimitState> = {
     qwencloud: null,
     minimaxCookieConfigured: false,
     minimaxApiKeyConfigured: false,
+    opencodeGoApiKeyConfigured: false,
     grokAuthConfigured: false,
     codexbarAvailable: false,
     claudeTarget: { runtime: 'host', wslDistro: null },
