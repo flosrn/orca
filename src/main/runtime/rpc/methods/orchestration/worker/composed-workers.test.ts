@@ -192,7 +192,7 @@ describe('orchestration RPC methods', () => {
         launchToken: expect.any(String),
         // Why: the preamble travels in the launch argv — the capability the
         // worker presents later must be the one baked in at spawn.
-        agentPrompt: expect.stringContaining('--dispatch-capability dcap_'),
+        startupPrompt: expect.stringContaining('--dispatch-capability dcap_'),
         title: `worker-${task.id}`,
         surfaceOwner: false
       })
@@ -212,7 +212,7 @@ describe('orchestration RPC methods', () => {
       })
 
       const createOptions = vi.mocked(runtime.createTerminal).mock.calls.at(-1)?.[1]
-      expect(createOptions?.agentPrompt).toContain('orca-ide orchestration send')
+      expect(createOptions?.startupPrompt).toContain('orca-ide orchestration send')
       expect(runtime.getWorktreeOrchestrationCliCommand).toHaveBeenCalledWith('repo::worktree')
     })
     it('applies and reports opaque per-invocation model preferences', async () => {

@@ -17,6 +17,35 @@ const jsonl = (rows: unknown[]) => `${rows.map((row) => JSON.stringify(row)).joi
 const filler = jsonl([{ type: 'irrelevant_event', payload: 'x'.repeat(1024) }]).repeat(11000)
 
 describe('large remote history through real relay filesystem', () => {
+  it('reports an oversized record without losing healthy sessions or publishing a partial session', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'orca-history-record-limit-'))
+    try {
+      const directory = join(home, '.codex', 'sessions')
+      await mkdir(directory, { recursive: true })
+      const metadata = (id: string) =>
+        jsonl([{ type: 'session_meta', payload: { id, cwd: '/repo' } }])
+      const badPath = join(directory, 'bad.jsonl')
+      await writeFile(badPath, metadata('bad') + 'x'.repeat(11 * 1024 * 1024))
+      await writeFile(join(directory, 'good.jsonl'), metadata('good'))
+      const result = await scanRemoteAiVaultSessions({
+        provider: createRelayAiVaultFilesystemProvider(),
+        executionHostId: 'ssh:record-limit',
+        remoteHome: home,
+        hostPlatform: platform,
+        unlimited: true
+      })
+      expect(result.sessions.map((session) => session.sessionId)).toEqual(['good'])
+      expect(result.issues).toEqual([
+        expect.objectContaining({
+          path: badPath.replace(/\\/g, '/'),
+          message: 'Session transcript record exceeds 10485760 byte limit'
+        })
+      ])
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
   it('lists a large Codex rollout with middle messages and usage intact', async () => {
     const home = await mkdtemp(join(tmpdir(), 'orca-history-17744-'))
     try {
@@ -99,7 +128,10 @@ describe('large remote history through real relay filesystem', () => {
           path = join(home, '.hermes', 'sessions', 'large.json')
           record = { session_id: 'large', cwd: '/repo', model: 'test-model', messages }
         } else if (agent === 'devin') {
-          path = join(home, '.local', 'share', 'devin', 'cli', 'transcripts', 'large.json')
+          path =
+            platform.os === 'win32'
+              ? join(home, 'AppData', 'Roaming', 'devin', 'cli', 'transcripts', 'large.json')
+              : join(home, '.local', 'share', 'devin', 'cli', 'transcripts', 'large.json')
           record = {
             session_id: 'large',
             working_directory: '/repo',

@@ -72,7 +72,7 @@ export async function startArgvWorkerDispatch(args: {
     ...(args.launchPreferences ? { launchPreferences: args.launchPreferences } : {}),
     preAllocatedHandle,
     launchToken: workerLaunchToken,
-    agentPrompt: preamble,
+    startupPrompt: preamble,
     title: `worker-${args.task.id}`,
     // Why: dispatching a worker is background work; it must not pull the
     // sidebar to the worker's workspace while the user reads somewhere else.

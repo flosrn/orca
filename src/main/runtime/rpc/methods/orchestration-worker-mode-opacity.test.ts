@@ -226,9 +226,9 @@ describe('a worker cannot tell which mode it is running in', () => {
     expect(terminal.mode.mode).toBe('terminal')
     const structuredPreamble = structuredPreambles[0] as string
     const terminalPreamble = vi.mocked(runtime.createTerminal).mock.calls.find((call) => {
-      const opts = call[1] as { agentPrompt?: string } | undefined
-      return typeof opts?.agentPrompt === 'string'
-    })?.[1]?.agentPrompt as string
+      const opts = call[1] as { startupPrompt?: string } | undefined
+      return typeof opts?.startupPrompt === 'string'
+    })?.[1]?.startupPrompt as string
     expect(normalizePreamble(structuredPreamble, STRUCTURED_HANDLE, structured.dispatchId)).toBe(
       normalizePreamble(terminalPreamble, TERMINAL_HANDLE, terminal.dispatchId)
     )
@@ -252,7 +252,7 @@ describe('a worker cannot tell which mode it is running in', () => {
 
     expect(result).toMatchObject({ state: 'ready' })
     expect(showTerminal).not.toHaveBeenCalled()
-    const subDispatchPrompt = vi.mocked(runtime.createTerminal).mock.calls.at(-1)?.[1]?.agentPrompt
+    const subDispatchPrompt = vi.mocked(runtime.createTerminal).mock.calls.at(-1)?.[1]?.startupPrompt
     expect(subDispatchPrompt).toContain('=== SUB-DISPATCH ===')
   })
 

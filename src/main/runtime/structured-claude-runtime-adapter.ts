@@ -1,3 +1,4 @@
+import type { PermissionMode } from '@anthropic-ai/claude-agent-sdk'
 import { proveClaudeTranscriptBranch } from '../claude/claude-transcript-branch-proof'
 import type { AgentSessionRecord } from '../../shared/agent-session-record'
 import type { AgentSessionBackgroundTaskState } from '../../shared/agent-session-wire'
@@ -30,6 +31,8 @@ export type StructuredClaudeRuntimeAdapterDeps = {
   resolveClaudeAuthPolicy: (input: {
     claudeConfigDir: string
   }) => Promise<ClaudeStructuredAuthPolicy> | ClaudeStructuredAuthPolicy
+  /** The user's Agent Permissions setting for Claude; absent means prompting. */
+  resolveClaudePermissionMode?: () => Promise<PermissionMode> | PermissionMode
   readClaudeManagedAccountGate?: () => ClaudeManagedAccountGateSettings | null
   openClaudeConnection?: ClaudeStructuredSessionAdapterDeps['openConnection']
   readProcessStartTime?: ClaudeStructuredSessionAdapterDeps['readProcessStartTime']
@@ -52,6 +55,9 @@ export function createStructuredClaudeRuntimeAdapter(
       resolveCommand: deps.resolveClaudeCommand ?? resolveClaudeCommand,
       ...(deps.resolveClaudeLaunchEnv ? { resolveEnv: deps.resolveClaudeLaunchEnv } : {}),
       resolveAuthPolicy: deps.resolveClaudeAuthPolicy,
+      ...(deps.resolveClaudePermissionMode
+        ? { resolvePermissionMode: deps.resolveClaudePermissionMode }
+        : {}),
       ...(deps.readClaudeManagedAccountGate
         ? { readManagedAccountGate: deps.readClaudeManagedAccountGate }
         : {})

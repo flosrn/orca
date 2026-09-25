@@ -134,6 +134,23 @@ describe('NativeChatStructuredSession', () => {
     expect(mocks.fileLinkClick).toHaveBeenCalledWith(event, 'file:///repo/src/a.ts')
   })
 
+  // The list defaults to visible, so a dropped prop silently re-arms auto-scroll
+  // on reveal and drags a reader who left a hidden pane detached to the bottom.
+  it.each([true, false])('tells the transcript the pane is visible: %s', (isVisible) => {
+    render(
+      <NativeChatStructuredSession
+        isVisible={isVisible}
+        isFocusedGroup
+        tabId="structured-tab-visibility"
+        sessionId="session-visibility"
+        target={{ kind: 'local' }}
+        agent="codex"
+      />
+    )
+
+    expect(mocks.messageListProps?.isVisible).toBe(isVisible)
+  })
+
   // Turn status and transcript image previews shipped Codex-first. Every
   // structured session renders through the same list, so neither is agent-gated.
   it.each(['codex', 'claude'] as const)(
@@ -184,7 +201,10 @@ describe('NativeChatStructuredSession', () => {
     expect(screen.queryByTestId('structured-composer')).toBeNull()
 
     act(() => mocks.questionCardProps?.onCancel())
-    expect(mocks.cancel).toHaveBeenCalledWith('turn-question')
+    expect(mocks.cancel).toHaveBeenCalledWith('turn-question', {
+      itemId: 'legacy-question-item',
+      expectedRevision: 1
+    })
     expect(mocks.messageListProps?.showLiveTurnActivity).toBe(false)
 
     mocks.promptItems = []
@@ -250,7 +270,10 @@ describe('NativeChatStructuredSession', () => {
     expect(mocks.messageListProps?.showLiveTurnActivity).toBe(false)
 
     act(() => mocks.approvalCardProps?.onCancel?.())
-    expect(mocks.cancel).toHaveBeenCalledWith('turn-approval')
+    expect(mocks.cancel).toHaveBeenCalledWith('turn-approval', {
+      itemId: 'approval-item',
+      expectedRevision: 1
+    })
   })
 
   // Every background-task test mounts the same local Claude session; only the ids
@@ -348,7 +371,7 @@ describe('NativeChatStructuredSession', () => {
     let finishFirst!: (value: unknown) => void
     let finishSecond!: (value: unknown) => void
     mocks.stopBackgroundTask.mockImplementation(
-      (_sessionId: string, taskId: string) =>
+      (_sessionId: string, taskId?: string) =>
         new Promise((resolve) => {
           if (taskId === 'task-one') {
             finishFirst = resolve

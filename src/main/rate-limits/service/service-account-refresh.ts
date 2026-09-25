@@ -119,7 +119,8 @@ export abstract class RateLimitServiceAccountRefresh extends RateLimitServiceIna
       const state = await this.fetchCodexResetResultState(
         codexTarget,
         codexHomePath,
-        scopedStateBeforeReset
+        scopedStateBeforeReset,
+        outcome
       )
       return { outcome, state }
     } catch (error) {
