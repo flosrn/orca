@@ -120,6 +120,16 @@ describe('serve-mode-argv', () => {
     ])
   })
 
+  it('normalizes loopback bind without treating its address as the serve subcommand', () => {
+    expect(normalizeServeModeArgv(['/AppRun', 'serve', '--bind-host=127.0.0.1'])).toEqual([
+      '/AppRun',
+      '--serve',
+      '--serve-bind-host',
+      '127.0.0.1'
+    ])
+    expect(findServeSubcommandIndex(['/AppRun', '--bind-host', 'serve'])).toBe(-1)
+  })
+
   it('keeps Electron-injected Chromium switches while normalizing direct serve', () => {
     expect(
       normalizeServeModeArgv([
@@ -149,6 +159,8 @@ describe('serve-mode-argv', () => {
       '6768',
       '--serve-pairing-address',
       '100.64.1.20',
+      '--serve-bind-host',
+      '127.0.0.1',
       '--serve-no-pairing',
       '--serve-mobile-pairing',
       '--serve-recipe-json',

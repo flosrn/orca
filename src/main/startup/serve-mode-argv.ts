@@ -18,6 +18,7 @@ const CLI_TO_SERVE_FLAG = new Map([
 const CLI_TO_SERVE_VALUE_FLAG = new Map([
   ['--port', '--serve-port'],
   ['--pairing-address', '--serve-pairing-address'],
+  ['--bind-host', '--serve-bind-host'],
   ['--project-root', '--serve-project-root']
 ])
 
@@ -30,6 +31,7 @@ export const VALUE_TAKING_FLAGS = new Set([
   ...CLI_TO_SERVE_VALUE_FLAG.keys(),
   '--serve-port',
   '--serve-pairing-address',
+  '--serve-bind-host',
   '--serve-project-root',
   '--disable-features',
   '--user-data-dir',

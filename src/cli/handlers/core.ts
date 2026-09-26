@@ -113,10 +113,18 @@ export const CORE_HANDLERS: Record<string, CommandHandler> = {
     }
     const port = getOptionalServePort(flags)
     const pairingAddressValue = flags.get('pairing-address')
+    const bindHostValue = flags.get('bind-host')
+    if (bindHostValue !== undefined && bindHostValue !== '127.0.0.1') {
+      throw new RuntimeClientError(
+        'invalid_argument',
+        '--bind-host only supports 127.0.0.1 (loopback).'
+      )
+    }
     const exitCode = await serveOrcaApp({
       json,
       port,
       pairingAddress: typeof pairingAddressValue === 'string' ? pairingAddressValue : null,
+      bindHost: bindHostValue === '127.0.0.1' ? bindHostValue : null,
       noPairing,
       mobilePairing,
       recipeJson,

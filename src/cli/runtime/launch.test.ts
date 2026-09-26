@@ -393,6 +393,21 @@ describe('serveOrcaApp', () => {
     )
   })
 
+  it('passes an explicit loopback bind to the foreground server child', async () => {
+    const child = new FakeChildProcess()
+    spawnMock.mockReturnValue(child)
+    const launched = serveOrcaApp({ bindHost: '127.0.0.1', pairingAddress: '100.64.1.20' })
+    expect(spawnMock.mock.calls[0]?.[1]).toEqual([
+      '--serve',
+      '--serve-pairing-address',
+      '100.64.1.20',
+      '--serve-bind-host',
+      '127.0.0.1'
+    ])
+    child.emit('exit', 0, null)
+    await expect(launched).resolves.toBe(0)
+  })
+
   it('passes the app root before serve flags for dev Electron executables', async () => {
     process.env.ORCA_APP_EXECUTABLE = '/repo/node_modules/.bin/electron'
     process.env.ORCA_APP_EXECUTABLE_NEEDS_APP_ROOT = '1'

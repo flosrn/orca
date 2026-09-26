@@ -66,11 +66,36 @@ describe('orca cli worktree awareness', () => {
       json: true,
       port: '6768',
       pairingAddress: '100.64.1.20',
+      bindHost: null,
       noPairing: true,
       mobilePairing: false,
       recipeJson: false,
       projectRoot: null
     })
+  })
+
+  it('forwards explicit loopback bind independently of the advertised address', async () => {
+    serveOrcaAppMock.mockResolvedValue(0)
+    await main(
+      ['serve', '--bind-host', '127.0.0.1', '--pairing-address', '100.64.1.20'],
+      '/tmp/repo'
+    )
+    expect(serveOrcaAppMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindHost: '127.0.0.1',
+        pairingAddress: '100.64.1.20'
+      })
+    )
+  })
+
+  it('rejects a public bind before spawning the server', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const priorExitCode = process.exitCode
+    await main(['serve', '--bind-host', '0.0.0.0'], '/tmp/repo')
+    expect(serveOrcaAppMock).not.toHaveBeenCalled()
+    expect(errSpy.mock.calls.flat().join('\n')).toContain('--bind-host only supports 127.0.0.1')
+    expect(process.exitCode).toBe(1)
+    process.exitCode = priorExitCode
   })
 
   it('starts a foreground headless server with mobile pairing enabled', async () => {
@@ -85,6 +110,7 @@ describe('orca cli worktree awareness', () => {
       json: true,
       port: null,
       pairingAddress: '100.64.1.20',
+      bindHost: null,
       noPairing: false,
       mobilePairing: true,
       recipeJson: false,
@@ -111,6 +137,7 @@ describe('orca cli worktree awareness', () => {
       json: false,
       port: null,
       pairingAddress: 'wss://sandbox.example.com',
+      bindHost: null,
       noPairing: false,
       mobilePairing: false,
       recipeJson: true,

@@ -82,6 +82,7 @@ export function serveOrcaApp(
     json?: boolean
     port?: string | null
     pairingAddress?: string | null
+    bindHost?: string | null
     noPairing?: boolean
     mobilePairing?: boolean
     recipeJson?: boolean
@@ -99,6 +100,9 @@ export function serveOrcaApp(
   }
   if (args.pairingAddress) {
     childArgs.push('--serve-pairing-address', args.pairingAddress)
+  }
+  if (args.bindHost) {
+    childArgs.push('--serve-bind-host', args.bindHost)
   }
   if (args.noPairing) {
     childArgs.push('--serve-no-pairing')

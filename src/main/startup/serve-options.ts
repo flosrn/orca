@@ -7,6 +7,7 @@ export type ServeOptions = {
   json: boolean
   wsPort?: number
   pairingAddress: string | null
+  bindHost: string | null
   noPairing: boolean
   mobilePairing: boolean
   recipeJson: boolean
@@ -106,10 +107,21 @@ export function getServeOptions(argv: readonly string[]): ServeOptions {
     wsPort = parsedPort
   }
 
+  const bindHost = valueAfter(
+    optionsArgv,
+    ['--serve-bind-host', '--bind-host'],
+    true,
+    '--serve-bind-host'
+  )
+  if (bindHost !== null && bindHost !== '127.0.0.1') {
+    throw new Error('--bind-host only supports 127.0.0.1 (loopback).')
+  }
+
   const options: ServeOptions = {
     // The CLI uses `flags.has('json')`, so even `--json=false` enables JSON output.
     json: hasFlag(optionsArgv, ['--serve-json', '--json']),
     ...(wsPort !== undefined ? { wsPort } : {}),
+    bindHost,
     pairingAddress: valueAfter(
       optionsArgv,
       ['--serve-pairing-address', '--pairing-address'],

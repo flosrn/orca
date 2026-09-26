@@ -10,11 +10,48 @@ describe('getServeOptions', () => {
       json: false,
       wsPort: 6768,
       pairingAddress: null,
+      bindHost: null,
       noPairing: true,
       mobilePairing: false,
       recipeJson: false,
       projectRoot: null
     })
+  })
+
+  it('pins an explicit loopback bind without changing the advertised address', () => {
+    const argv = normalizeServeModeArgv([
+      '/AppRun',
+      'serve',
+      '--bind-host',
+      '127.0.0.1',
+      '--pairing-address',
+      '100.64.1.20'
+    ])
+    expect(getServeOptions(argv)).toMatchObject({
+      bindHost: '127.0.0.1',
+      pairingAddress: '100.64.1.20'
+    })
+    expect(
+      getServeOptions(['/AppRun', '--serve', '--serve-pairing-address=127.0.0.1'])
+    ).toMatchObject({ pairingAddress: '127.0.0.1', bindHost: null })
+  })
+
+  it.each(['0.0.0.0', '192.0.2.1', 'example.com', '127.0.0.2'])(
+    'rejects a non-approved bind address %j',
+    (address) => {
+      expect(() => getServeOptions(['/AppRun', '--serve', `--serve-bind-host=${address}`])).toThrow(
+        /--bind-host.*127\.0\.0\.1/
+      )
+    }
+  )
+
+  it('rejects a missing or empty bind-host value', () => {
+    expect(() => getServeOptions(['/AppRun', '--serve', '--serve-bind-host'])).toThrow(
+      /Missing value for --serve-bind-host/
+    )
+    expect(() => getServeOptions(['/AppRun', '--serve', '--serve-bind-host='])).toThrow(
+      /Missing value for --serve-bind-host/
+    )
   })
 
   it('accepts equals-form values in the normalized shape', () => {
@@ -140,6 +177,7 @@ describe('getServeOptions', () => {
     ).toEqual({
       json: false,
       pairingAddress: null,
+      bindHost: null,
       noPairing: false,
       mobilePairing: false,
       recipeJson: false,

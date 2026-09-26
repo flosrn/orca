@@ -518,8 +518,11 @@ describe('OrcaRuntimeRpcServer WebSocket bind host (STA-2370)', () => {
     }
   })
 
-  it('honours a pinned bind host over exposeNetworkByDefault (orcad --bind)', async () => {
+  it('pins serve loopback despite its wide default and a previously connected client', async () => {
     const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-rpc-'))
+    const registry = new DeviceRegistry(userDataPath)
+    const device = registry.getOrCreatePendingDevice('CLI', 'runtime', 'network')
+    registry.updateLastSeen(device.deviceId)
     const server = new OrcaRuntimeRpcServer({
       runtime: new OrcaRuntimeService(),
       userDataPath,
@@ -534,6 +537,12 @@ describe('OrcaRuntimeRpcServer WebSocket bind host (STA-2370)', () => {
     await server.start()
     try {
       expect(wsTransportOf(server)?.resolvedHost).toBe('127.0.0.1')
+      expect(
+        server
+          .getDeviceRegistry()
+          ?.listDevices()
+          .some((d) => d.lastSeenAt > 0)
+      ).toBe(true)
       expect(new URL(server.getWebSocketEndpoint()!).hostname).toBe('127.0.0.1')
     } finally {
       await server.stop()
