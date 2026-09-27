@@ -137,9 +137,10 @@ export abstract class RateLimitServiceConfiguration extends RateLimitServiceAcco
       minimaxApiKeyConfigured: hasMiniMaxApiKey(),
       opencodeGoApiKeyConfigured: this.openCodeGoApiKeyConfigured,
       grokAuthConfigured: this.grokAuthConfigured,
-      // Why: absence of the shared binary is the single reason both CodexBar meters can't
+      // Why: absence of the CodexBar binary is the single reason the Qwen Cloud meter can't
       // report; the renderer treats it as "unconfigured", not as a failure.
       codexbarAvailable: this.codexbarAvailable,
+      cursorAuthConfigured: this.cursorAuthConfigured,
       claudeTarget: this.claudeFetchTarget,
       codexTarget: this.codexFetchTarget,
       ...this.managedAccountContextResolver?.({

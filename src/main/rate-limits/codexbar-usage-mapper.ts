@@ -8,11 +8,11 @@ import type {
 /**
  * Providers Orca meters through the CodexBar CLI.
  *
- * Why these two and not CodexBar's full ~80: Claude, Codex and Grok already have native
+ * Why only Qwen Cloud and not CodexBar's full ~80: Claude, Codex, Grok and Cursor have native
  * fetchers whose numbers are per-account, and a second CodexBar row for them would double-count
- * one subscription. These two have no native fetcher at all.
+ * one subscription. Qwen Cloud has no native fetcher at all.
  */
-export const CODEXBAR_PROVIDERS = ['cursor', 'qwencloud'] as const
+export const CODEXBAR_PROVIDERS = ['qwencloud'] as const
 
 export type CodexBarProvider = (typeof CODEXBAR_PROVIDERS)[number]
 
@@ -24,7 +24,6 @@ export type CodexBarProvider = (typeof CODEXBAR_PROVIDERS)[number]
  * Orca's id and translated at the boundary.
  */
 export const CODEXBAR_PROVIDER_CLI_ARGUMENT: Record<CodexBarProvider, string> = {
-  cursor: 'cursor',
   qwencloud: 'qwen-cloud'
 }
 
@@ -118,8 +117,9 @@ function mapSource(value: unknown): UsageRateLimitSource | undefined {
 }
 
 /**
- * C‍ursor's named side-pools (`Grok Bot` and friends). They are extra quotas on one subscription,
- * not extra accounts, so they ride along as named buckets the way Gemini's per-model pools do.
+ * Named side-pools CodexBar reports beside the three slots. They are extra quotas on one
+ * subscription, not extra accounts, so they ride along as named buckets the way Gemini's
+ * per-model pools do.
  */
 function mapExtraBuckets(value: unknown): RateLimitBucket[] {
   if (!Array.isArray(value)) {

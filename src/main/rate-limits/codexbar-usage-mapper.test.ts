@@ -6,7 +6,8 @@ import {
 } from './codexbar-usage-mapper'
 
 // Captured from `codexbar usage --provider cursor --format json` (CodexBar 0.55.0, 2026-08-27).
-// Cursor reports three ~31-day slots plus a named side-pool, and no weekly window at all.
+// Cursor now has a native fetcher, but this payload remains the only captured sample of the
+// decoder's duplicate-slot and side-pool shapes: three ~31-day slots plus a named side-pool.
 const CURSOR_PAYLOAD = JSON.stringify([
   {
     provider: 'cursor',
@@ -86,7 +87,7 @@ const QWENCLOUD_PAYLOAD = JSON.stringify([
 
 describe('mapCodexBarUsage', () => {
   it('classifies windows by measured duration, not by slot name', () => {
-    const { limits } = mapCodexBarUsage('cursor', THREE_HORIZON_PAYLOAD)
+    const { limits } = mapCodexBarUsage('qwencloud', THREE_HORIZON_PAYLOAD)
 
     // `primary` is a 5h session here but a 31-day pool in real Cursor data, so the slot name decides nothing.
     expect(limits.session?.windowMinutes).toBe(300)
@@ -115,7 +116,7 @@ describe('mapCodexBarUsage', () => {
   })
 
   it('collapses duplicate same-horizon slots to the highest used', () => {
-    const { limits, email } = mapCodexBarUsage('cursor', CURSOR_PAYLOAD)
+    const { limits, email } = mapCodexBarUsage('qwencloud', CURSOR_PAYLOAD)
 
     // Cursor's three 31-day slots are one pool measured three ways; the pill must show the
     // binding one rather than an arbitrary slot.
@@ -125,15 +126,15 @@ describe('mapCodexBarUsage', () => {
     expect(email).toBe('florian.seran@gmail.com')
   })
 
-  it('carries Cursor side-pools as named buckets rather than extra accounts', () => {
-    const { limits } = mapCodexBarUsage('cursor', CURSOR_PAYLOAD)
+  it('carries named side-pools as buckets rather than extra accounts', () => {
+    const { limits } = mapCodexBarUsage('qwencloud', CURSOR_PAYLOAD)
 
     expect(limits.buckets).toHaveLength(1)
     expect(limits.buckets?.[0]).toMatchObject({ name: 'Grok Bot', windowMinutes: 9292 })
   })
 
   it('reports the login method as the plan label', () => {
-    expect(mapCodexBarUsage('cursor', CURSOR_PAYLOAD).limits.planType).toBe('Cursor Ultra')
+    expect(mapCodexBarUsage('qwencloud', CURSOR_PAYLOAD).limits.planType).toBe('Cursor Ultra')
   })
 
   it('maps a provider-level auth error to the CLI’s own message', () => {
@@ -156,14 +157,14 @@ describe('mapCodexBarUsage', () => {
   })
 
   it('treats non-JSON output as a parse failure instead of throwing', () => {
-    const { limits } = mapCodexBarUsage('cursor', 'CodexBar 0.55.0\nnot json at all')
+    const { limits } = mapCodexBarUsage('qwencloud', 'CodexBar 0.55.0\nnot json at all')
 
     expect(limits.status).toBe('error')
     expect(limits.usageMetadata?.failureKind).toBe('parse')
   })
 
   it('treats an unknown JSON shape as a parse failure', () => {
-    const { limits } = mapCodexBarUsage('cursor', '{"provider":"cursor"}')
+    const { limits } = mapCodexBarUsage('qwencloud', '{"provider":"cursor"}')
 
     expect(limits.status).toBe('error')
     expect(limits.usageMetadata?.failureKind).toBe('parse')
@@ -174,7 +175,7 @@ describe('mapCodexBarUsage', () => {
       { provider: 'cursor', usage: { primary: { windowMinutes: 44640 }, tertiary: null } }
     ])
 
-    const { limits } = mapCodexBarUsage('cursor', raw)
+    const { limits } = mapCodexBarUsage('qwencloud', raw)
 
     expect(limits.status).toBe('error')
     expect(limits.usageMetadata?.failureKind).toBe('usage-unavailable')
@@ -202,6 +203,5 @@ describe('mapCodexBarUsage', () => {
   it('translates the Qwen Cloud id to the hyphenated CLI argument', () => {
     // CodexBar accepts `qwen-cloud` on the command line but reports `qwencloud` in the payload.
     expect(CODEXBAR_PROVIDER_CLI_ARGUMENT.qwencloud).toBe('qwen-cloud')
-    expect(CODEXBAR_PROVIDER_CLI_ARGUMENT.cursor).toBe('cursor')
   })
 })

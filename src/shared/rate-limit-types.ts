@@ -57,9 +57,9 @@ export type ProviderRateLimits = {
     | 'minimax'
     | 'grok'
     | 'antigravity'
+    | 'cursor'
     // Metered through the CodexBar CLI rather than a native fetcher; see
     // src/main/rate-limits/codexbar-cli-source.ts.
-    | 'cursor'
     | 'qwencloud'
   /** 5-hour session window, null if not available. */
   session: RateLimitWindow | null
@@ -67,9 +67,9 @@ export type ProviderRateLimits = {
   weekly: RateLimitWindow | null
   /** Claude Fable 7-day weekly window, null if not available. */
   fableWeekly?: RateLimitWindow | null
-  /** 30-day monthly window (OpenCode Go, Grok unified billing), null if not available. */
+  /** 30-day monthly window (OpenCode Go, Grok unified billing, Cursor plan pools), null if not available. */
   monthly?: RateLimitWindow | null
-  /** Named per-model buckets (Gemini only). */
+  /** Named per-model buckets (Gemini models, Cursor plan pools). */
   buckets?: RateLimitBucket[]
   /** Available earned Codex rate-limit reset credits, if reported. */
   rateLimitResetCredits?: {
@@ -127,6 +127,17 @@ export type SystemDefaultLaneDescriptor = {
   measurableWhenInactive: boolean
 }
 
+export type CursorAccountStatus = {
+  signedIn: boolean
+  email: string | null
+  displayName: string | null
+  /** Which local store the session came from: the macOS Keychain, the CLI auth file, or Cursor IDE. */
+  credentialSource: 'keychain' | 'cli' | 'desktop' | null
+  planType: string | null
+  tokenFresh: boolean
+  error: string | null
+}
+
 export type RateLimitState = {
   claude: ProviderRateLimits | null
   codex: ProviderRateLimits | null
@@ -162,12 +173,18 @@ export type RateLimitState = {
   /** True when main finds a Grok CLI session file (~/.grok/auth.json or GROK_HOME). */
   grokAuthConfigured: boolean
   /**
-   * True when the CodexBar CLI is on PATH. One flag for both CodexBar-backed providers:
-   * they share a binary, so its absence is the single reason none of them can report. Acts as
+   * True when the CodexBar CLI is on PATH. One flag for every CodexBar-backed provider
+   * (Qwen Cloud): its absence is the single reason none of them can report. Acts as
    * the durable visibility signal the way `grokAuthConfigured` does, keeping the meters on the
    * bar between snapshot refreshes instead of flickering out.
    */
   codexbarAvailable: boolean
+  /**
+   * True when main finds a Cursor session on this machine: the macOS Keychain
+   * item cursor-agent writes, its legacy auth.json, or the Cursor IDE's own
+   * stored login. The token itself never leaves main.
+   */
+  cursorAuthConfigured: boolean
   claudeTarget: RateLimitRuntimeTarget
   codexTarget: RateLimitRuntimeTarget
   /** Active managed account; `null` selects the provider login, absent on older hosts. */

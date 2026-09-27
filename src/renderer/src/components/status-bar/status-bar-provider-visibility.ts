@@ -21,9 +21,10 @@ export type UsageProviderSettings = Pick<
   // store, neither of which the renderer can see; main reports presence.
   opencodeGoApiKeyConfigured: boolean
   grokAuthConfigured: boolean
-  // Why: the two codexbar-metered providers share one durable signal — the
+  // Why: codexbar-metered providers (Qwen Cloud) share one durable signal — the
   // presence of the codexbar binary. There is no per-provider credential.
   codexbarAvailable: boolean
+  cursorAuthConfigured: boolean
 }
 
 type UsageProviderSnapshots = {
@@ -35,9 +36,9 @@ type UsageProviderSnapshots = {
   antigravity: ProviderRateLimits | null | undefined
   minimax: ProviderRateLimits | null | undefined
   grok: ProviderRateLimits | null | undefined
-  // Why: optional — with no codexbar binary main never emits these keys, and
-  // callers that predate them stay valid.
-  cursor?: ProviderRateLimits | null | undefined
+  cursor: ProviderRateLimits | null | undefined
+  // Why: optional — with no codexbar binary main never emits this key, and
+  // callers that predate it stay valid.
   qwencloud?: ProviderRateLimits | null | undefined
 }
 
@@ -91,6 +92,7 @@ export function hasUsageProviderSettings(
     settings?.minimaxCookieConfigured === true ||
     settings?.minimaxApiKeyConfigured === true ||
     settings?.grokAuthConfigured === true ||
+    settings?.cursorAuthConfigured === true ||
     settings?.codexbarAvailable === true
   )
 }
@@ -129,7 +131,10 @@ export function hasUsageProviderSettingsForProvider(
   if (providerId === 'grok') {
     return settings.grokAuthConfigured === true
   }
-  if (providerId === 'cursor' || providerId === 'qwencloud') {
+  if (providerId === 'cursor') {
+    return settings.cursorAuthConfigured === true
+  }
+  if (providerId === 'qwencloud') {
     return settings.codexbarAvailable === true
   }
   return false
@@ -141,7 +146,7 @@ function createPendingProviderSnapshot(providerId: UsageProviderId): ProviderRat
     session: null,
     weekly: null,
     ...(providerId === 'opencode-go' ? { monthly: null } : {}),
-    ...(providerId === 'gemini' ? { buckets: [] } : {}),
+    ...(providerId === 'gemini' || providerId === 'cursor' ? { buckets: [] } : {}),
     updatedAt: 0,
     error: null,
     status: 'fetching'
@@ -177,12 +182,10 @@ export function isUsageEmptyState(
   const antigravitySnapshotPending =
     hasUsageProviderSettingsForProvider('antigravity', settings) &&
     isProviderSnapshotPending(providers.antigravity)
-  // Why: with no codexbar binary these snapshots stay null forever, so an
+  // Why: with no codexbar binary the Qwen Cloud snapshot stays null forever, so an
   // unguarded pending check would pin the CTA off permanently.
   const codexBarSnapshotsPending =
-    settings.codexbarAvailable === true &&
-    (isProviderSnapshotPending(providers.cursor) ||
-      isProviderSnapshotPending(providers.qwencloud))
+    settings.codexbarAvailable === true && isProviderSnapshotPending(providers.qwencloud)
   if (
     isProviderSnapshotPending(providers.claude) ||
     isProviderSnapshotPending(providers.codex) ||
@@ -192,6 +195,7 @@ export function isUsageEmptyState(
     antigravitySnapshotPending ||
     isProviderSnapshotPending(providers.minimax) ||
     isProviderSnapshotPending(providers.grok) ||
+    isProviderSnapshotPending(providers.cursor) ||
     codexBarSnapshotsPending
   ) {
     return false

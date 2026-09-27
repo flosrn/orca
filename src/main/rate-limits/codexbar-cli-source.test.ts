@@ -38,8 +38,8 @@ describe('fetchCodexBarUsage', () => {
 
     const snapshot = await fetchCodexBarUsage()
 
-    // An absent CLI is not a provider failure: the two meters must stay off the bar entirely
-    // rather than render two error rows for software the user never installed.
+    // An absent CLI is not a provider failure: the meter must stay off the bar entirely
+    // rather than render an error row for software the user never installed.
     expect(snapshot.binaryPath).toBeNull()
     expect(snapshot.results).toEqual({})
     expect(mocks.runProcess).not.toHaveBeenCalled()
@@ -61,12 +61,12 @@ describe('fetchCodexBarUsage', () => {
 
     const snapshot = await fetchCodexBarUsage()
 
-    expect(mocks.runProcess).toHaveBeenCalledTimes(2)
+    expect(mocks.runProcess).toHaveBeenCalledTimes(1)
     const requested = mocks.runProcess.mock.calls.map(([spec]) => {
       return spec.args?.[spec.args.indexOf('--provider') + 1]
     })
-    expect(requested).toEqual(['cursor', 'qwen-cloud'])
-    expect(Object.keys(snapshot.results)).toEqual(['cursor', 'qwencloud'])
+    expect(requested).toEqual(['qwen-cloud'])
+    expect(Object.keys(snapshot.results)).toEqual(['qwencloud'])
   })
 
   it('always spawns the resolved absolute path, not the bare command name', async () => {
@@ -89,18 +89,6 @@ describe('fetchCodexBarUsage', () => {
 
     expect(mocks.runProcess.mock.calls[0][0].args).toContain('--no-color')
   })
-
-  it('keeps one provider’s failure from taking down the others', async () => {
-    mocks.resolveCommandOnLocalPath.mockResolvedValue('/usr/bin/codexbar')
-    mocks.runProcess
-      .mockRejectedValueOnce(new Error('EACCES'))
-      .mockResolvedValue(processResult({ stdout: WEEKLY_PAYLOAD }))
-
-    const snapshot = await fetchCodexBarUsage()
-
-    expect(snapshot.results.cursor?.limits.status).toBe('error')
-    expect(snapshot.results.qwencloud?.limits.status).toBe('ok')
-  })
 })
 
 describe('fetchCodexBarProvider', () => {
@@ -111,7 +99,7 @@ describe('fetchCodexBarProvider', () => {
   it('maps a spawn rejection to a cli-unavailable failure', async () => {
     mocks.runProcess.mockRejectedValue(new Error('spawn ENOENT'))
 
-    const { limits } = await fetchCodexBarProvider('cursor', '/usr/bin/codexbar')
+    const { limits } = await fetchCodexBarProvider('qwencloud', '/usr/bin/codexbar')
 
     expect(limits.status).toBe('error')
     expect(limits.error).toContain('spawn ENOENT')
@@ -143,7 +131,7 @@ describe('fetchCodexBarProvider', () => {
   it('falls back to stderr when the CLI prints nothing on stdout', async () => {
     mocks.runProcess.mockResolvedValue(processResult({ code: 2, stderr: 'config file missing' }))
 
-    const { limits } = await fetchCodexBarProvider('cursor', '/usr/bin/codexbar')
+    const { limits } = await fetchCodexBarProvider('qwencloud', '/usr/bin/codexbar')
 
     expect(limits.error).toBe('config file missing')
     expect(limits.usageMetadata?.failureKind).toBe('cli-unavailable')
@@ -152,7 +140,7 @@ describe('fetchCodexBarProvider', () => {
   it('reports the exit code when the CLI is silent on both streams', async () => {
     mocks.runProcess.mockResolvedValue(processResult({ code: 3 }))
 
-    const { limits } = await fetchCodexBarProvider('cursor', '/usr/bin/codexbar')
+    const { limits } = await fetchCodexBarProvider('qwencloud', '/usr/bin/codexbar')
 
     expect(limits.error).toContain('3')
   })
@@ -160,7 +148,7 @@ describe('fetchCodexBarProvider', () => {
   it('bounds runtime and captured output', async () => {
     mocks.runProcess.mockResolvedValue(processResult({ stdout: WEEKLY_PAYLOAD }))
 
-    await fetchCodexBarProvider('cursor', '/usr/bin/codexbar')
+    await fetchCodexBarProvider('qwencloud', '/usr/bin/codexbar')
 
     const spec = mocks.runProcess.mock.calls[0][0] as {
       timeoutMs?: number | null

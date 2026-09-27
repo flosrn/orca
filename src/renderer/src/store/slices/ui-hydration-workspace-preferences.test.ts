@@ -160,6 +160,7 @@ describe('createUISlice hydratePersistedUI', () => {
       _minimaxStatusBarDefaultAdded: true,
       _antigravityStatusBarDefaultAdded: true,
       _grokStatusBarDefaultAdded: true,
+      _cursorStatusBarDefaultAdded: true,
       _codexBarStatusBarDefaultAdded: true
     })
   })
@@ -177,6 +178,7 @@ describe('createUISlice hydratePersistedUI', () => {
         _minimaxStatusBarDefaultAdded: true,
         _antigravityStatusBarDefaultAdded: true,
         _grokStatusBarDefaultAdded: true,
+        _cursorStatusBarDefaultAdded: true,
         _codexBarStatusBarDefaultAdded: true
       })
     )

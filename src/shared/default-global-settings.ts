@@ -136,6 +136,8 @@ export function buildDefaultSettings(args: {
     experimentalNativeChat: false,
     experimentalStructuredNativeChat: false,
     nativeChatResumeWorkOnRestart: false,
+    nativeChatInheritShellEnvironment: true,
+    nativeChatShellEnvironmentVariables: [],
     nativeChatSessionOptions: {},
     openInApplications: [...DEFAULT_OPEN_IN_APPLICATIONS],
     rightSidebarOpenByDefault: true,
@@ -236,6 +238,7 @@ export function buildDefaultSettings(args: {
     mobilePairingConnectionMode: 'automatic',
     mobilePairingCustomAddress: null,
     mobilePairingCustomAddresses: [],
+    machineName: '',
     // Why: off keeps the cosmetic overlay unmounted for users who never opt in.
     experimentalPet: false,
     experimentalActivity: false,

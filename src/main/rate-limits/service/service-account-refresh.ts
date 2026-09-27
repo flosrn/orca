@@ -30,10 +30,10 @@ export abstract class RateLimitServiceAccountRefresh extends RateLimitServiceIna
   }
 
   async refreshCodexBar(): Promise<RateLimitState> {
-    // Why: one CodexBar batch covers Cursor/Qwen Cloud. Until a
-    // dedicated queue exists, a forced full cycle is the same batch plus the
-    // other providers — still one user click, still one CLI round-trip for
-    // those two because the full cycle already overlaps it.
+    // Why: one CodexBar batch covers Qwen Cloud. Until a dedicated queue
+    // exists, a forced full cycle is the same batch plus the other
+    // providers — still one user click, still one CLI round-trip because
+    // the full cycle already overlaps it.
     await this.fetchAll({ force: true })
     return this.getState()
   }

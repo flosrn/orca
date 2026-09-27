@@ -78,6 +78,7 @@ function usageSettings(overrides: Partial<UsageProviderSettings> = {}): UsagePro
     opencodeGoApiKeyConfigured: false,
     grokAuthConfigured: false,
     codexbarAvailable: false,
+    cursorAuthConfigured: false,
     ...overrides
   }
 }
@@ -395,6 +396,35 @@ describe('getVisibleUsageProvider', () => {
 })
 
 describe('isUsageEmptyState', () => {
+  it('keeps the Cursor bar visible on a local session before the first snapshot', () => {
+    // Why: the credential lives on disk, not in settings, so main's flag is the
+    // only durable signal that the bar has an account behind it.
+    const pending = getVisibleUsageProvider(
+      'cursor',
+      null,
+      usageSettings({ cursorAuthConfigured: true })
+    )
+    expect(pending).toMatchObject({ provider: 'cursor', status: 'fetching' })
+    expect(getVisibleUsageProvider('cursor', null, usageSettings())).toBeNull()
+  })
+
+  it('hides the Cursor bar when no local session exists, even on an unavailable snapshot', () => {
+    // Why: 'unavailable' is how a signed-out host reports Cursor; without the
+    // durable flag there is no account to show a bar for.
+    const unavailable = provider('unavailable', { provider: 'cursor' })
+    expect(getVisibleUsageProvider('cursor', unavailable, usageSettings())).toBeNull()
+    // With a session on disk the row stays, so "no allowance" is explained
+    // rather than silently vanishing.
+    expect(
+      getVisibleUsageProvider('cursor', unavailable, usageSettings({ cursorAuthConfigured: true }))
+    ).toBe(unavailable)
+  })
+
+  it('keeps a failing Cursor refresh visible so the error is not silently hidden', () => {
+    const failing = provider('error', { provider: 'cursor' })
+    expect(getVisibleUsageProvider('cursor', failing, usageSettings())).toBe(failing)
+  })
+
   it('waits for provider snapshots before showing the setup CTA', () => {
     expect(isUsageEmptyState(createEmptyRateLimitState(), usageSettings())).toBe(false)
   })
@@ -410,7 +440,8 @@ describe('isUsageEmptyState', () => {
           kimi: provider('unavailable', { provider: 'kimi' }),
           antigravity: undefined,
           minimax: undefined,
-          grok: undefined
+          grok: undefined,
+          cursor: undefined
         },
         usageSettings()
       )
@@ -428,7 +459,8 @@ describe('isUsageEmptyState', () => {
           kimi: provider('unavailable', { provider: 'kimi' }),
           antigravity: provider('unavailable', { provider: 'antigravity' }),
           minimax: provider('unavailable', { provider: 'minimax' }),
-          grok: provider('unavailable', { provider: 'grok' })
+          grok: provider('unavailable', { provider: 'grok' }),
+          cursor: provider('unavailable', { provider: 'cursor' })
         },
         usageSettings()
       )
@@ -446,7 +478,8 @@ describe('isUsageEmptyState', () => {
           kimi: provider('unavailable', { provider: 'kimi' }),
           antigravity: provider('unavailable', { provider: 'antigravity' }),
           minimax: provider('unavailable', { provider: 'minimax' }),
-          grok: provider('unavailable', { provider: 'grok' })
+          grok: provider('unavailable', { provider: 'grok' }),
+          cursor: provider('unavailable', { provider: 'cursor' })
         },
         usageSettings({
           codexManagedAccounts: [
@@ -479,7 +512,8 @@ describe('isUsageEmptyState', () => {
           kimi: provider('unavailable', { provider: 'kimi' }),
           antigravity: null,
           minimax: provider('unavailable', { provider: 'minimax' }),
-          grok: provider('unavailable', { provider: 'grok' })
+          grok: provider('unavailable', { provider: 'grok' }),
+          cursor: provider('unavailable', { provider: 'cursor' })
         },
         usageSettings()
       )
@@ -497,7 +531,8 @@ describe('isUsageEmptyState', () => {
           kimi: provider('unavailable', { provider: 'kimi' }),
           antigravity: null,
           grok: provider('unavailable', { provider: 'grok' }),
-          minimax: provider('unavailable', { provider: 'minimax' })
+          minimax: provider('unavailable', { provider: 'minimax' }),
+          cursor: provider('unavailable', { provider: 'cursor' })
         },
         usageSettings({ antigravityUsageConfigured: true, geminiCliOAuthEnabled: true })
       )
@@ -517,7 +552,8 @@ describe('isUsageEmptyState', () => {
           kimi: provider('unavailable', { provider: 'kimi' }),
           antigravity: null,
           grok: provider('unavailable', { provider: 'grok' }),
-          minimax: provider('unavailable', { provider: 'minimax' })
+          minimax: provider('unavailable', { provider: 'minimax' }),
+          cursor: provider('unavailable', { provider: 'cursor' })
         },
         usageSettings({ antigravityUsageConfigured: true })
       )

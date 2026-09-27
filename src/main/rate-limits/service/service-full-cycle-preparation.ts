@@ -3,11 +3,14 @@ import { fetchCodexRateLimits } from '../codex-fetcher'
 import { fetchGeminiRateLimits } from '../gemini-usage-fetcher'
 import { fetchGrokRateLimits } from '../grok-fetcher'
 import { readGrokAuthSession } from '../grok-auth'
+import { fetchCursorRateLimits } from '../cursor-fetcher'
+import { readCursorAuthSession } from '../cursor-auth'
 import { fetchMiniMaxRateLimits } from '../minimax/minimax-fetcher'
 import { createHash } from 'node:crypto'
 import { fetchOpenCodeGoUsage } from '../opencode-go-usage-source-selection'
 import { fetchCodexBarUsage, type CodexBarUsageSnapshot } from '../codexbar-cli-source'
 import { RateLimitServiceFetchPolicy } from './service-fetch-policy'
+import type { SettledProviderResult } from './service-sibling-provider-result'
 import type {
   ClaudeRuntimeAuthPreparation,
   InternalRateLimitState,
@@ -40,10 +43,9 @@ export type FetchAllCyclePrepared = {
     PromiseSettledResult<ProviderRateLimits>,
     PromiseSettledResult<ProviderRateLimits>
   ]
-  grokResultPromise: Promise<
-    { status: 'fulfilled'; value: ProviderRateLimits } | { status: 'rejected'; reason: unknown }
-  >
-  // Why: one batch reads both CodexBar providers in parallel; started here so its CLI
+  grokResultPromise: Promise<SettledProviderResult>
+  cursorResultPromise: Promise<SettledProviderResult>
+  // Why: one batch reads every CodexBar provider in parallel; started here so its CLI
   // round trips overlap the HTTP fetches instead of adding to the cycle's latency.
   codexBarSnapshotPromise: Promise<CodexBarUsageSnapshot>
 }
@@ -132,8 +134,21 @@ export abstract class RateLimitServiceFullCyclePreparation extends RateLimitServ
         ? this.withFetchingStatus(null, 'minimax')
         : this.withFetchingStatus(previousState.minimax, 'minimax'),
       grok: this.withFetchingStatus(previousState.grok, 'grok'),
+      cursor: this.withFetchingStatus(previousState.cursor, 'cursor'),
       ...this.withCodexBarFetchingStatus(previousState)
     })
+
+    // Why: the Cursor probe reads the macOS Keychain, so it is awaited inside the
+    // provider's own promise instead of blocking the rest of the cycle on it.
+    const cursorResultPromise = readCursorAuthSession()
+      .then((authReadResult) => {
+        this.cursorAuthConfigured = authReadResult.status === 'ok'
+        return fetchCursorRateLimits({ signal, authReadResult })
+      })
+      .then(
+        (value) => ({ status: 'fulfilled', value }) as const,
+        (reason) => ({ status: 'rejected', reason }) as const
+      )
 
     const missingWslCodexHome =
       codexFetchGated || codexHomePath ? null : this.getMissingWslCodexHomeResult(codexTarget)
@@ -225,6 +240,7 @@ export abstract class RateLimitServiceFullCyclePreparation extends RateLimitServ
         miniMaxResult
       ],
       grokResultPromise,
+      cursorResultPromise,
       codexBarSnapshotPromise
     }
   }

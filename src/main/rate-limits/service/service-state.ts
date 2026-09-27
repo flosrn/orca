@@ -38,8 +38,11 @@ export abstract class RateLimitServiceState {
   }
   protected grokAuthConfigured = readGrokAuthSession().status === 'ok'
   // Why: probing the binary is async (PATH lookup), so it can only be known from the first fetch
-  // cycle onward; false keeps the two CodexBar meters off the bar until then.
+  // cycle onward; false keeps the CodexBar-backed Qwen Cloud meter off the bar until then.
   protected codexbarAvailable = false
+  // Why: the Cursor probe reads the macOS Keychain, so it cannot run synchronously
+  // at construction the way Grok's auth-file probe does; each fetch cycle sets it.
+  protected cursorAuthConfigured = false
   protected openCodeGoApiKeyConfigured = false
   protected pollInterval: number = DEFAULT_POLL_MS
   protected timer: ReturnType<typeof setInterval> | null = null

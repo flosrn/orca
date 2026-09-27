@@ -87,11 +87,7 @@ export abstract class RateLimitServicePolling extends RateLimitServiceFetchQueue
         provider: provider as ActiveRateLimitProvider,
         limits
       }))
-      .filter(
-        ({ provider }) =>
-          this.codexbarAvailable ||
-          (provider !== 'cursor' && provider !== 'qwencloud')
-      )
+      .filter(({ provider }) => this.codexbarAvailable || provider !== 'qwencloud')
   }
 
   protected getActiveWindowRefreshPlan(now: number): ActiveWindowRefreshPlan {

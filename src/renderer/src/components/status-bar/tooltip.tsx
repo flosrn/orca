@@ -175,7 +175,12 @@ export function getWindowSections(
   }
   if (p.monthly !== undefined && p.monthly !== null) {
     sections.push({
-      label: translate('auto.components.status.bar.tooltip.7f7f208060', 'Monthly'),
+      // Why: Cursor reports the plan total in `monthly` and its pools as buckets;
+      // "Plan" names the number closest to the user's cap.
+      label:
+        p.provider === 'cursor'
+          ? translate('auto.components.status.bar.tooltip.cursor.plan', 'Plan')
+          : translate('auto.components.status.bar.tooltip.7f7f208060', 'Monthly'),
       window: p.monthly
     })
   }

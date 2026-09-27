@@ -36,7 +36,10 @@ import { syncProjectHostSetupCompatibilityState } from './repo-lifecycle-operati
 import { scheduleSave } from './write-scheduling'
 import { forgetSshConnectionGeneration } from '../../ssh/ssh-connection-generation'
 
-type SshProfileOperationsRuntime = Pick<StoreRuntimeState, 'protectedSecrets' | 'state'>
+type SshProfileOperationsRuntime = Pick<
+  StoreRuntimeState,
+  'dirtyProfileStateDomains' | 'protectedSecrets' | 'state'
+>
 
 const sshProfileOperationsContext = Symbol('SshProfileOperations')
 type SshProfileOperationsContext = {
@@ -167,7 +170,12 @@ export function getSshTargetStateOperations(owner: SshProfileOperations): SshTar
     state: owner[sshProfileOperationsContext].runtime.state,
     protectedSecrets: owner[sshProfileOperationsContext].runtime.protectedSecrets,
     scheduleSave: () => scheduleSave(owner[sshProfileOperationsContext].scheduling),
-    flush: () => owner[sshProfileOperationsContext].flushBarriers.flush()
+    flush: () => {
+      owner[sshProfileOperationsContext].runtime.dirtyProfileStateDomains?.add(
+        'claudeLivePtySessionIds'
+      )
+      owner[sshProfileOperationsContext].flushBarriers.flush()
+    }
   }
 }
 

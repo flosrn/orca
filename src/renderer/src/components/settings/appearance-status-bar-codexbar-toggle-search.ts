@@ -11,7 +11,7 @@ export type StatusBarToggleSearchEntry = {
 }
 
 // Extracted rather than inlined in appearance-status-bar-search.ts: that file sits at the
-// max-lines budget, and both providers are metered by the one CodexBar CLI anyway.
+// max-lines budget, and every provider here is metered by the one CodexBar CLI anyway.
 export function getCodexBarStatusBarToggleSearchEntries(): readonly StatusBarToggleSearchEntry[] {
   const statusBarKeyword = translateSearchKeyword(
     'auto.components.settings.appearance.search.896eb53fd4',
@@ -30,28 +30,6 @@ export function getCodexBarStatusBarToggleSearchEntries(): readonly StatusBarTog
     'codexbar'
   )
   return [
-    {
-      id: 'cursor',
-      title: translate('auto.components.settings.appearance.search.a3f1c07d92', 'Cursor Usage'),
-      description: translate(
-        'auto.components.settings.appearance.search.d7a4b13c85',
-        'Show Cursor subscription usage in the status bar.'
-      ),
-      keywords: [
-        ...statusBarKeyword,
-        ...translateSearchKeyword(
-          'auto.components.settings.appearance.search.e8b5c24d96',
-          'cursor'
-        ),
-        ...usageKeyword,
-        ...subscriptionKeyword,
-        ...codexbarKeyword
-      ],
-      toggleDescription: translate(
-        'settings.appearance.statusBar.cursorToggleDescription',
-        'Show Cursor subscription usage reported by the CodexBar CLI.'
-      )
-    },
     {
       id: 'qwencloud',
       title: translate('auto.components.settings.appearance.search.c5d3e29b74', 'Qwen Cloud Usage'),

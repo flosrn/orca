@@ -18,10 +18,11 @@ export function getUsageProviderAccountsSectionId(
       return 'accounts-minimax'
     case 'grok':
       return 'accounts-grok'
+    case 'cursor':
+      return 'accounts-cursor'
     case 'kimi':
       // Why: Orca must not mutate Kimi's CLI-owned credential lifecycle.
       return null
-    case 'cursor':
     case 'qwencloud':
       // Why: codexbar-metered providers are read-only — Orca owns no sign-in for them.
       return null

@@ -114,17 +114,7 @@ export abstract class RateLimitServiceResultPolicy extends RateLimitServiceFetch
 
   protected withFetchingStatus(
     current: ProviderRateLimits | null,
-    provider:
-      | 'claude'
-      | 'codex'
-      | 'gemini'
-      | 'opencode-go'
-      | 'kimi'
-      | 'minimax'
-      | 'grok'
-      | 'antigravity'
-      | 'cursor'
-      | 'qwencloud'
+    provider: ActiveRateLimitProvider
   ): ProviderRateLimits {
     if (!current) {
       return {
@@ -144,20 +134,14 @@ export abstract class RateLimitServiceResultPolicy extends RateLimitServiceFetch
   }
 
   // Why: mark fetching only once the binary is known present, else hosts without CodexBar get
-  // two chips that never settle.
+  // a chip that never settles.
   protected withCodexBarFetchingStatus(
     previous: InternalRateLimitState
-  ): Pick<InternalRateLimitState, 'cursor' | 'qwencloud'> {
+  ): Pick<InternalRateLimitState, 'qwencloud'> {
     if (!this.codexbarAvailable) {
-      return {
-        cursor: previous.cursor,
-        qwencloud: previous.qwencloud
-      }
+      return { qwencloud: previous.qwencloud }
     }
-    return {
-      cursor: this.withFetchingStatus(previous.cursor, 'cursor'),
-      qwencloud: this.withFetchingStatus(previous.qwencloud, 'qwencloud')
-    }
+    return { qwencloud: this.withFetchingStatus(previous.qwencloud, 'qwencloud') }
   }
 
   protected applyCodexBarSnapshot(
@@ -179,7 +163,6 @@ export abstract class RateLimitServiceResultPolicy extends RateLimitServiceFetch
     }
     this.updateState({
       ...this.state,
-      cursor: apply('cursor', previousState.cursor),
       qwencloud: apply('qwencloud', previousState.qwencloud)
     })
   }
