@@ -88,15 +88,28 @@ describe('orca cli worktree awareness', () => {
     )
   })
 
-  it('rejects a public bind before spawning the server', async () => {
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const priorExitCode = process.exitCode
-    await main(['serve', '--bind-host', '0.0.0.0'], '/tmp/repo')
-    expect(serveOrcaAppMock).not.toHaveBeenCalled()
-    expect(errSpy.mock.calls.flat().join('\n')).toContain('--bind-host only supports 127.0.0.1')
-    expect(process.exitCode).toBe(1)
-    process.exitCode = priorExitCode
+  it('forwards a Tailscale IPv4 bind', async () => {
+    serveOrcaAppMock.mockResolvedValue(0)
+    await main(['serve', '--bind-host', '100.64.1.20'], '/tmp/repo')
+    expect(serveOrcaAppMock).toHaveBeenCalledWith(
+      expect.objectContaining({ bindHost: '100.64.1.20' })
+    )
   })
+
+  it.each(['0.0.0.0', '192.168.1.10', '100.64.0.0/10'])(
+    'rejects bind %j before spawning the server',
+    async (host) => {
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const priorExitCode = process.exitCode
+      await main(['serve', '--bind-host', host], '/tmp/repo')
+      expect(serveOrcaAppMock).not.toHaveBeenCalled()
+      expect(errSpy.mock.calls.flat().join('\n')).toMatch(
+        /--bind-host only supports 127\.0\.0\.1.*100\.64\.0\.0\/10/
+      )
+      expect(process.exitCode).toBe(1)
+      process.exitCode = priorExitCode
+    }
+  )
 
   it('starts a foreground headless server with mobile pairing enabled', async () => {
     serveOrcaAppMock.mockResolvedValue(0)

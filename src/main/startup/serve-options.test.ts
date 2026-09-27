@@ -36,11 +36,17 @@ describe('getServeOptions', () => {
     ).toMatchObject({ pairingAddress: '127.0.0.1', bindHost: null })
   })
 
-  it.each(['0.0.0.0', '192.0.2.1', 'example.com', '127.0.0.2'])(
+  it('pins a Tailscale IPv4 bind', () => {
+    expect(
+      getServeOptions(normalizeServeModeArgv(['/AppRun', 'serve', '--bind-host', '100.64.1.20']))
+    ).toMatchObject({ bindHost: '100.64.1.20' })
+  })
+
+  it.each(['0.0.0.0', '192.0.2.1', 'example.com', '127.0.0.2', '100.128.0.1', '100.64.0.0/10'])(
     'rejects a non-approved bind address %j',
     (address) => {
       expect(() => getServeOptions(['/AppRun', '--serve', `--serve-bind-host=${address}`])).toThrow(
-        /--bind-host.*127\.0\.0\.1/
+        /--bind-host only supports 127\.0\.0\.1.*100\.64\.0\.0\/10/
       )
     }
   )

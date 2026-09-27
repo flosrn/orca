@@ -1,4 +1,5 @@
 import {
+  getServeBindHostValidationError,
   getServeFlagTypoError,
   getServeOptionValidationError
 } from '../../shared/serve-option-validation'
@@ -113,8 +114,9 @@ export function getServeOptions(argv: readonly string[]): ServeOptions {
     true,
     '--serve-bind-host'
   )
-  if (bindHost !== null && bindHost !== '127.0.0.1') {
-    throw new Error('--bind-host only supports 127.0.0.1 (loopback).')
+  const bindHostError = bindHost === null ? null : getServeBindHostValidationError(bindHost)
+  if (bindHostError) {
+    throw new Error(bindHostError)
   }
 
   const options: ServeOptions = {

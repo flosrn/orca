@@ -3,7 +3,10 @@ import type { CommandHandler } from '../dispatch'
 import { formatCliStatus, formatStatus, printResult } from '../format'
 import { RuntimeClientError, serveOrcaApp } from '../runtime-client'
 import { stripElectronRunAsNode } from '../runtime/launch'
-import { getServeOptionValidationError } from '../../shared/serve-option-validation'
+import {
+  getServeBindHostValidationError,
+  getServeOptionValidationError
+} from '../../shared/serve-option-validation'
 
 function envRecord(): Record<string, string> {
   // Why: the `orca` launcher runs Orca's Electron binary as Node, so this CLI
@@ -114,17 +117,19 @@ export const CORE_HANDLERS: Record<string, CommandHandler> = {
     const port = getOptionalServePort(flags)
     const pairingAddressValue = flags.get('pairing-address')
     const bindHostValue = flags.get('bind-host')
-    if (bindHostValue !== undefined && bindHostValue !== '127.0.0.1') {
-      throw new RuntimeClientError(
-        'invalid_argument',
-        '--bind-host only supports 127.0.0.1 (loopback).'
+    if (bindHostValue !== undefined) {
+      const bindHostError = getServeBindHostValidationError(
+        typeof bindHostValue === 'string' ? bindHostValue : ''
       )
+      if (bindHostError) {
+        throw new RuntimeClientError('invalid_argument', bindHostError)
+      }
     }
     const exitCode = await serveOrcaApp({
       json,
       port,
       pairingAddress: typeof pairingAddressValue === 'string' ? pairingAddressValue : null,
-      bindHost: bindHostValue === '127.0.0.1' ? bindHostValue : null,
+      bindHost: typeof bindHostValue === 'string' ? bindHostValue : null,
       noPairing,
       mobilePairing,
       recipeJson,

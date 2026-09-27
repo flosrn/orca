@@ -610,6 +610,20 @@ describe('OrcaRuntimeRpcServer WebSocket bind host (STA-2370)', () => {
     }
   })
 
+  it('refuses to widen a bind pinned to a Tailscale address', async () => {
+    const server = new OrcaRuntimeRpcServer({
+      runtime: new OrcaRuntimeService(),
+      userDataPath: mkdtempSync(join(tmpdir(), 'orca-runtime-rpc-')),
+      enableWebSocket: true,
+      wsPort: 0,
+      exposeNetworkByDefault: true,
+      pinnedBindHost: '100.64.1.20'
+    })
+    await expect(server.ensureNetworkExposure()).rejects.toThrow(
+      /pinned to 100\.64\.1\.20; refusing to widen/
+    )
+  })
+
   it('still widens on request when the operator pinned the wide address', async () => {
     const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-rpc-'))
     const server = new OrcaRuntimeRpcServer({

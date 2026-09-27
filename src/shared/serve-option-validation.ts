@@ -1,4 +1,5 @@
 import { levenshtein } from './edit-distance'
+import { isTailnetIPv4Address } from './tailnet-address'
 
 export type ServeOptionValidationInput = {
   noPairing: boolean
@@ -21,6 +22,19 @@ export function getServeOptionValidationError(options: ServeOptionValidationInpu
     return 'Recipe JSON output requires --project-root.'
   }
   return null
+}
+
+/** A serve listener binds loopback or this host's tailnet IPv4 — never a wildcard, LAN or public address. */
+export function getServeBindHostValidationError(bindHost: string): string | null {
+  if (bindHost === '127.0.0.1') {
+    return null
+  }
+  // Why the round-trip: reject non-canonical octets like `064`, which some resolvers read as octal.
+  const canonical = bindHost.split('.').map(Number).join('.')
+  if (canonical === bindHost && isTailnetIPv4Address(bindHost)) {
+    return null
+  }
+  return '--bind-host only supports 127.0.0.1 (loopback) or a Tailscale IPv4 in 100.64.0.0/10.'
 }
 
 const SERVE_SECURITY_FLAG_NAMES = [
