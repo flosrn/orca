@@ -14,6 +14,7 @@ import {
   tailGainedNewerBlockedReason
 } from './terminal-wait-tail-state'
 import { extractOscTitleScanTail } from '../../shared/osc-title-scan-tail'
+import { isDecPrivateModeOnlyChunk } from './dec-private-mode-chunk'
 
 export class OrcaRuntimeWithOnPtyData extends OrcaRuntimeWithPreparePtyExecutionContext {
   onPtyData(
@@ -68,6 +69,7 @@ export class OrcaRuntimeWithOnPtyData extends OrcaRuntimeWithPreparePtyExecution
     captureModelReceipt?.(modelCompletion)
 
     const pty = this.getOrCreatePtyWorktreeRecord(ptyId)
+    const countsAsOutput = !isDecPrivateModeOnlyChunk(data)
     const ptyTailBefore = pty
       ? {
           lines: pty.tailBuffer,
@@ -83,7 +85,9 @@ export class OrcaRuntimeWithOnPtyData extends OrcaRuntimeWithPreparePtyExecution
     if (pty) {
       pty.connected = true
       pty.disconnectedAt = null
-      pty.lastOutputAt = at
+      if (countsAsOutput) {
+        pty.lastOutputAt = at
+      }
       const normalized = normalizeTerminalChunk(data, pty.tailPendingAnsi)
       pty.tailPendingAnsi = normalized.pendingAnsi
       const nextTail = appendNormalizedToTailBuffer(
@@ -113,7 +117,7 @@ export class OrcaRuntimeWithOnPtyData extends OrcaRuntimeWithPreparePtyExecution
     for (const leaf of this.getLeavesForPty(ptyId)) {
       this.recordPtyWorktree(ptyId, leaf.worktreeId, {
         connected: true,
-        lastOutputAt: pty?.lastOutputAt ?? at,
+        lastOutputAt: countsAsOutput ? (pty?.lastOutputAt ?? at) : undefined,
         preview: pty?.preview ?? leaf.preview,
         tabId: leaf.tabId,
         paneKey: this.makeRuntimePaneKey(leaf),
@@ -121,7 +125,9 @@ export class OrcaRuntimeWithOnPtyData extends OrcaRuntimeWithPreparePtyExecution
       })
       leaf.connected = true
       leaf.writable = this.graphStatus === 'ready'
-      leaf.lastOutputAt = at
+      if (countsAsOutput) {
+        leaf.lastOutputAt = at
+      }
       if (
         pty &&
         ptyTailBefore &&
