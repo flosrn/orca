@@ -31,6 +31,7 @@ import type { CreateWorktreeArgsWithSystemProvenance } from '../ipc-context-sche
 import { createFolderWorkspace } from './folder-workspace-creation'
 import { findExactRepoOwner, isCapturedRepoCurrent } from '../listing/worktree-host-ownership'
 import { requireWorktreeCreateRoute } from '../../../worktree-create-execution-host-route'
+import { getRepoExecutionHostId } from '../../../../shared/execution-host'
 import type { WorktreeIpcContext } from '../worktree-ipc-context'
 
 export function registerWorktreeCreateHandlers(context: WorktreeIpcContext): void {
@@ -72,10 +73,25 @@ export function registerWorktreeCreateHandlers(context: WorktreeIpcContext): voi
             // row read as local here and ran `git worktree add` on the client against a remote path,
             // while the runtime sibling on the same repo already resolved.
             const createRoute = requireWorktreeCreateRoute(repo)
-            result =
-              createRoute.kind === 'ssh'
-                ? await createRemoteWorktree(createArgs, createRoute.repo, store, mainWindow)
-                : await createLocalWorktree(createArgs, repo, store, mainWindow, runtime)
+            if (createRoute.kind === 'ssh') {
+              const created = await createRemoteWorktree(
+                createArgs,
+                createRoute.repo,
+                store,
+                mainWindow
+              )
+              // Why: the renderer spawns SSH setup later; register before handing the setup over.
+              const setup = runtime?.registerWorktreePreparation(
+                {
+                  ...created.worktree,
+                  hostId: created.worktree.hostId ?? getRepoExecutionHostId(createRoute.repo)
+                },
+                created.setup
+              )
+              result = setup ? { ...created, setup } : created
+            } else {
+              result = await createLocalWorktree(createArgs, repo, store, mainWindow, runtime)
+            }
           }
         } catch (error) {
           releaseAutomationWorkspaceProvenanceRequest(args.automationProvenanceRequest)

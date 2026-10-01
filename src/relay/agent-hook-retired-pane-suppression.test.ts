@@ -2,10 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { RelayAgentHookServer } from './agent-hook-server'
+import { RelayAgentHookServer, type RelayHookForward } from './agent-hook-server'
 import { RelayAgentHookRuntime } from './relay-agent-hook-runtime'
 import { RetiredPaneSurfaceRegistry } from './retired-pane-surfaces'
-import type { AgentHookRelayEnvelope } from '../shared/agent-hook-relay'
 import { makePaneKey } from '../shared/stable-pane-id'
 import type { PtyHandler, PtySurfaceRetiredListener } from './pty-handler'
 import type { RelayDispatcher } from './dispatcher'
@@ -59,7 +58,7 @@ describe('relay hook forwarding for a retired pane surface', () => {
   })
 
   async function startServer(options: {
-    forward: (envelope: AgentHookRelayEnvelope) => void
+    forward: RelayHookForward
     isPaneSurfaceRetired?: (paneKey: string) => boolean
   }): Promise<RelayAgentHookServer> {
     const server = new RelayAgentHookServer({ endpointDir: dir, ...options })
@@ -70,7 +69,7 @@ describe('relay hook forwarding for a retired pane surface', () => {
 
   it('forwards and caches a post from a pane that still has a tab', async () => {
     const retired = new RetiredPaneSurfaceRegistry()
-    const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
+    const forward = vi.fn<RelayHookForward>()
     const server = await startServer({
       forward,
       isPaneSurfaceRetired: (paneKey) => retired.isRetired(paneKey)
@@ -84,7 +83,7 @@ describe('relay hook forwarding for a retired pane surface', () => {
 
   it('does not advertise an orphan agent whose tab was closed', async () => {
     const retired = new RetiredPaneSurfaceRegistry()
-    const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
+    const forward = vi.fn<RelayHookForward>()
     const server = await startServer({
       forward,
       isPaneSurfaceRetired: (paneKey) => retired.isRetired(paneKey)
@@ -104,7 +103,7 @@ describe('relay hook forwarding for a retired pane surface', () => {
 
   it('does not replay a cached status for a pane retired after it was cached', async () => {
     const retired = new RetiredPaneSurfaceRegistry()
-    const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
+    const forward = vi.fn<RelayHookForward>()
     const server = await startServer({
       forward,
       isPaneSurfaceRetired: (paneKey) => retired.isRetired(paneKey)
@@ -121,7 +120,7 @@ describe('relay hook forwarding for a retired pane surface', () => {
 
   it('forwards again once the pane key is bound by a new PTY', async () => {
     const retired = new RetiredPaneSurfaceRegistry()
-    const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
+    const forward = vi.fn<RelayHookForward>()
     const server = await startServer({
       forward,
       isPaneSurfaceRetired: (paneKey) => retired.isRetired(paneKey)
@@ -138,7 +137,7 @@ describe('relay hook forwarding for a retired pane surface', () => {
   })
 
   it('an embedder that supplies no retirement source keeps forwarding everything', async () => {
-    const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
+    const forward = vi.fn<RelayHookForward>()
     const server = await startServer({ forward })
 
     expect(await postHook(server, PANE_KEY)).toBe(204)

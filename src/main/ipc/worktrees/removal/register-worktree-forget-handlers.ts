@@ -122,7 +122,9 @@ export function registerWorktreeForgetHandlers(context: WorktreeIpcContext): voi
           store,
           args.worktreeId,
           ownerHost?.id,
-          args.snapshotPruneBatchId
+          args.snapshotPruneBatchId,
+          // Forgetting deletes nothing on disk, so the generation's preparation archives stay.
+          { purgePreparationArchives: false }
         )
         // Why: cached roots outlive the forgotten workspace, so an ownerless path stays filesystem-authorized until a rebuild.
         invalidateAuthorizedRootsCache()

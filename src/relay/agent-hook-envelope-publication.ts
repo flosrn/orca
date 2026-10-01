@@ -2,7 +2,8 @@ import {
   AGENT_HOOK_NOTIFICATION_METHOD,
   AGENT_HOOK_SHED_FIELDS_KEY,
   createShedSubagentsField,
-  type AgentHookRelayEnvelope
+  type AgentHookRelayEnvelope,
+  type AgentHookRelayReadinessEnvelope
 } from '../shared/agent-hook-relay'
 import type { RelayDispatcher } from './dispatcher'
 
@@ -50,7 +51,7 @@ function fitsProducerFrame(dispatcher: RelayDispatcher, params: Record<string, u
 }
 
 function toNotificationParams(
-  envelope: AgentHookRelayEnvelope,
+  envelope: AgentHookRelayEnvelope | AgentHookRelayReadinessEnvelope,
   shedFields: readonly string[]
 ): Record<string, unknown> {
   const params = envelope as unknown as Record<string, unknown>
@@ -156,7 +157,7 @@ function logUnsendableEnvelope(
  *  background; one that no shedding can fit is dropped. */
 export function publishAgentHookEnvelope(
   dispatcher: RelayDispatcher,
-  envelope: AgentHookRelayEnvelope
+  envelope: AgentHookRelayEnvelope | AgentHookRelayReadinessEnvelope
 ): void {
   const clientIds = dispatcher.activeClientIds()
   if (clientIds.length === 0) {
@@ -192,7 +193,8 @@ export function publishAgentHookEnvelope(
         return
       }
     }
-    if (step >= SHED_ORDER.length) {
+    // Why: a readiness-only envelope has an empty payload, so it has nothing to shed either.
+    if (step >= SHED_ORDER.length || !isStatusEnvelope(candidate)) {
       // Nothing left to shed and it still does not fit: waiting cannot make it sendable, and this
       // snapshot supersedes any pending one, which is now stale.
       if (measureBeforePublish) {
@@ -222,6 +224,13 @@ export function publishAgentHookEnvelope(
     delete candidate.payload[field]
     shedFields.push(shedField)
   }
+}
+
+/** Status-less readiness envelopes carry no `state`; every status envelope does. */
+function isStatusEnvelope(
+  envelope: AgentHookRelayEnvelope | AgentHookRelayReadinessEnvelope
+): envelope is AgentHookRelayEnvelope {
+  return 'state' in envelope.payload
 }
 
 function setPendingEnvelope(

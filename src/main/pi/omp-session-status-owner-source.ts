@@ -27,7 +27,7 @@ export function getOmpSessionOwnerHandlerSourceLines(): string[] {
     '  function ownsSessionStatus(ctx): boolean {',
     '    if (!isOmpRuntime()) return true',
     '    // Newer OMP builds may expose this computed runtime provenance directly.',
-    '    if (ctx?.agentKind === "sub") return false',
+    '    if (ctx?.agentKind === "sub" || ctx?.agent?.kind === "sub") return false',
     '    const current = sessionProvenance(ctx)',
     '    if (!current) return true',
     "    // A task transcript is never the pane's resumable root, even when its",
@@ -59,7 +59,10 @@ export function getOmpSessionOwnerHandlerSourceLines(): string[] {
     '    })',
     '  }',
     '',
-    "  onStatus('session_start', () => {})",
+    "  onStatus('session_start', (_event, ctx) => {",
+    '    updateRuntimeOmpSessionMetadata(ctx)',
+    "    if (captureRootReadiness(ctx)) post('session_start')",
+    '  })',
     ''
   ]
 }

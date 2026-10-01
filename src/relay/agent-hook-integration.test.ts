@@ -29,6 +29,11 @@ import {
 import { AGENT_STATUS_ASSISTANT_MESSAGE_MAX_LENGTH } from '../shared/agent-status-types'
 import { AgentHookServer } from '../main/agent-hooks/server'
 import { publishAgentHookEnvelope } from './agent-hook-envelope-publication'
+import {
+  preparationFacts,
+  registerPreparationAgent,
+  resetPreparationObservationsForTests
+} from '../main/runtime/preparation/preparation-observation'
 
 const LEAF_7 = '77777777-7777-4777-8777-777777777777'
 const LEAF_9 = '99999999-9999-4999-8999-999999999999'
@@ -116,6 +121,50 @@ describe('Integration: relay hook server → mux → AgentHookServer.ingestRemot
     hookServer.stop()
     orcaServer.stop()
     rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it.each([
+    ['a status-less session_start', { hook_event_name: 'session_start' }],
+    ['a later agent_start snapshot', { hook_event_name: 'agent_start' }]
+  ])('carries the OMP root readiness receipt on %s through the relay', async (_case, event) => {
+    resetPreparationObservationsForTests()
+    const paneKey = `tab-7:${LEAF_7}`
+    registerPreparationAgent({
+      preparationId: 'prep-relay',
+      paneKey,
+      launchToken: 'launch-relay',
+      incarnationId: 'inc-relay',
+      ptyId: 'pty-relay'
+    })
+    const { port, token } = hookServer.getCoordinates()
+    const res = await fetch(`http://127.0.0.1:${port}/hook/omp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Orca-Agent-Hook-Token': token },
+      body: JSON.stringify({
+        paneKey,
+        launchToken: 'launch-relay',
+        tabId: 'tab-7',
+        worktreeId: 'wt-7',
+        payload: {
+          ...event,
+          root_session_ready: true,
+          root_session_id: 'root-1',
+          status_owner_module: '/managed/orca-agent-status.ts'
+        }
+      })
+    })
+    expect(res.status).toBe(204)
+    const start = Date.now()
+    while (!preparationFacts('prep-relay').takeover && Date.now() - start < 1500) {
+      await new Promise((r) => setImmediate(r))
+    }
+    expect(preparationFacts('prep-relay').takeover).toMatchObject({
+      ready: true,
+      rootSessionId: 'root-1',
+      statusOwnerModule: '/managed/orca-agent-status.ts',
+      incarnationId: 'inc-relay'
+    })
+    resetPreparationObservationsForTests()
   })
 
   it.each([

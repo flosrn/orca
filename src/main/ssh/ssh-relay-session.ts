@@ -1119,6 +1119,8 @@ export class SshRelaySession {
     ptyProvider.setTerminalUnavailableRecovery?.((cause) =>
       this.recoverRemoteTerminalRuntime(ptyProvider, cause)
     )
+    // Idle retirement names this persisted consumer identity; the relay checks it against its creator record.
+    ptyProvider.setPtyConsumerClientInstanceId?.(this.ptyConsumerClientInstanceId)
     const consumerOwnerState = this.activePtyConsumerOwner()
     if (consumerOwnerState) {
       ptyProvider.setPtyDeliveryPauseAdapter?.(({ id, providerGeneration: generation, paused }) => {
@@ -1632,6 +1634,8 @@ export class SshRelaySession {
             typeof envelope.claudeRunningNonAgentTask === 'boolean'
               ? envelope.claudeRunningNonAgentTask
               : undefined,
+          // Why: ingestRemote validates the receipt; older relays simply omit it.
+          rootReadiness: envelope.rootReadiness,
           // Why: the SSH relay protocol advertises no run-serving capability.
           advertisedAgentStatusCapabilities: AGENT_STATUS_LEGACY_UNADVERTISED_PEER_CAPABILITIES,
           payload: envelope.payload

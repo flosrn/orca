@@ -9,6 +9,14 @@ import {
 } from './types'
 import type { PtyProcessInspection } from '../providers/pty-process-inspection'
 import { clientOnlyUnverifiableInspection } from '../../shared/terminal-process-inspection'
+import { IDLE_RETIREMENT_DAEMON_PROTOCOL_VERSION } from './daemon-protocol-version'
+import { remainingDaemonRequestTimeoutMs } from './daemon-request-deadline'
+import {
+  parsePtyIdleRetirementResult,
+  retainPty,
+  type PtyIdleRetirementRequest,
+  type PtyIdleRetirementResult
+} from '../../shared/pty-idle-retirement'
 
 export abstract class DaemonPtyProcessInspection extends DaemonPtyBufferSnapshots {
   // Why: daemon-backed PTYs can host long-lived agents while detached; cleanup prompts must not treat them as idle shells.
@@ -50,6 +58,42 @@ export abstract class DaemonPtyProcessInspection extends DaemonPtyBufferSnapshot
         : {}),
       // Additive: an older daemon ignores it and pays for the full capture.
       ...(options?.steadyState === true ? { steadyState: true } : {})
+    })
+  }
+
+  async retireIdle(
+    id: string,
+    request: PtyIdleRetirementRequest
+  ): Promise<PtyIdleRetirementResult> {
+    if (this.protocolVersion < IDLE_RETIREMENT_DAEMON_PROTOCOL_VERSION) {
+      // An older daemon would treat any stop as unconditional teardown.
+      return retainPty('unsupported')
+    }
+    return this.withHistorySpawnLock<PtyIdleRetirementResult>(id, async () => {
+      try {
+        await this.ensureConnected(request.deadlineMs)
+      } catch {
+        return retainPty('unverifiable')
+      }
+      let reply: unknown
+      try {
+        reply = await this.client.request(
+          'retireIdle',
+          { sessionId: id, expectedIncarnationId: request.expectedIncarnationId },
+          remainingDaemonRequestTimeoutMs(request.deadlineMs)
+        )
+      } catch {
+        // The daemon may have acted before the reply was lost; never read this as retained or absent.
+        return { outcome: 'unconfirmed' }
+      }
+      const result: PtyIdleRetirementResult = parsePtyIdleRetirementResult(reply) ?? {
+        outcome: 'unconfirmed'
+      }
+      if (result.outcome === 'stopped' || result.outcome === 'exited') {
+        // Same as an explicit close: drop restore history and tombstone so no ghost comes back.
+        await this.forgetKilledSession(id, false)
+      }
+      return result
     })
   }
 

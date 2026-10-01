@@ -63,7 +63,10 @@ export class OrcaRuntimeWithCreateAgentSession extends OrcaRuntimeWithGetAgentSe
           request.placement?.tabId ?? null,
           request.placement?.leafId ?? null,
           request.viewMode ?? null,
-          ...(request.terminalKittyKeyboardProtocol === true ? ['kitty-keyboard'] : [])
+          ...(request.terminalKittyKeyboardProtocol === true ? ['kitty-keyboard'] : []),
+          ...(request.preparation
+            ? ['preparation', request.preparation.preparationId, request.preparation.role]
+            : [])
         ])
       )
       .digest('base64url')
@@ -140,7 +143,10 @@ export class OrcaRuntimeWithCreateAgentSession extends OrcaRuntimeWithGetAgentSe
             request.placement?.tabId ?? null,
             request.placement?.leafId ?? null,
             request.viewMode ?? null,
-            ...(request.terminalKittyKeyboardProtocol === true ? ['kitty-keyboard'] : [])
+            ...(request.terminalKittyKeyboardProtocol === true ? ['kitty-keyboard'] : []),
+            ...(request.preparation
+              ? ['preparation', request.preparation.preparationId, request.preparation.role]
+              : [])
           ])
         )
         .digest('base64url')
@@ -211,7 +217,8 @@ export class OrcaRuntimeWithCreateAgentSession extends OrcaRuntimeWithGetAgentSe
           signal: caller.signal,
           onPtySpawnCommitted: () => {
             retainReplayFence = true
-          }
+          },
+          ...(request.preparation ? { preparation: request.preparation } : {})
         })
       } catch (error) {
         if (isAgentSessionOperationOutcomeUnknown(error)) {

@@ -10,6 +10,7 @@ import type {
 import type { ExecutionHostId } from '../../../../shared/execution-host'
 import type { StartupCommandDelivery } from '../../../../shared/codex-startup-delivery'
 import type { SessionOptionValue } from '../../../../shared/native-chat-session-options'
+import type { PreparationSpawnIntake } from '../../../../shared/preparation-contracts'
 import type { AgentStartedTelemetry } from '../../lib/worktree-startup-payload'
 import type {
   DirectSshLivePtyBinding,
@@ -80,6 +81,8 @@ export type TerminalState = {
       }
       showSessionRestoredBanner?: boolean
       telemetry?: AgentStartedTelemetry
+      /** Registration role for the tab's first pane spawn; never derived from its title. */
+      preparation?: PreparationSpawnIntake
     }
   >
   pendingInitialCwdByTabId: Record<string, string>
@@ -89,6 +92,7 @@ export type TerminalState = {
       command: string
       env?: Record<string, string>
       direction: SetupSplitDirection
+      preparation?: PreparationSpawnIntake
     }
   >
   pendingIssueCommandSplitByTabId: Record<

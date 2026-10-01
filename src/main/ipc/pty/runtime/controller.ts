@@ -8,6 +8,8 @@ import {
   retireRejectedPtyFromRuntimeController,
   stopAndWaitPtyFromRuntimeController
 } from './kill'
+import { retireIdlePtyFromRuntimeController } from './retire-idle'
+import { ptyInputRevision } from '../delivery/input-revision'
 import {
   attachPtyFromRuntimeController,
   clearBufferFromRuntimeController,
@@ -58,6 +60,8 @@ export function installPtyRuntimeController(deps: PtyRuntimeControllerDeps): voi
       retireRejectedPtyFromRuntimeController(deps, ptyId, stopConfirmed),
     markReversibleStops: (ptyIds) => markReversibleStopsFromRuntimeController(deps, ptyIds),
     stopAndWait: (ptyId, opts) => stopAndWaitPtyFromRuntimeController(deps, ptyId, opts),
+    retireIdle: (ptyId, request) => retireIdlePtyFromRuntimeController(deps, ptyId, request),
+    inputRevision: (ptyId) => ptyInputRevision(ptyId),
     getForegroundProcess: (ptyId) => getForegroundProcessFromRuntimeController(ptyId),
     inspectProcess: (ptyId, options) => inspectProcessFromRuntimeController(ptyId, options),
     confirmForegroundProcess: (ptyId) => confirmForegroundProcessFromRuntimeController(ptyId),

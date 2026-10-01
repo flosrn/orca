@@ -1,16 +1,21 @@
 import { performance } from 'node:perf_hooks'
 import type { TerminalHost } from './terminal-host'
 
+/** Per-session activity revisions; idle retirement refuses when any moves while it inspects. */
+export type DaemonSessionActivity = { input: number; output: number; bind: number }
+
 export class DaemonSessionAttachments {
   private readonly clientIdBySessionId = new Map<string, string>()
   private readonly tokenBySessionId = new Map<string, symbol>()
   private readonly lastInputAtBySessionId = new Map<string, number>()
+  private readonly activityBySessionId = new Map<string, DaemonSessionActivity>()
 
   constructor(private readonly host: TerminalHost) {}
 
   attach(sessionId: string, clientId: string, token: symbol): void {
     this.clientIdBySessionId.set(sessionId, clientId)
     this.tokenBySessionId.set(sessionId, token)
+    this.touchActivity(sessionId).bind += 1
   }
 
   clientIdForSession(sessionId: string): string | undefined {
@@ -19,6 +24,24 @@ export class DaemonSessionAttachments {
 
   recordInput(sessionId: string): void {
     this.lastInputAtBySessionId.set(sessionId, performance.now())
+    this.touchActivity(sessionId).input += 1
+  }
+
+  recordOutput(sessionId: string): void {
+    this.touchActivity(sessionId).output += 1
+  }
+
+  activity(sessionId: string): Readonly<DaemonSessionActivity> {
+    return { ...this.touchActivity(sessionId) }
+  }
+
+  private touchActivity(sessionId: string): DaemonSessionActivity {
+    let activity = this.activityBySessionId.get(sessionId)
+    if (!activity) {
+      activity = { input: 0, output: 0, bind: 0 }
+      this.activityBySessionId.set(sessionId, activity)
+    }
+    return activity
   }
 
   lastInputAt(sessionId: string): number | undefined {
@@ -33,6 +56,7 @@ export class DaemonSessionAttachments {
     this.clientIdBySessionId.delete(sessionId)
     this.tokenBySessionId.delete(sessionId)
     this.lastInputAtBySessionId.delete(sessionId)
+    this.activityBySessionId.delete(sessionId)
   }
 
   detachSessionForClient(sessionId: string, clientId: string): void {

@@ -9,6 +9,8 @@ import {
   getActiveMultiplexerMock
 } from './worktrees-test-module-mocks'
 import { handlers, setupWorktreeHandlers, store } from './worktrees-test-harness'
+import type { WorktreeRuntimeStub } from './worktrees-test-runtime-stub'
+import { getRepoExecutionHostId } from '../../shared/execution-host'
 
 vi.mock('electron', async () =>
   (await import('./worktrees-test-module-mocks')).electronModuleMock()
@@ -92,83 +94,91 @@ vi.mock('../runtime/worktree-teardown', async () =>
 )
 vi.mock('./pty', async () => (await import('./worktrees-test-module-mocks')).ptyModuleMock())
 
+const SSH_REPO = {
+  id: 'repo-ssh',
+  path: '/remote/repo',
+  displayName: 'ssh',
+  badgeColor: '#000',
+  addedAt: 0,
+  connectionId: 'conn-1',
+  worktreeBaseRef: 'origin/main'
+}
+
+/** A wait-for-setup SSH repo whose orca.yaml declares a setup script. */
+function arrangeSshCreateWithSetup() {
+  const provider = {
+    exec: vi.fn().mockImplementation(async (args: string[]) => {
+      if (args[0] === 'remote') {
+        return { stdout: 'origin\n', stderr: '' }
+      }
+      if (args[0] === 'rev-parse' && args[1] === '--git-path') {
+        return {
+          stdout: '/remote/repo/.git/worktrees/repo-improve-dashboard/orca/setup-runner.sh\n',
+          stderr: ''
+        }
+      }
+      if (args[0] === 'rev-parse') {
+        throw new Error('missing local branch')
+      }
+      if (args[0] === 'show-ref') {
+        throw Object.assign(new Error('missing exact ref'), { code: 1 })
+      }
+      return { stdout: '', stderr: '' }
+    }),
+    fetchRemoteTrackingRef: vi.fn().mockResolvedValue(undefined),
+    addWorktree: vi.fn().mockResolvedValue(undefined),
+    listWorktrees: vi.fn().mockResolvedValue([
+      {
+        path: '/remote/old-improve-dashboard',
+        head: 'old123',
+        branch: 'refs/heads/archive/improve-dashboard',
+        isBare: false,
+        isMainWorktree: false
+      },
+      {
+        path: '/remote/repo-improve-dashboard',
+        head: 'abc123',
+        branch: 'refs/heads/improve-dashboard',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+  }
+  const fsProvider = {
+    readFile: vi.fn().mockResolvedValue({
+      content: 'setupAgentStartupPolicy: wait-for-setup\nscripts:\n  setup: pnpm install\n',
+      isBinary: false
+    }),
+    createDir: vi.fn().mockResolvedValue(undefined),
+    writeFile: vi.fn().mockResolvedValue(undefined)
+  }
+  store.getRepos.mockReturnValue([SSH_REPO])
+  store.getRepo.mockReturnValue(SSH_REPO)
+  getSshGitProviderMock.mockReturnValue(provider)
+  getSshFilesystemProviderMock.mockReturnValue(fsProvider)
+  getActiveMultiplexerMock.mockReturnValue({
+    request: vi.fn().mockResolvedValue(undefined),
+    notify: vi.fn()
+  })
+  store.setWorktreeMeta.mockImplementation((_worktreeId, meta) => meta)
+  parseOrcaYamlMock.mockReturnValue({
+    scripts: { setup: 'pnpm install' },
+    setupAgentStartupPolicy: 'wait-for-setup'
+  })
+  getEffectiveHooksFromConfigMock.mockReturnValue({ scripts: { setup: 'pnpm install' } })
+  shouldRunSetupForCreateMock.mockReturnValue(true)
+  return { provider, fsProvider }
+}
+
 describe('registerWorktreeHandlers', () => {
+  let runtimeStub: WorktreeRuntimeStub
+
   beforeEach(() => {
-    setupWorktreeHandlers()
+    runtimeStub = setupWorktreeHandlers()
   })
 
   it('reads remote orca.yaml and returns a setup launch payload during SSH create', async () => {
-    const repo = {
-      id: 'repo-ssh',
-      path: '/remote/repo',
-      displayName: 'ssh',
-      badgeColor: '#000',
-      addedAt: 0,
-      connectionId: 'conn-1',
-      worktreeBaseRef: 'origin/main'
-    }
-    const provider = {
-      exec: vi.fn().mockImplementation(async (args: string[]) => {
-        if (args[0] === 'remote') {
-          return { stdout: 'origin\n', stderr: '' }
-        }
-        if (args[0] === 'rev-parse' && args[1] === '--git-path') {
-          return {
-            stdout: '/remote/repo/.git/worktrees/repo-improve-dashboard/orca/setup-runner.sh\n',
-            stderr: ''
-          }
-        }
-        if (args[0] === 'rev-parse') {
-          throw new Error('missing local branch')
-        }
-        if (args[0] === 'show-ref') {
-          throw Object.assign(new Error('missing exact ref'), { code: 1 })
-        }
-        return { stdout: '', stderr: '' }
-      }),
-      fetchRemoteTrackingRef: vi.fn().mockResolvedValue(undefined),
-      addWorktree: vi.fn().mockResolvedValue(undefined),
-      listWorktrees: vi.fn().mockResolvedValue([
-        {
-          path: '/remote/old-improve-dashboard',
-          head: 'old123',
-          branch: 'refs/heads/archive/improve-dashboard',
-          isBare: false,
-          isMainWorktree: false
-        },
-        {
-          path: '/remote/repo-improve-dashboard',
-          head: 'abc123',
-          branch: 'refs/heads/improve-dashboard',
-          isBare: false,
-          isMainWorktree: false
-        }
-      ])
-    }
-    const fsProvider = {
-      readFile: vi.fn().mockResolvedValue({
-        content: 'setupAgentStartupPolicy: wait-for-setup\nscripts:\n  setup: pnpm install\n',
-        isBinary: false
-      }),
-      createDir: vi.fn().mockResolvedValue(undefined),
-      writeFile: vi.fn().mockResolvedValue(undefined)
-    }
-    const mux = {
-      request: vi.fn().mockResolvedValue(undefined),
-      notify: vi.fn()
-    }
-    store.getRepos.mockReturnValue([repo])
-    store.getRepo.mockReturnValue(repo)
-    getSshGitProviderMock.mockReturnValue(provider)
-    getSshFilesystemProviderMock.mockReturnValue(fsProvider)
-    getActiveMultiplexerMock.mockReturnValue(mux)
-    store.setWorktreeMeta.mockImplementation((_worktreeId, meta) => meta)
-    parseOrcaYamlMock.mockReturnValue({
-      scripts: { setup: 'pnpm install' },
-      setupAgentStartupPolicy: 'wait-for-setup'
-    })
-    getEffectiveHooksFromConfigMock.mockReturnValue({ scripts: { setup: 'pnpm install' } })
-    shouldRunSetupForCreateMock.mockReturnValue(true)
+    const { provider, fsProvider } = arrangeSshCreateWithSetup()
 
     const result = await handlers['worktrees:create'](null, {
       repoId: 'repo-ssh',
@@ -202,6 +212,40 @@ describe('registerWorktreeHandlers', () => {
         }
       })
     )
+  })
+
+  // AE7 (manual, remote): the renderer spawns SSH setup later, so the preparation must already be
+  // registered under the execution host, and the setup it receives must carry that identity.
+  it('registers the SSH preparation under its execution host before handing setup to the renderer', async () => {
+    arrangeSshCreateWithSetup()
+    runtimeStub.registerWorktreePreparation.mockImplementationOnce(
+      (_worktree: unknown, setup: Record<string, unknown> | undefined) =>
+        setup ? { ...setup, preparation: { preparationId: 'prep-ssh-manual' } } : setup
+    )
+
+    const result = await handlers['worktrees:create'](null, {
+      repoId: 'repo-ssh',
+      name: 'improve-dashboard',
+      setupDecision: 'run'
+    })
+
+    expect(runtimeStub.registerWorktreePreparation).toHaveBeenCalledOnce()
+    expect(runtimeStub.registerWorktreePreparation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'repo-ssh::/remote/repo-improve-dashboard',
+        hostId: getRepoExecutionHostId(SSH_REPO)
+      }),
+      expect.objectContaining({
+        runnerScriptPath: '/remote/repo/.git/worktrees/repo-improve-dashboard/orca/setup-runner.sh'
+      })
+    )
+    expect(result).toMatchObject({
+      setup: {
+        runnerScriptPath: '/remote/repo/.git/worktrees/repo-improve-dashboard/orca/setup-runner.sh',
+        waitForAgentStartup: true,
+        preparation: { preparationId: 'prep-ssh-manual' }
+      }
+    })
   })
 
   it('keeps Windows SSH setup runners independent from the local Git Bash setting', async () => {

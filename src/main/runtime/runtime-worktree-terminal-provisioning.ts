@@ -4,6 +4,10 @@ import type { GlobalSettings } from '../../shared/global-settings-types'
 import { buildObservedSetupCommand } from './orchestration/setup-completion-signal'
 import { buildSetupRunnerCommand } from '../../shared/setup-runner-command'
 import type { RuntimeStore } from './runtime-store-contract'
+import {
+  preparationSpawnIntake,
+  type PreparationSpawnIntake
+} from '../../shared/preparation-contracts'
 
 type TerminalResult = { handle: string; tabId?: string | null }
 export type WorktreeProvisionTerminalOptions = {
@@ -13,6 +17,7 @@ export type WorktreeProvisionTerminalOptions = {
   direction?: 'horizontal' | 'vertical'
   activate?: boolean
   surfaceOwner?: false
+  preparation?: PreparationSpawnIntake
 }
 
 export type WorktreeTerminalProvisioningHost = {
@@ -43,6 +48,8 @@ export type WorktreeTerminalProvisioningArgs = {
   observeSetupCompletion?: boolean
   // Why: setup and startup must use the same wrapper when startup waits for setup.
   wrappedSetupCommand?: string
+  // Why: the sequenced wrapper already announces its nonce; observing it must not mint a second token.
+  wrappedSetupCompletionToken?: string
   surfaceOwner?: false
 }
 
@@ -102,16 +109,23 @@ export async function provisionWorktreeTerminals(
       primaryHandle = (await host.createTerminal(args.worktreeSelector, surfacing)).handle
     }
     if (args.setup) {
-      const completionToken =
-        args.observeSetupCompletion && !args.wrappedSetupCommand ? randomUUID() : null
-      const observed = completionToken
-        ? buildObservedSetupCommand(
-            args.setup.runnerScriptPath,
-            args.setupCommandPlatform,
-            completionToken,
-            args.setup.shell
-          )
+      // Why: a registered preparation is only retired on its runner's own marker, so it is always
+      // observed, whichever caller created it or whether it waits for receipts.
+      const observe = args.observeSetupCompletion === true || args.setup.preparation !== undefined
+      const completionToken = observe
+        ? args.wrappedSetupCommand
+          ? (args.wrappedSetupCompletionToken ?? null)
+          : randomUUID()
         : null
+      const observed =
+        completionToken && !args.wrappedSetupCommand
+          ? buildObservedSetupCommand(
+              args.setup.runnerScriptPath,
+              args.setupCommandPlatform,
+              completionToken,
+              args.setup.shell
+            )
+          : null
       const command =
         args.wrappedSetupCommand ??
         observed?.command ??
@@ -121,6 +135,7 @@ export async function provisionWorktreeTerminals(
           args.setup.shell
         )
       const env = { ...args.setup.envVars, ...observed?.env }
+      const preparation = preparationSpawnIntake(args.setup.preparation, 'preparation')
       const shouldSplit =
         primaryHandle &&
         (setupLaunchMode === 'split-vertical' || setupLaunchMode === 'split-horizontal')
@@ -130,13 +145,15 @@ export async function provisionWorktreeTerminals(
             command,
             env,
             activate: false,
-            ...surfacing
+            ...surfacing,
+            ...preparation
           })
         : host.createTerminal(args.worktreeSelector, {
             title: 'Setup',
             command,
             env,
-            ...surfacing
+            ...surfacing,
+            ...preparation
           }))
       setupTerminalHandle = setupTerminal.handle
       setupSpawned = true

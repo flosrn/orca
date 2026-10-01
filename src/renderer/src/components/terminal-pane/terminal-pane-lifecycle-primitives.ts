@@ -10,6 +10,7 @@ import type { HttpLinkSourceOwner } from '@/lib/http-link-routing'
 import { resolveLocalhostHttpLinkDisplayUrl } from '@/lib/http-link-routing'
 import { recordCreatedTerminalPaneSplit } from './terminal-pane-split-completion'
 import { PRIMARY_SELECTION_MAX_LENGTH } from '@/lib/primary-selection'
+import type { PreparationSpawnIntake } from '../../../../shared/preparation-contracts'
 
 /** Writes a transport-agnostic interrupt reset without running xterm work inline. */
 export function resetTerminalKeyboardProtocolAfterInterrupt(terminal: Terminal): void {
@@ -162,7 +163,11 @@ export function resolvePaneSeedCwd(splitPaneCwd: string | undefined, fallbackCwd
   return splitPaneCwd ?? fallbackCwd
 }
 
-export type SplitStartupPayload = { command: string; env?: Record<string, string> }
+export type SplitStartupPayload = {
+  command: string
+  env?: Record<string, string>
+  preparation?: PreparationSpawnIntake
+}
 
 export function resolveTerminalHomePathFromEnv(
   env: Record<string, string> | undefined

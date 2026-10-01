@@ -1,4 +1,6 @@
 import { createAgentSessionKeyboardOptions } from '@/runtime/agent-session-keyboard-capability'
+import { createAgentSessionPreparationOptions } from '@/runtime/agent-session-preparation-capability'
+import type { PreparationSpawnIntake } from '../../../../shared/preparation-contracts'
 /* eslint-disable max-lines -- Why: remote PTY transport keeps lifecycle, JSON fallback, and binary stream wiring together so reconnect/destroy ordering stays testable as one behavior surface. */
 import type { RuntimeRpcResponse } from '../../../../shared/runtime-rpc-envelope'
 import {
@@ -408,6 +410,10 @@ export function createRemoteRuntimePtyTransport(
   // another fresh agent when the first response was lost.
   const agentCreateOperation = createAgentSessionCreateOperation()
   const agentKeyboardOptions = createAgentSessionKeyboardOptions(terminalKittyKeyboardProtocol)
+  const agentPreparationOptions = createAgentSessionPreparationOptions()
+  // Why: claimed on this transport's first connect only; later connects replay the same intake so
+  // an unknown-outcome retry keeps one payload, and a restored session spends it unsent.
+  let transportPreparation: PreparationSpawnIntake | null | undefined
   const outputProcessor = createPtyOutputProcessor({
     onTitleChange,
     onBell,
@@ -2211,6 +2217,11 @@ export function createRemoteRuntimePtyTransport(
         }
 
         const commandToSend = options.command ?? command
+        if (transportPreparation === undefined) {
+          const claimed = options.claimPreparation?.() ?? null
+          transportPreparation = options.sessionId ? null : claimed
+        }
+        const preparationToSend = transportPreparation
         const startupCommandDeliveryToSend =
           options.startupCommandDelivery ?? startupCommandDelivery
         const envToSend = options.env ?? env
@@ -2243,7 +2254,8 @@ export function createRemoteRuntimePtyTransport(
           focus: false,
           // Why: transport backs an already-mounted pane; activation is local state, not permission for remote UI reveal.
           presentation: 'background' as const,
-          ...(activate === true ? { activate: true } : {})
+          ...(activate === true ? { activate: true } : {}),
+          ...(preparationToSend ? { preparation: preparationToSend } : {})
         }
         const legacyCreate = () =>
           createWithUnknownOutcomeRecovery(
@@ -2263,6 +2275,10 @@ export function createRemoteRuntimePtyTransport(
           )
         const hostAuthorityCreate = async () => {
           const keyboardOptions = await agentKeyboardOptions(createEnvironmentId)
+          const preparationOptions = await agentPreparationOptions(
+            createEnvironmentId,
+            preparationToSend
+          )
           return createWithUnknownOutcomeRecovery(
             'agent-session',
             (timeoutMs) =>
@@ -2294,6 +2310,7 @@ export function createRemoteRuntimePtyTransport(
                     withAgentSessionCreateOperationId(
                       {
                         ...keyboardOptions,
+                        ...preparationOptions,
                         worktree: toRuntimeTerminalWorktreeSelector(worktreeId),
                         agent: launchAgentToSend!,
                         ...(agentPrompt ? { prompt: agentPrompt } : {}),

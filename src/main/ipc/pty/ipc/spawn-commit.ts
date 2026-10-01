@@ -25,6 +25,7 @@ import { admitPtyReattachOwnership, registerPersistedPtySpawn } from '../pane/sp
 import { reflowHeadlessTerminalToCommittedGrid } from '../delivery/attached-pty-size'
 import { seedHeadlessTerminalFromSpawnResult } from '../pane/terminal-spawn-restore'
 import { markNativeWindowsConptyPty } from '../../../runtime/terminal-model-query-authority'
+import { bindPtyIpcSpawnPreparation } from './spawn-preparation'
 
 export async function commitPtyIpcSpawn(ctx: PtyIpcSpawnState): Promise<PtySpawnResult> {
   const args = ctx.args
@@ -207,6 +208,7 @@ export async function commitPtyIpcSpawn(ctx: PtyIpcSpawnState): Promise<PtySpawn
   }
   // Why: renderer tab state cannot reliably infer background and reattached PTYs in the daemon inventory.
   ctx.deps.sendPtySpawnedToRenderer(ctx.result.id)
+  bindPtyIpcSpawnPreparation(ctx)
   if (!args.connectionId) {
     ctx.deps.options?.onCodexHomePtySpawned?.({
       id: ctx.result.id,

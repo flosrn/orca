@@ -1,4 +1,5 @@
 import type { TerminalPaneSplitSource } from '../../../shared/feature-education-telemetry'
+import type { PreparationSpawnIntake } from '../../../shared/preparation-contracts'
 
 export const TOGGLE_TERMINAL_PANE_EXPAND_EVENT = 'orca-toggle-terminal-pane-expand'
 export const FOCUS_TERMINAL_PANE_EVENT = 'orca-focus-terminal-pane'
@@ -57,6 +58,8 @@ export type SplitTerminalPaneDetail = {
   telemetrySource?: TerminalPaneSplitSource
   newLeafId?: string
   ptyId?: string
+  /** Runtime-issued preparation role for the new leaf's first spawn; never inferred locally. */
+  preparation?: PreparationSpawnIntake
 }
 
 export type RequestActiveTerminalPaneSplitDetail = {

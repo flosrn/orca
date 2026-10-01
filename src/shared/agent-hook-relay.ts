@@ -27,6 +27,7 @@ import { createHash } from 'node:crypto'
 import type { AgentSubagentSnapshot, ParsedAgentStatusPayload } from './agent-status-types'
 import type { AgentProviderSessionMetadata } from './agent-session-resume'
 import type { AgentHookTarget } from './agent-hook-types'
+import type { PreparationRootReadiness } from './preparation-root-readiness'
 
 // Why: the local hook server knows the discriminator from URL pathname routing
 // (`/hook/<source>`); the relay equally must tag each forwarded notification
@@ -110,6 +111,8 @@ export type AgentHookRelayEnvelope = {
   isReplay?: boolean
   /** Claude background-work evidence for input-interrupt inference on the receiving host. */
   claudeRunningNonAgentTask?: boolean
+  /** OMP root readiness receipt from the raw post; older peers omit or ignore it. */
+  rootReadiness?: PreparationRootReadiness
   /** Forwarded from the agent CLI POST body. The relay default is `remote`,
    *  which marks transport location rather than dev/prod build env. */
   env?: string
@@ -119,6 +122,19 @@ export type AgentHookRelayEnvelope = {
   /** Pre-normalized status payload from the relay's `normalizeHookPayload`.
    *  Orca's `ingestRemote` validates it again at the SSH trust boundary. */
   payload: ParsedAgentStatusPayload
+}
+
+/**
+ * Root-readiness-only envelope for a post that normalized to no pane status (OMP session_start).
+ * The payload is empty on purpose: `ingestRemote` observes the receipt first, then drops a payload
+ * without a state, so no receiving Orca version invents a pane status from it.
+ */
+export type AgentHookRelayReadinessEnvelope = Omit<
+  AgentHookRelayEnvelope,
+  'payload' | 'rootReadiness'
+> & {
+  rootReadiness: PreparationRootReadiness
+  payload: Record<string, never>
 }
 
 /** JSON-RPC notification method name carried over the relay control channel. */

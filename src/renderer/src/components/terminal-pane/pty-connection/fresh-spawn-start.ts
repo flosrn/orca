@@ -114,6 +114,10 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
       ...(session.pendingReplacedPtyId
         ? { claimReplacedPtyId: session.claimPendingReplacedPtyId }
         : {}),
+      // Why: an override launches something other than the queued startup, so it never binds.
+      ...(session.pendingPreparation && startupOverride === undefined
+        ? { claimPreparation: session.claimPendingPreparation }
+        : {}),
       shouldContinue: () =>
         !session.disposed &&
         (findTerminalTabForPane(useAppStore.getState(), session.deps.worktreeId, session.deps.tabId)

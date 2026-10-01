@@ -1,7 +1,6 @@
 import type { CloseTerminalPaneDetail } from '@/constants/terminal'
-import { detachTerminalLayoutLeaf } from '@/components/terminal-pane/terminal-layout-leaf-detach'
-import type { AppState } from '@/store'
-import { makePaneKey, parsePaneKey } from '../../../shared/stable-pane-id'
+import { parsePaneKey } from '../../../shared/stable-pane-id'
+import { terminalSurfaceRetirementDetail } from './retire-terminal-surface-in-store'
 
 type LegacyWorkerTerminalRecoveryEvent = {
   paneKey: string
@@ -24,60 +23,11 @@ export function resolveLegacyWorkerTerminalRecoveryAction(
   return pane && event.ptyId
     ? {
         kind: 'rollback-surface',
-        detail: {
+        detail: terminalSurfaceRetirementDetail({
           tabId: pane.tabId,
           leafId: pane.leafId,
-          preservePty: true,
-          retireSurface: true,
-          expectedPtyId: event.ptyId
-        }
+          ptyId: event.ptyId
+        })
       }
     : { kind: 'ignore' }
-}
-
-type LegacyWorkerTerminalRecoveryStore = Pick<
-  AppState,
-  | 'tabsByWorktree'
-  | 'terminalLayoutsByTabId'
-  | 'setTabLayout'
-  | 'clearTabPtyId'
-  | 'closeTab'
-  | 'retireAgentPaneAuthority'
->
-
-export function rollbackLegacyWorkerTerminalSurfaceInStore(
-  store: LegacyWorkerTerminalRecoveryStore,
-  detail: CloseTerminalPaneDetail
-): 'removed' | 'already-removed' | 'identity-mismatch' {
-  const tabExists = Object.values(store.tabsByWorktree).some((tabs) =>
-    tabs.some((tab) => tab.id === detail.tabId)
-  )
-  if (!tabExists) {
-    return 'already-removed'
-  }
-  if (!detail.leafId || !detail.expectedPtyId) {
-    return 'identity-mismatch'
-  }
-  const layout = store.terminalLayoutsByTabId[detail.tabId]
-  const boundPtyId = layout?.ptyIdsByLeafId?.[detail.leafId]
-  if (!boundPtyId) {
-    return 'already-removed'
-  }
-  if (boundPtyId !== detail.expectedPtyId) {
-    return 'identity-mismatch'
-  }
-  const detached = detachTerminalLayoutLeaf(layout, detail.leafId)
-  if (detached) {
-    store.retireAgentPaneAuthority(makePaneKey(detail.tabId, detail.leafId), {
-      preserveSleepingAgentSession: true
-    })
-    store.setTabLayout(detail.tabId, detached.sourceLayout)
-    store.clearTabPtyId(detail.tabId, detail.expectedPtyId)
-  } else {
-    store.closeTab(detail.tabId, {
-      reason: 'pty-exit',
-      captureRecentlyClosed: false
-    })
-  }
-  return 'removed'
 }

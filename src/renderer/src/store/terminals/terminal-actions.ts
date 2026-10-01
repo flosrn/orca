@@ -12,6 +12,7 @@ import type {
 import type { DirectSshAuthority } from '../../../../shared/ssh-types'
 import type { StartupCommandDelivery } from '../../../../shared/codex-startup-delivery'
 import type { SessionOptionValue } from '../../../../shared/native-chat-session-options'
+import type { PreparationSpawnIntake } from '../../../../shared/preparation-contracts'
 import type { AgentStartedTelemetry } from '../../lib/worktree-startup-payload'
 import type { AiVaultSessionTitle } from '../../../../shared/ai-vault-session-title'
 import type {
@@ -220,6 +221,7 @@ export type TerminalActions = {
       }
       showSessionRestoredBanner?: boolean
       telemetry?: AgentStartedTelemetry
+      preparation?: PreparationSpawnIntake
     }
   ) => void
   queueTabInitialCwd: (tabId: string, cwd: string) => void
@@ -246,6 +248,7 @@ export type TerminalActions = {
     }
     showSessionRestoredBanner?: boolean
     telemetry?: AgentStartedTelemetry
+    preparation?: PreparationSpawnIntake
   } | null
   queueTabSetupSplit: (
     tabId: string,
@@ -253,12 +256,14 @@ export type TerminalActions = {
       command: string
       env?: Record<string, string>
       direction: SetupSplitDirection
+      preparation?: PreparationSpawnIntake
     }
   ) => void
   consumeTabSetupSplit: (tabId: string) => {
     command: string
     env?: Record<string, string>
     direction: SetupSplitDirection
+    preparation?: PreparationSpawnIntake
   } | null
   queueTabIssueCommandSplit: (
     tabId: string,

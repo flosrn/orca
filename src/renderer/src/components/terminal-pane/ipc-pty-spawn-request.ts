@@ -41,6 +41,10 @@ export async function spawnIpcPty(
     cwdFallback === 'worktree' && !connectionId && !admittedSessionId
   // Why: a reattach under an admitted session id must never stop the PTY it is reattaching.
   const replacesPtyId = admittedSessionId ? null : (connectOptions.claimReplacedPtyId?.() ?? null)
+  // Why taken even on a reattach: the role belongs to the pane's first spawn only; a reattach
+  // spends it unsent so no later respawn of this pane can carry it.
+  const claimedPreparation = connectOptions.claimPreparation?.() ?? null
+  const preparation = admittedSessionId ? null : claimedPreparation
   return window.api.pty.spawn({
     cols: connectOptions.cols ?? 80,
     rows: connectOptions.rows ?? 24,
@@ -82,6 +86,7 @@ export async function spawnIpcPty(
     ...(projectRuntime ? { projectRuntime } : {}),
     ...(terminalColorQueryReplies ? { terminalColorQueryReplies } : {}),
     ...(terminalKittyKeyboardProtocol === true ? { terminalKittyKeyboardProtocol: true } : {}),
-    ...(telemetry ? { telemetry } : {})
+    ...(telemetry ? { telemetry } : {}),
+    ...(preparation ? { preparation } : {})
   })
 }

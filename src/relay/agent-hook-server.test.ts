@@ -2,10 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { RelayAgentHookServer } from './agent-hook-server'
+import { RelayAgentHookServer, type RelayHookForward } from './agent-hook-server'
 import type { AgentHookResultRetryScheduler } from './agent-hook-result-retry-scheduler'
 import { endpointDirForRelaySocket } from './agent-hook-endpoint-coordinates'
-import type { AgentHookRelayEnvelope } from '../shared/agent-hook-relay'
 import { makePaneKey } from '../shared/stable-pane-id'
 import * as agentHookListener from '../shared/agent-hook-listener/grok-result-discovery'
 import { HOOK_REQUEST_MAX_BYTES } from '../shared/agent-hook-listener/request-body'
@@ -44,7 +43,7 @@ describe('RelayAgentHookServer', () => {
   })
 
   it('forwards a raw Claude JSON POST with base64 metadata headers', async () => {
-    const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
+    const forward = vi.fn<RelayHookForward>()
     const server = new RelayAgentHookServer({ endpointDir: dir, forward })
     await server.start()
     try {
@@ -99,7 +98,7 @@ describe('RelayAgentHookServer', () => {
         receivedAt: Date.now()
       })}\n`
     )
-    const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
+    const forward = vi.fn<RelayHookForward>()
     const server = new RelayAgentHookServer({ endpointDir: dir, forward })
 
     await server.start()
@@ -245,7 +244,7 @@ describe('RelayAgentHookServer', () => {
   })
 
   it('forwards Claude background monitoring until its authoritative inventory drains', async () => {
-    const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
+    const forward = vi.fn<RelayHookForward>()
     const server = new RelayAgentHookServer({ endpointDir: dir, forward })
     await server.start()
     try {
@@ -350,7 +349,7 @@ describe('RelayAgentHookServer', () => {
   })
 
   it('replays cached payloads on demand', async () => {
-    const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
+    const forward = vi.fn<RelayHookForward>()
     const server = new RelayAgentHookServer({ endpointDir: dir, forward })
     await server.start()
     try {
@@ -386,7 +385,7 @@ describe('RelayAgentHookServer', () => {
   })
 
   it('forwards and replays Pi session identity as metadata-only', async () => {
-    const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
+    const forward = vi.fn<RelayHookForward>()
     const server = new RelayAgentHookServer({ endpointDir: dir, forward })
     await server.start()
     try {
@@ -442,7 +441,7 @@ describe('RelayAgentHookServer', () => {
   })
 
   it('does not replay paneKeys after clearPaneState', async () => {
-    const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
+    const forward = vi.fn<RelayHookForward>()
     const server = new RelayAgentHookServer({ endpointDir: dir, forward })
     await server.start()
     try {
@@ -471,7 +470,7 @@ describe('RelayAgentHookServer', () => {
   // Why: the relay should still drop malformed HTTP events before they reach
   // the wire, even though Orca main re-validates at the SSH trust boundary.
   it('does not forward when normalizeHookPayload rejects the event', async () => {
-    const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
+    const forward = vi.fn<RelayHookForward>()
     const server = new RelayAgentHookServer({ endpointDir: dir, forward })
     await server.start()
     try {
@@ -532,7 +531,7 @@ describe('RelayAgentHookServer', () => {
   })
 
   it('keeps Copilot transcript retry alive across a following SessionEnd event', async () => {
-    const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
+    const forward = vi.fn<RelayHookForward>()
     const server = new RelayAgentHookServer({ endpointDir: dir, forward })
     const transcriptPath = join(dir, 'events.jsonl')
     writeFileSync(transcriptPath, '')
@@ -589,7 +588,7 @@ describe('RelayAgentHookServer', () => {
   })
 
   it('retries Grok chat history on the relay without blocking the hook POST', async () => {
-    const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
+    const forward = vi.fn<RelayHookForward>()
     const server = new RelayAgentHookServer({ endpointDir: dir, forward })
     const sessionId = '019e37f4-5135-7b63-a4ab-6d13aa6bf528'
     const cwd = join(dir, 'workspace')
@@ -650,7 +649,7 @@ describe('RelayAgentHookServer', () => {
     // Mirrors the server's private MAX_CACHED_PANES. The WSL relay never gets a
     // per-pane teardown signal, so the cache is recency-capped instead.
     const CAP = 256
-    const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
+    const forward = vi.fn<RelayHookForward>()
     const server = new RelayAgentHookServer({ endpointDir: dir, forward })
     await server.start()
     try {
@@ -699,7 +698,7 @@ describe('RelayAgentHookServer', () => {
       releaseDiscovery = resolve
     })
     vi.spyOn(agentHookListener, 'preparePendingGrokResultDiscovery').mockReturnValue(discovery)
-    const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
+    const forward = vi.fn<RelayHookForward>()
     const server = new RelayAgentHookServer({ endpointDir: dir, forward })
     const sessionId = '019e37f4-5135-7b63-a4ab-6d13aa6bf534'
     const cwd = join(dir, 'workspace')
@@ -756,7 +755,7 @@ describe('RelayAgentHookServer', () => {
       releaseDiscovery = resolve
     })
     vi.spyOn(agentHookListener, 'preparePendingGrokResultDiscovery').mockReturnValue(discovery)
-    const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
+    const forward = vi.fn<RelayHookForward>()
     const server = new RelayAgentHookServer({ endpointDir: dir, forward })
     await server.start()
     try {

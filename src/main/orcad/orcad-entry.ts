@@ -248,6 +248,11 @@ async function startOrcadRuntime(
       }
     }
   })
+  // Why before registerHeadlessPtyRuntime: daemon-restored output must reach its recorded
+  // preparation capture, and removal purges need the same storage as the desktop host.
+  const { openRuntimePreparationStorage, recoverRuntimePreparationLifecycle } =
+    await import('../runtime/preparation/preparation-storage-startup')
+  openRuntimePreparationStorage(runtime, profileStore.getProfileStorageDirectory())
 
   const { installOrcadSessionSearchService } = await import('./orcad-session-search')
   sessionSearch = await installOrcadSessionSearchService({
@@ -285,6 +290,8 @@ async function startOrcadRuntime(
 
   await runtime.refreshRestoredOrchestrationAuthority()
   await runtime.reconcileLegacyWorkerTerminals()
+  // Providers are registered and the daemon swap settled: panes nothing re-announced are read back.
+  await recoverRuntimePreparationLifecycle(runtime)
 
   // Recovery binds terminal and dispatch identities; only now can startup observations be fenced.
   observedStatusCapture.attach(runtime)

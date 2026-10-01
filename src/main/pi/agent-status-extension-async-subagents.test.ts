@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   AGENT_STATUS_EXTENSION_SELF_PID,
-  createAgentStatusExtensionHarness,
-  type AgentStatusExtensionHarness
+  createAgentStatusExtensionHarness
 } from './agent-status-extension-test-harness'
+import type { AgentStatusExtensionHarness } from './agent-status-extension-test-harness-types'
 
 // Event shapes and orderings mirror traces recorded from pi-subagents 0.71.0.
 const WORKFLOW = 'workflow-1'

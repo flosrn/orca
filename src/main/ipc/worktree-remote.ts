@@ -9,7 +9,6 @@ import { existsSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import type { Store } from '../persistence'
 import type { GitAdmissionTier } from '../../shared/rpc-contract/git-admission-tier-params'
-import type { GlobalSettings } from '../../shared/global-settings-types'
 import type { Repo } from '../../shared/repo-types'
 import type { SetupAgentStartupPolicy } from '../../shared/orca-yaml-hook-types'
 import type {
@@ -145,11 +144,13 @@ import { resolveWorktreeSharedDirectories } from '../git/worktree-shared-directo
 import { normalizeSparseDirectories } from './sparse-checkout-directories'
 import { joinWorktreeRelativePath } from '../runtime/runtime-relative-paths'
 import type { IFilesystemProvider } from '../providers/types'
+import { getSetupRunnerCommandPlatformForPath } from '../../shared/setup-runner-command'
 import {
-  buildSetupRunnerCommand,
-  getSetupRunnerCommandPlatformForPath
-} from '../../shared/setup-runner-command'
-import { createSequencedSetupAgentCommands } from '../../shared/setup-agent-sequencing'
+  createSequencedSetupAgentCommands,
+  createSetupAgentSequenceNonce
+} from '../../shared/setup-agent-sequencing'
+import { getRepoExecutionHostId } from '../../shared/execution-host'
+import { preparationSpawnIntake } from '../../shared/preparation-contracts'
 import { shouldWaitForSetupBeforeAgentStartup } from '../../shared/setup-agent-startup-policy'
 import { createWorktreeCreateTimingRecorder } from '../worktree-create-timing'
 import {
@@ -400,10 +401,9 @@ async function spawnLocalStartupAndSetupTerminals(args: {
   startup: CreateWorktreeArgs['startup']
   setup: CreateWorktreeResult['setup']
   defaultTabs: CreateWorktreeResult['defaultTabs']
-  settings: GlobalSettings
   createdWithAgent: CreateWorktreeArgs['createdWithAgent']
 }): Promise<StagedStartupResult> {
-  const { runtime, worktree, startup, setup, defaultTabs, settings, createdWithAgent } = args
+  const { runtime, worktree, startup, setup, defaultTabs, createdWithAgent } = args
   if (!runtime || !startup || defaultTabs?.tabs.length) {
     return { didSpawnSetup: false }
   }
@@ -412,18 +412,22 @@ async function spawnLocalStartupAndSetupTerminals(args: {
   let startupTerminalHandle: string | null = null
   let startupTerminal: CreateWorktreeResult['startupTerminal']
 
+  const hostPlatform = process.platform === 'win32' ? 'windows' : 'posix'
+  const setupCommandPlatform = setup
+    ? getSetupRunnerCommandPlatformForLaunch(setup, hostPlatform)
+    : hostPlatform
   let sequencedStartup = startup
   let wrappedSetupCommandStr: string | undefined
+  let wrappedSetupCompletionToken: string | undefined
   if (startup && setup?.waitForAgentStartup === true) {
-    const platform = getSetupRunnerCommandPlatformForLaunch(
-      setup,
-      process.platform === 'win32' ? 'windows' : 'posix'
-    )
+    // Why: the Setup pane is observed under the same nonce the agent gate waits on.
+    const nonce = createSetupAgentSequenceNonce()
     const sequenced = createSequencedSetupAgentCommands({
       runnerScriptPath: setup.runnerScriptPath,
       startupCommand: startup.command,
-      platform,
-      shell: setup.shell
+      platform: setupCommandPlatform,
+      shell: setup.shell,
+      nonce
     })
     sequencedStartup = {
       ...startup,
@@ -431,6 +435,7 @@ async function spawnLocalStartupAndSetupTerminals(args: {
       ...(sequenced.startupEnv ? { env: { ...startup.env, ...sequenced.startupEnv } } : {})
     }
     wrappedSetupCommandStr = sequenced.setupCommand
+    wrappedSetupCompletionToken = nonce
   }
 
   try {
@@ -458,7 +463,8 @@ async function spawnLocalStartupAndSetupTerminals(args: {
       ...(sequencedStartup.viewMode ? { viewMode: sequencedStartup.viewMode } : {}),
       startupCommandDelivery: sequencedStartup.startupCommandDelivery,
       telemetry: sequencedStartup.telemetry,
-      activate: true
+      activate: true,
+      ...preparationSpawnIntake(setup?.preparation, 'agent')
     })
     startupTerminalHandle = terminal.handle
     startupTerminal = {
@@ -474,43 +480,27 @@ async function spawnLocalStartupAndSetupTerminals(args: {
 
   let didSpawnSetup = false
   if (setup) {
-    try {
-      const setupCommand =
-        wrappedSetupCommandStr ??
-        buildSetupRunnerCommand(
-          setup.runnerScriptPath,
-          getSetupRunnerCommandPlatformForLaunch(
-            setup,
-            process.platform === 'win32' ? 'windows' : 'posix'
-          ),
-          setup.shell
-        )
-      const setupLaunchMode =
-        (settings as Partial<Pick<GlobalSettings, 'setupScriptLaunchMode'>>)
-          .setupScriptLaunchMode ?? 'new-tab'
-      if (setupLaunchMode === 'split-vertical' || setupLaunchMode === 'split-horizontal') {
-        if (!startupTerminalHandle) {
-          throw new Error('startup_terminal_missing')
-        }
-        await runtime.splitTerminal(startupTerminalHandle, {
-          direction: setupLaunchMode === 'split-horizontal' ? 'horizontal' : 'vertical',
-          command: setupCommand,
-          env: setup.envVars,
-          activate: false
-        })
-      } else {
-        await runtime.createTerminal(`id:${worktree.id}`, {
-          title: 'Setup',
-          command: setupCommand,
-          env: setup.envVars,
-          activate: false
-        })
-      }
-      didSpawnSetup = true
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      const nextWarning = `failed to create the setup terminal for ${worktree.path}: ${message}`
-      warning = appendWorktreeCreateWarning(warning, nextWarning)
+    // Why: the same provisioning as worker/CLI creates, so the full runner's completion token is
+    // recorded for exactly this Setup pane and its preparation role binds at spawn.
+    const provisioned = await runtime.provisionManagedWorktreeTerminals({
+      worktreeSelector: `id:${worktree.id}`,
+      worktreeId: worktree.id,
+      worktreePath: worktree.path,
+      setup,
+      primaryTerminalHandle: startupTerminalHandle,
+      hasStartupTerminal: true,
+      setupCommandPlatform,
+      observeSetupCompletion: true,
+      ...(wrappedSetupCommandStr
+        ? { wrappedSetupCommand: wrappedSetupCommandStr, wrappedSetupCompletionToken }
+        : {})
+    })
+    didSpawnSetup = provisioned.setupSpawned
+    if (!didSpawnSetup) {
+      warning = appendWorktreeCreateWarning(
+        warning,
+        `failed to create the setup terminal for ${worktree.path}`
+      )
       console.warn(`[worktree-create] ${warning}`)
     }
   }
@@ -3040,6 +3030,12 @@ async function performLocalWorktreeCreate(
 
   // Startup resolves the new id before lifecycle notifications invalidate runtime caches.
   runtime?.invalidateWorktreeCatalog?.(repo.id)
+  // Why: registered before any terminal spawns so every runner of this setup carries one identity.
+  setup =
+    runtime?.registerWorktreePreparation(
+      { ...worktree, hostId: worktree.hostId ?? getRepoExecutionHostId(repo) },
+      setup
+    ) ?? setup
   const stagedStartup = await timing.time('spawn_startup_terminal', () =>
     spawnLocalStartupAndSetupTerminals({
       runtime,
@@ -3047,7 +3043,6 @@ async function performLocalWorktreeCreate(
       startup: args.startup,
       setup,
       defaultTabs,
-      settings,
       createdWithAgent: args.createdWithAgent
     })
   )

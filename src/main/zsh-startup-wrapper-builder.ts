@@ -26,7 +26,7 @@
  * time, so defining them first makes them immune; `emulate -L zsh` inside the
  * hook restores zsh option semantics for the body at call time.
  */
-import { getPosixOmpShellWrapper } from './pty/omp-shell-wrapper'
+import { getPosixOmpShellWrapper } from '../shared/omp-shell-wrapper'
 import { WSL_MANAGED_CLI_PATH_RESTORE } from './wsl-managed-cli-path-restore'
 import { getPosixCodexShellLaunchPreflight } from './pty/codex-shell-launch-preflight'
 import {

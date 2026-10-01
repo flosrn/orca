@@ -24,7 +24,8 @@ import {
   Workflow,
   FolderInput,
   FolderPlus,
-  FolderTree
+  FolderTree,
+  ScrollText
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { WorktreeOpenInSubMenu } from './WorktreeOpenInMenu'
@@ -188,6 +189,10 @@ export default function WorktreeContextMenuView({ model }: { model: WorktreeCont
                   'auto.components.sidebar.WorktreeContextMenu.copyWorktreeName',
                   'Copy Worktree Name'
                 )}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => model.setPreparationOutputOpen(true)}>
+                <ScrollText className="size-3.5" />
+                {translate('preparationOutput.menuItem', 'Preparation Output')}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={handleTogglePin} disabled={isDeleting}>

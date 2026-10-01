@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as pty from 'node-pty'
 import { afterEach, describe, expect, it } from 'vitest'
-import { getPosixOmpShellWrapper } from './omp-shell-wrapper'
+import { getPosixOmpShellWrapper } from '../../shared/omp-shell-wrapper'
 
 const describePosix = process.platform === 'win32' ? describe.skip : describe
 const hasBash = process.platform !== 'win32' && spawnSync('bash', ['--version']).status === 0

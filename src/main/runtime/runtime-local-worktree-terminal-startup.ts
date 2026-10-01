@@ -4,7 +4,11 @@ import type { Repo } from '../../shared/repo-types'
 import type { TuiAgent } from '../../shared/tui-agent'
 import type { Worktree } from '../../shared/worktree/types'
 import type { WorktreeStartupLaunch } from '../../shared/worktree/launch-types'
-import { createSequencedSetupAgentCommands } from '../../shared/setup-agent-sequencing'
+import {
+  createSequencedSetupAgentCommands,
+  createSetupAgentSequenceNonce
+} from '../../shared/setup-agent-sequencing'
+import { preparationSpawnIntake } from '../../shared/preparation-contracts'
 import { getSetupRunnerCommandPlatformForPath } from '../../shared/setup-runner-command'
 import type { RuntimeTerminalCreate } from '../../shared/runtime-types'
 import type { TerminalCreateOptions } from './runtime-terminal-contracts'
@@ -76,13 +80,16 @@ export async function startRuntimeLocalWorktreeTerminals(args: {
   let startupTerminalPtyId: string | null = null
   let sequencedStartup = startup
   let wrappedSetupCommand: string | undefined
+  let wrappedSetupCompletionToken: string | undefined
   if (startup && setup?.waitForAgentStartup === true) {
     const platform = setupPlatform(setup, process.platform === 'win32' ? 'windows' : 'posix')
+    const nonce = createSetupAgentSequenceNonce()
     const sequenced = createSequencedSetupAgentCommands({
       runnerScriptPath: setup.runnerScriptPath,
       startupCommand: startup.command,
       platform,
-      shell: setup.shell
+      shell: setup.shell,
+      nonce
     })
     sequencedStartup = {
       ...startup,
@@ -90,6 +97,7 @@ export async function startRuntimeLocalWorktreeTerminals(args: {
       ...(sequenced.startupEnv ? { env: { ...startup.env, ...sequenced.startupEnv } } : {})
     }
     wrappedSetupCommand = sequenced.setupCommand
+    wrappedSetupCompletionToken = nonce
   }
 
   if (sequencedStartup && ports.canSpawn) {
@@ -109,7 +117,8 @@ export async function startRuntimeLocalWorktreeTerminals(args: {
         ...(sequencedStartup.viewMode ? { viewMode: sequencedStartup.viewMode } : {}),
         startupCommandDelivery: sequencedStartup.startupCommandDelivery,
         telemetry: sequencedStartup.telemetry,
-        ...ownerSurfacing(shouldActivate)
+        ...ownerSurfacing(shouldActivate),
+        ...preparationSpawnIntake(setup?.preparation, 'agent')
       })
       if (args.draftPaste) {
         ports.pasteDraft(terminal.handle, args.draftPaste)
@@ -131,7 +140,13 @@ export async function startRuntimeLocalWorktreeTerminals(args: {
     const runtimeWillProvision = didSpawnStartup && Boolean(setup || defaultTabs)
     if (runtimeWillProvision) {
       const provisioned = await ports.provision(
-        provisionArgs(args, startupTerminalHandle, didSpawnStartup, wrappedSetupCommand)
+        provisionArgs(
+          args,
+          startupTerminalHandle,
+          didSpawnStartup,
+          wrappedSetupCommand,
+          wrappedSetupCompletionToken
+        )
       )
       didSpawnSetup = provisioned.setupSpawned
       setupTerminalHandle = provisioned.setupTerminalHandle
@@ -153,7 +168,13 @@ export async function startRuntimeLocalWorktreeTerminals(args: {
     )
   } else if (ports.canSpawn && (setup || defaultTabs || didSpawnStartup)) {
     const provisioning = ports.provision({
-      ...provisionArgs(args, startupTerminalHandle, didSpawnStartup, wrappedSetupCommand),
+      ...provisionArgs(
+        args,
+        startupTerminalHandle,
+        didSpawnStartup,
+        wrappedSetupCommand,
+        wrappedSetupCompletionToken
+      ),
       surfaceOwner: false
     })
     if (request.awaitTerminalProvisioning) {
@@ -198,7 +219,8 @@ function provisionArgs(
   args: Parameters<typeof startRuntimeLocalWorktreeTerminals>[0],
   primaryTerminalHandle: string | null,
   hasStartupTerminal: boolean,
-  wrappedSetupCommand?: string
+  wrappedSetupCommand?: string,
+  wrappedSetupCompletionToken?: string
 ): WorktreeTerminalProvisioningArgs {
   return {
     worktreeSelector: `id:${args.worktree.id}`,
@@ -210,7 +232,8 @@ function provisionArgs(
     hasStartupTerminal,
     setupCommandPlatform: setupPlatform(args.setup, 'posix'),
     observeSetupCompletion: args.request.observeSetupCompletion,
-    ...(wrappedSetupCommand ? { wrappedSetupCommand } : {})
+    ...(wrappedSetupCommand ? { wrappedSetupCommand } : {}),
+    ...(wrappedSetupCommand && wrappedSetupCompletionToken ? { wrappedSetupCompletionToken } : {})
   }
 }
 

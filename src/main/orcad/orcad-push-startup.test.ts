@@ -40,6 +40,7 @@ vi.mock('./orcad-profile-state-startup', () => ({
   createOrcadProfileStateStartup: async () => ({
     store: {
       getSettings: () => ({}),
+      getProfileStorageDirectory: () => state.root,
       flushFinalOrThrowAsync: async () => {},
       freezeWritesAsync: async () => {}
     },
@@ -72,6 +73,7 @@ vi.mock('../runtime/orca-runtime', () => ({
       return 'headless-runtime'
     }
     rehydrateClientHostedBrowserPages() {}
+    setPreparationStorage() {}
     async refreshRestoredOrchestrationAuthority() {}
     async reconcileLegacyWorkerTerminals() {}
     setMobilePushRegistrar(

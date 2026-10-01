@@ -15,6 +15,7 @@ import { drainAgentHookSpool, type SpoolRecord } from '../../../shared/agent-hoo
 import { clearAllListenerCaches } from '../../../shared/agent-hook-listener/listener-state'
 import { trackEmptyPaneKeyHook } from './server-transport-rules'
 import { AgentHookServerRuntimeEnv } from './server-runtime-env'
+import { observeAuthenticatedHookBody } from '../../runtime/preparation/preparation-observation'
 
 export abstract class AgentHookServerLifecycle extends AgentHookServerRuntimeEnv {
   /** Start the loopback listener after hydration and spool replay have settled. */
@@ -96,6 +97,7 @@ export abstract class AgentHookServerLifecycle extends AgentHookServerRuntimeEnv
         trackEmptyPaneKeyHook(hookBody)
         const aliasedBody = this.normalizeHookBodyPaneKeyAlias(hookBody)
         const normalized = this.normalizeLocalHookPayload(source, aliasedBody)
+        observeAuthenticatedHookBody(aliasedBody, true)
         const statusDisposition = normalized.event
           ? this.getAgentStatusDisposition(normalized.event.paneKey, {
               source,

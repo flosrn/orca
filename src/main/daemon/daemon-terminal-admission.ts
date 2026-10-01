@@ -176,6 +176,7 @@ export class DaemonTerminalAdmission {
     return {
       onData: (data, rawLength = data.length, transformed = false, seq) => {
         const routedSessionId = sessionId()
+        this.options.attachments.recordOutput(routedSessionId)
         this.options.transientFactRelay.onSessionData(routedSessionId, data)
         const lastInputAt = this.options.attachments.lastInputAt(routedSessionId)
         const isInteractiveOutput =

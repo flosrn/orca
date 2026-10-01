@@ -11,6 +11,7 @@ import type {
   RuntimeEnsureAgentSessionRequest
 } from '../agent-session-host-authority'
 import { isTuiAgent } from '../tui-agent-config'
+import { PreparationSpawnIntakeParam } from './preparation-params'
 
 export const MAX_WORKTREE_SELECTOR_LENGTH = 32_768
 
@@ -179,7 +180,9 @@ export const CreateAgentSessionParams: z.ZodType<RuntimeCreateAgentSessionReques
     startupCwd: z.string().min(1).max(MAX_WORKTREE_SELECTOR_LENGTH).optional(),
     presentation: Presentation.optional(),
     placement: Placement.optional(),
-    viewMode: z.enum(['terminal', 'chat']).optional()
+    viewMode: z.enum(['terminal', 'chat']).optional(),
+    // Why: strict schema; clients send it only after the host advertises the preparation capability.
+    preparation: PreparationSpawnIntakeParam.optional()
   })
   .strict()
   .superRefine((value, context) => {

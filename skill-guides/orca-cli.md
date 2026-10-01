@@ -183,6 +183,20 @@ Terminal rules:
 - For long output, use cursor reads. After a limited tail preview, page from `oldestCursor`; after a cursor read, continue with `nextCursor` while `limited` is true and `nextCursor !== latestCursor`.
 - `--direction horizontal` splits left/right. `--direction vertical` splits top/bottom.
 
+Preparation output: after a new worktree's preparation succeeds and its agent takes over, Orca closes the preparation pane and keeps its output as a read-only archive.
+
+```text
+ORCA preparation output list --worktree active --json
+ORCA preparation output read --archive <archiveId> --all
+ORCA preparation output read --archive <archiveId> --offset <nextOffset> --json
+```
+
+- An empty `archives` list means no archive exists; an archive with `byteLength: 0` is a preparation that printed nothing.
+- Pages are UTF-8 byte ranges of at most 65536 bytes; continue from `nextOffset` until it is null. Reads never reopen a terminal or rerun setup.
+- Cleanup is fail-closed. A preparation pane stays open when the runner failed, was interrupted or never reported, when no root agent session confirmed it took over, when output could not be archived in full (write failure or more than 16 MiB), when input or work is still running in it, when the execution host predates exact idle stops or cannot prove one, or across an Orca restart. A retained pane is ordinary occupancy: read or close it yourself, and never infer that cleanup happened.
+- Only panes Orca created for this worktree's preparation are candidates. An older terminal titled `Setup`, or one running the same command, is never adopted or closed.
+- `durability: "unestablished"` means the archive was written but the platform could not confirm the directory sync; such an archive never authorized a close. `redactionApplied: true` means secrets were replaced before the archive was written.
+
 ## Artifacts
 
 Artifacts publish HTML or Markdown files through the signed-in Orca account. Anyone can view

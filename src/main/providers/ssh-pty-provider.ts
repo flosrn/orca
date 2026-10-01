@@ -25,11 +25,11 @@ import { SshAgentSessionCapabilities } from './ssh-agent-session-capabilities'
 import type { PtyProcessInspection } from './pty-process-inspection'
 import { spawnWithTerminalRuntimeRepair, type TerminalRepairHook } from './ssh-pty-spawn-repair'
 import { createSshPtyProviderRpcOperations } from './ssh-pty-provider-rpc-operations'
-
-// Why: sequential relay teardown calls share one absolute budget; convert to the mux-relative timeout only at dispatch.
-function relayTimeoutOptions(deadlineMs: number | undefined): { timeoutMs: number } | undefined {
-  return deadlineMs === undefined ? undefined : { timeoutMs: Math.max(1, deadlineMs - Date.now()) }
-}
+import { relayTimeoutOptions, requestSshPtyIdleRetirement } from './ssh-pty-idle-retirement'
+import type {
+  PtyIdleRetirementRequest,
+  PtyIdleRetirementResult
+} from '../../shared/pty-idle-retirement'
 
 /** Remote PTY provider that proxies IPtyProvider operations through the relay. */
 export class SshPtyProvider implements IPtyProvider {
@@ -42,6 +42,8 @@ export class SshPtyProvider implements IPtyProvider {
   private readonly outputState: SshPtyProviderOutputState
   private recoverFromTerminalUnavailable: TerminalRepairHook<SshPtyProvider> | null = null
   private readonly rpcOperations: ReturnType<typeof createSshPtyProviderRpcOperations>
+  /** Persisted consumer identity the relay attests as creator of PTYs this client spawns. */
+  private consumerClientInstanceId: string | null = null
 
   deleteWorktreeHistory = (worktreeId: string): Promise<void> =>
     this.rpcOperations.deleteWorktreeHistory(worktreeId)
@@ -264,6 +266,26 @@ export class SshPtyProvider implements IPtyProvider {
       relayTimeoutOptions(opts.deadlineMs)
     )
     this.livePtyIds.delete(id)
+  }
+
+  setPtyConsumerClientInstanceId(clientInstanceId: string): void {
+    this.consumerClientInstanceId = clientInstanceId
+  }
+
+  async retireIdle(
+    id: string,
+    request: PtyIdleRetirementRequest
+  ): Promise<PtyIdleRetirementResult> {
+    const result = await requestSshPtyIdleRetirement({
+      mux: this.mux,
+      relayPtyId: this.toRelayPtyId(id),
+      ownerClientInstanceId: this.consumerClientInstanceId,
+      request
+    })
+    if (result.outcome === 'stopped' || result.outcome === 'exited') {
+      this.livePtyIds.delete(id)
+    }
+    return result
   }
 
   async listProcesses(opts?: {

@@ -43,6 +43,11 @@ import {
 import { spawnLocalPty } from './local-pty-spawn'
 import { cancelAllPendingLocalPtySpawns } from './local-pty-spawn-state'
 import { killAllLocalPtys, killOrphanedLocalPtys, shutdownLocalPty } from './local-pty-termination'
+import { retireLocalPtyIdle } from './local-pty-idle-retirement'
+import type {
+  PtyIdleRetirementRequest,
+  PtyIdleRetirementResult
+} from '../../shared/pty-idle-retirement'
 
 export type { LocalPtyProviderOptions } from './local-pty-provider-types'
 export {
@@ -103,6 +108,10 @@ export class LocalPtyProvider implements IPtyProvider {
 
   shutdown(id: string, opts: { immediate?: boolean; keepHistory?: boolean }): Promise<void> {
     return shutdownLocalPty(id, opts)
+  }
+
+  retireIdle(id: string, request: PtyIdleRetirementRequest): Promise<PtyIdleRetirementResult> {
+    return retireLocalPtyIdle(id, request)
   }
 
   sendSignal(id: string, signal: string): Promise<void> {

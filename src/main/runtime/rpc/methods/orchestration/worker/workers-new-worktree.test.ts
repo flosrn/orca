@@ -341,6 +341,41 @@ describe('orchestration new-worktree workers', () => {
     )
   })
 
+  it('records later setup success as evidence without settling or releasing the worker', async () => {
+    mockCreatedWorktree({
+      terminals: [
+        { handle: 'term_worker', title: 'Codex' },
+        { handle: 'term_setup', title: 'Setup' }
+      ]
+    })
+    let finishSetup: ((result: { exitCode: number | null }) => void) | undefined
+    vi.mocked(runtime.waitForSetupTerminalCompletion).mockImplementation(async () => {
+      const { promise, resolve } = Promise.withResolvers<{ exitCode: number | null }>()
+      finishSetup = resolve
+      return await promise
+    })
+
+    const { result } = await startWorker()
+    const dispatchId = (result as { dispatchId: string }).dispatchId
+    const before = db.getWorkerDispatch(dispatchId)
+    // The shared runner observation succeeds; the Setup pane is then retired by preparation
+    // cleanup, which is not a worker Release and must not move the dispatch.
+    finishSetup?.({ exitCode: 0 })
+
+    await vi.waitFor(() => expect(db.getWorkerDispatch(dispatchId)?.setup_state).toBe('succeeded'))
+    expect(db.getWorkerDispatch(dispatchId)).toMatchObject({
+      state: before?.state,
+      stage: before?.stage
+    })
+    expect(JSON.parse(db.getWorkerDispatch(dispatchId)?.effects ?? '[]')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'terminal', id: 'term_setup', role: 'setup' }),
+        expect.objectContaining({ kind: 'setup', state: 'succeeded' })
+      ])
+    )
+    expect(runtime.sendTerminalAgentPrompt).toHaveBeenCalledOnce()
+  })
+
   it('uses the exact setup handle instead of a configured tab title', async () => {
     mockCreatedWorktree({
       setupTerminalHandle: 'term_actual_setup',

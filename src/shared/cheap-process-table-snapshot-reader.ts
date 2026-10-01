@@ -6,11 +6,8 @@ import {
   parseCheapProcessTableRows,
   type CheapProcessTableRow
 } from './process-table-snapshot'
-import {
-  PS_TIMEOUT_MS,
-  createProcessTableSnapshotReader,
-  withEvidenceBudget
-} from './process-table-snapshot-reader'
+import { createProcessTableSnapshotReader } from './process-table-snapshot-cache'
+import { PS_TIMEOUT_MS, withEvidenceBudget } from './process-table-snapshot-reader'
 
 /**
  * The cheap-tier sibling of the strict evidence reader: same coalescing and TTL, a

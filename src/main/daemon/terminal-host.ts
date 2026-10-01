@@ -234,6 +234,11 @@ export class TerminalHost {
     return session.getForegroundProcess()
   }
 
+  /** Host spawn record, never a process-table name: whether the session root is the login wrapper. */
+  sessionRootIsLoginWrapper(sessionId: string): boolean {
+    return this.sessions.get(sessionId)?.rootIsLoginWrapper === true
+  }
+
   inspectProcess(
     sessionId: string,
     options?: { expectedIncarnationId?: string; steadyState?: boolean }

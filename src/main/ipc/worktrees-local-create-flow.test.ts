@@ -689,28 +689,30 @@ describe('registerWorktreeHandlers', () => {
         activate: true
       }
     )
-    expect(runtimeStub.createTerminal).toHaveBeenNthCalledWith(
-      2,
-      'id:repo-1::/workspace/improve-dashboard',
-      {
-        title: 'Setup',
-        command: expect.stringContaining('bash /workspace/repo/.git/orca/setup-runner.sh'),
-        env: {
+    // Why: the Setup pane goes through runtime provisioning so its full-runner token is observed.
+    expect(runtimeStub.createTerminal).toHaveBeenCalledOnce()
+    expect(runtimeStub.provisionManagedWorktreeTerminals).toHaveBeenCalledWith({
+      worktreeSelector: 'id:repo-1::/workspace/improve-dashboard',
+      worktreeId: 'repo-1::/workspace/improve-dashboard',
+      worktreePath: '/workspace/improve-dashboard',
+      setup: expect.objectContaining({
+        runnerScriptPath: '/workspace/repo/.git/orca/setup-runner.sh',
+        envVars: {
           ORCA_ROOT_PATH: '/workspace/repo',
           ORCA_WORKTREE_PATH: '/workspace/improve-dashboard'
-        },
-        activate: false
-      }
-    )
+        }
+      }),
+      primaryTerminalHandle: 'term-startup',
+      hasStartupTerminal: true,
+      setupCommandPlatform: 'posix',
+      observeSetupCompletion: true
+    })
     const startupCreateCall = runtimeStub.createTerminal.mock.calls[0]
-    const setupCreateCall = runtimeStub.createTerminal.mock.calls[1]
-    if (!startupCreateCall || !setupCreateCall) {
-      throw new Error('expected startup and setup terminal calls')
+    if (!startupCreateCall) {
+      throw new Error('expected a startup terminal call')
     }
     const startupCommand = (startupCreateCall[1] as { command: string }).command
-    const setupCommand = (setupCreateCall[1] as { command: string }).command
     expect(startupCommand).toBe('claude --prefill test')
-    expect(setupCommand).toBe('bash /workspace/repo/.git/orca/setup-runner.sh')
     expect(result.setup).toBeUndefined()
     expect(result.startupTerminal).toEqual({ spawned: true, surface: 'visible' })
     expect(runtimeStub.invalidateWorktreeCatalog).toHaveBeenCalledWith('repo-1')
@@ -754,9 +756,11 @@ describe('registerWorktreeHandlers', () => {
       },
       waitForAgentStartup: true
     })
-    runtimeStub.createTerminal
-      .mockResolvedValueOnce({ handle: 'term-startup', surface: 'visible' })
-      .mockRejectedValueOnce(new Error('setup creation failed'))
+    runtimeStub.createTerminal.mockResolvedValueOnce({ handle: 'term-startup', surface: 'visible' })
+    runtimeStub.provisionManagedWorktreeTerminals.mockResolvedValueOnce({
+      setupSpawned: false,
+      setupTerminalHandle: null
+    })
 
     const result = (await handlers['worktrees:create'](null, {
       repoId: 'repo-1',

@@ -7,6 +7,7 @@ import {
   listSupportedWindowsShellOverrides
 } from '../windows-terminal-shell'
 import { TERMINAL_PANE_SPLIT_SOURCES } from '../feature-education-telemetry'
+import { PreparationSpawnIntakeParam } from './preparation-params'
 
 export const TerminalHandle = z.object({
   terminal: requiredString('Missing terminal handle'),
@@ -187,6 +188,8 @@ export const TerminalCreateParams = z.object({
   presentation: z.enum(['background', 'focused']).optional(),
   tabId: OptionalString,
   leafId: OptionalString,
+  // Why: optional and stripped by older hosts, whose pane then stays unowned and retained.
+  preparation: PreparationSpawnIntakeParam.optional(),
   // Why refused at the boundary rather than at spawn: only the host knows the allowlist, and a
   // relay-side throw reaches the caller as an opaque spawn failure after the round trip.
   shell: z

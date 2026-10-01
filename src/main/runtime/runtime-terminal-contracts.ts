@@ -15,6 +15,7 @@ import type {
 import type { TuiAgent } from '../../shared/tui-agent'
 import type { WorktreeStartupLaunch } from '../../shared/worktree/launch-types'
 import type { RuntimeTerminalSend } from '../../shared/runtime-terminal-contracts'
+import type { PreparationSpawnIntake } from '../../shared/preparation-contracts'
 import type { RuntimeTerminalWriteOptions } from './runtime-terminal-writer'
 import type { RuntimePtyController } from './runtime-pty-controller-contract'
 import type { RuntimeAgentRowSnapshot } from './runtime-worktree-agent-rows'
@@ -80,6 +81,8 @@ export type TerminalCreateOptions = {
   signal?: AbortSignal
   onPtySpawnCommitted?: () => void
   deferMobileSessionPublish?: boolean
+  /** Binds the acknowledged pane to a creation-scoped preparation role; absent means unowned. */
+  preparation?: PreparationSpawnIntake
 }
 
 /** Identity a fenced spawn can be re-found by in the execution host's own inventory. */

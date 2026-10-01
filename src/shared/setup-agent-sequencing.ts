@@ -1,3 +1,4 @@
+import { getPosixOmpShellWrapper, getPowerShellOmpShellWrapper } from './omp-shell-wrapper'
 import { encodePowerShellCommand } from './powershell-command-encoding'
 import {
   nativeWindowsPathToPosixShellPath,
@@ -8,6 +9,7 @@ import {
 } from './setup-runner-command'
 import { createNonSecureContextUuid } from './non-secure-context-uuid'
 import { quotePowerShellLiteral } from './powershell-native-argument'
+import { SETUP_COMPLETION_PREFIX } from './setup-completion-marker'
 
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 2 * 60 * 60
 // Exported so the gate and its tests share one definition.
@@ -82,7 +84,8 @@ export function createSequencedSetupAgentCommands(args: {
     startupCommand: `bash -lc 'eval "$${SETUP_AGENT_SEQUENCE_STARTUP_SCRIPT_ENV}"'`,
     startupEnv: {
       [SETUP_AGENT_SEQUENCE_STARTUP_COMMAND_ENV]: args.startupCommand,
-      [SETUP_AGENT_SEQUENCE_STARTUP_SCRIPT_ENV]: startupScript
+      // Why: nested bash does not inherit the pane's zsh/PowerShell OMP wrapper.
+      [SETUP_AGENT_SEQUENCE_STARTUP_SCRIPT_ENV]: `${getPosixOmpShellWrapper()}\n${startupScript}`
     }
   }
 }
@@ -98,6 +101,7 @@ function buildPosixSetupCommand(setupCommand: string, markerPath: string, nonce:
     'status=$?',
     `printf '%s:%s\\n' ${nonceValue} "$status" > ${tmp}`,
     `mv -f ${tmp} ${marker}`,
+    `printf '\\n%s%s:%s\\n' ${quotePosixArg(SETUP_COMPLETION_PREFIX)} ${nonceValue} "$status"`,
     'exit "$status"'
   ].join('; ')
 
@@ -210,6 +214,7 @@ function buildWindowsSetupCommand(
     '$utf8 = [System.Text.UTF8Encoding]::new($false)',
     '[System.IO.File]::WriteAllText($tmp, ($nonce + ":" + $setupStatus + [Environment]::NewLine), $utf8)',
     'Move-Item -LiteralPath $tmp -Destination $marker -Force',
+    `Write-Output ('${SETUP_COMPLETION_PREFIX}' + $nonce + ':' + $setupStatus)`,
     'exit $setupStatus'
   ].join('; ')
 
@@ -271,6 +276,7 @@ function buildWindowsStartupCommand(
     '        exit 1',
     '      }',
     `      [Console]::Error.WriteLine(${quotePowerShellLiteral(SETUP_COMPLETE_MESSAGE)})`,
+    getPowerShellOmpShellWrapper(),
     '      Invoke-Expression $startup',
     '      if ($global:LASTEXITCODE -ne $null) { exit $global:LASTEXITCODE }',
     '      if (-not $?) { exit 1 }',

@@ -16,6 +16,7 @@ import type { ExecutionHostId } from '../../../../shared/execution-host'
 import type { PtyDataMeta } from './pty-dispatcher'
 import type { RemoteRuntimeSnapshotOutcome } from '../../runtime/remote-runtime-terminal-multiplexer'
 import type { PtyPreconnectInputEntry } from './pty-preconnect-input-buffer'
+import type { PreparationSpawnIntake } from '../../../../shared/preparation-contracts'
 
 export type PtyBufferSnapshot = {
   data: string
@@ -168,6 +169,9 @@ export type PtyTransport = {
     /** Taken only as the spawn request is sent; main stops the returned PTY before resolving the
      *  pane's owner. Never taken on a session reattach, so the caller still holds it. */
     claimReplacedPtyId?: () => string | null
+    /** Taken only as a fresh spawn request is sent, so the preparation role rides one spawn.
+     *  Never taken on a session reattach; transports that cannot carry it leave it untaken. */
+    claimPreparation?: () => PreparationSpawnIntake | null
     /** Reject a stale restored identity before this transport can publish global PTY handlers. */
     admitPtyId?: (ptyId: string) => boolean
     /** Reject a stale pane after any pre-spawn test gate but before creating a PTY. */

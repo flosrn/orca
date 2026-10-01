@@ -15,6 +15,7 @@ import {
 } from './terminal-wait-tail-state'
 import { extractOscTitleScanTail } from '../../shared/osc-title-scan-tail'
 import { isDecPrivateModeOnlyChunk } from './dec-private-mode-chunk'
+import { feedPreparationRunnerObservation } from './preparation/preparation-observation'
 
 export class OrcaRuntimeWithOnPtyData extends OrcaRuntimeWithPreparePtyExecutionContext {
   onPtyData(
@@ -27,7 +28,13 @@ export class OrcaRuntimeWithOnPtyData extends OrcaRuntimeWithPreparePtyExecution
     sourceRanges?: readonly TerminalOutputSourceRange[]
   ): number {
     const outputSequence = (this.ptyOutputSequenceById.get(ptyId) ?? 0) + sequenceChars
+    feedPreparationRunnerObservation(ptyId, data)
     this.ptyOutputSequenceById.set(ptyId, outputSequence)
+    this.preparationOutput?.observe(ptyId, {
+      startSequence: outputSequence - sequenceChars,
+      endSequence: outputSequence,
+      data
+    })
     this.providerModeTrackersByPtyId.get(ptyId)?.scan(data)
     for (const tracker of this.providerModeSnapshotScansByPtyId.get(ptyId) ?? []) {
       tracker.scan(data)

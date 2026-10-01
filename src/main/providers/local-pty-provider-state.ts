@@ -3,6 +3,7 @@ import type { PhysicalExitTracker } from '../../shared/physical-exit-tracker'
 import type { PtyStartupIngress } from '../../shared/pty-startup-ingress'
 import type { TerminalExitCause } from '../../shared/terminal-exit-cause'
 import { getSpawnedShellName, normalizeLocalCallerSessionId } from './local-pty-launch-helpers'
+import { forgetLocalPtyActivity } from './local-pty-activity'
 
 export type PtyShutdownOperation = {
   promise: Promise<void>
@@ -140,6 +141,7 @@ export function clearPtyState(id: string): void {
   ptyTerminationMode.delete(id)
   ptyReportsChildExitStatus.delete(id)
   ptyPhysicalExits.delete(id)
+  forgetLocalPtyActivity(id)
 }
 
 /**

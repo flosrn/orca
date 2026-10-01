@@ -19,7 +19,11 @@ export function runTerminalPaneBootstrapSplits(args: {
   if (setupSplit && initialPane) {
     const setupPane = splitPaneWithOneShotStartup(
       ptyDeps,
-      { command: setupSplit.command, env: setupSplit.env },
+      {
+        command: setupSplit.command,
+        env: setupSplit.env,
+        ...(setupSplit.preparation ? { preparation: setupSplit.preparation } : {})
+      },
       () => manager.splitPane(initialPane.id, setupSplit.direction)
     )
     issueAutomationAnchorPaneId = setupPane?.id ?? null

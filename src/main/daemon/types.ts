@@ -1,15 +1,11 @@
-import type {
-  ConfirmForegroundProcessRequest,
-  ConfirmShellForegroundRequest,
-  GetForegroundProcessRequest,
-  InspectProcessRequest
-} from './daemon-foreground-process-protocol'
+import type { DaemonProcessRequest } from './daemon-foreground-process-protocol'
 
 export type {
   ConfirmForegroundProcessRequest,
   ConfirmShellForegroundRequest,
   GetForegroundProcessRequest,
-  InspectProcessRequest
+  InspectProcessRequest,
+  RetireIdleRequest
 } from './daemon-foreground-process-protocol'
 
 // ─── Protocol Version ────────────────────────────────────────────────
@@ -317,10 +313,7 @@ export type DaemonRequest =
   | ShutdownIfIdleRequest
   | DetachRequest
   | GetCwdRequest
-  | GetForegroundProcessRequest
-  | InspectProcessRequest
-  | ConfirmForegroundProcessRequest
-  | ConfirmShellForegroundRequest
+  | DaemonProcessRequest
   | ClearScrollbackRequest
   | ShutdownRequest
   | PingRequest

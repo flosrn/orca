@@ -22,3 +22,20 @@ export type InspectProcessRequest = Omit<GetForegroundProcessRequest, 'type'> & 
     steadyState?: boolean
   }
 }
+
+/** v37+: the daemon stops the session only when it proves the exact incarnation idle. */
+export type RetireIdleRequest = Omit<GetForegroundProcessRequest, 'type'> & {
+  type: 'retireIdle'
+  payload: GetForegroundProcessRequest['payload'] & {
+    expectedIncarnationId: string
+    expectedOutputChars?: number
+  }
+}
+
+/** Every request that inspects, or conditionally stops, a session's process tree. */
+export type DaemonProcessRequest =
+  | GetForegroundProcessRequest
+  | InspectProcessRequest
+  | ConfirmForegroundProcessRequest
+  | ConfirmShellForegroundRequest
+  | RetireIdleRequest

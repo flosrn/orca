@@ -14,6 +14,7 @@ import type {
 import type { TerminalViewAttributes } from '../../shared/terminal-view-attributes'
 import type { PtyMainDeliveryDiagnostics } from '../../shared/pty-delivery-diagnostics'
 import type { AgentKind, LaunchSource, RequestKind } from '../../shared/telemetry-events'
+import type { PreparationSpawnIntake } from '../../shared/preparation-contracts'
 import type { PreloadApi } from '../api-types'
 
 export const ptySessionControlApi = {
@@ -47,6 +48,8 @@ export const ptySessionControlApi = {
     replacesPtyId?: string
     // Why: loose typing on purpose — renderer owns launch metadata, main owns whether the launch happened and validates (telemetry-plan.md §Agent launch semantics).
     telemetry?: { agent_kind: AgentKind; launch_source: LaunchSource; request_kind: RequestKind }
+    // Why: the first spawn of a preparation pane binds that exact incarnation to its registration.
+    preparation?: PreparationSpawnIntake
   }): Promise<{
     id: string
     /** Which lifetime of `id` this reply named; absent when the execution host predates the field. */

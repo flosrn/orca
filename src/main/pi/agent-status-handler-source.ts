@@ -3,6 +3,7 @@ import { getPiPrefillHandlerSourceLines } from './prefill-extension-source'
 import { getAgentStatusInputRedactionSourceLines } from './agent-status-input-redaction-source'
 import type { PiAgentKind } from '../../shared/pi-agent-kind'
 import { getOmpSessionOwnerHandlerSourceLines } from './omp-session-status-owner-source'
+import { getOmpRootReadinessHandlerSourceLines } from './omp-root-readiness-source'
 import { getPiAgentStatusUiPromptHandlerSourceLines } from './agent-status-ui-prompt-source'
 import {
   getPiSubagentRosterEventSourceLines,
@@ -74,7 +75,7 @@ export function getPiAgentStatusHandlerSourceLines(kind: PiAgentKind): string[] 
     kind === 'prime-agent'
       ? []
       : [
-          `  pi.on('model_select', (event${ctxParam}) => {`,
+          `  onStatus('model_select', (event${ctxParam}) => {`,
           ...captureSessionMetadata,
           '    if (!isOmpRuntime()) return',
           '    updateModelMetadata(event)',
@@ -132,6 +133,8 @@ export function getPiAgentStatusHandlerSourceLines(kind: PiAgentKind): string[] 
     '  const selfPid = String(process.pid)',
     '  if (ownerPid && ownerPid !== selfPid && isStatusOwnerAlive(ownerPid)) return',
     `  process.env.${ownerEnv} = selfPid`,
+    '  if (!claimStatusExtension(pi)) return',
+    ...getOmpRootReadinessHandlerSourceLines(),
     '  resetPostQueue()',
     ...getPiSubagentRosterSetupSourceLines(),
     ...(kind !== 'pi'
@@ -142,7 +145,8 @@ export function getPiAgentStatusHandlerSourceLines(kind: PiAgentKind): string[] 
     ...(kind !== 'prime-agent'
       ? [
           "  pi.on('session_switch', (_event, ctx) => {",
-          '    if (!isOmpRuntime()) return',
+          '    if (!isOmpRuntime() || !ownsSessionStatus(ctx)) return',
+          '    localReadiness = null',
           '    lifecycleState.active.clear()',
           '    lifecycleState.exited?.clear()',
           '    lifecycleState.waiting = false',

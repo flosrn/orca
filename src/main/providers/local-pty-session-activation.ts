@@ -31,6 +31,7 @@ import {
   startupIngressByPty
 } from './local-pty-provider-state'
 import { createLocalPtyShellReadinessSession } from './local-pty-shell-readiness-session'
+import { noteLocalPtyActivity } from './local-pty-activity'
 import { destroyPtyProcess, createPtyPhysicalExit } from './local-pty-termination'
 import { writeStartupCommandWhenShellReady } from './local-pty-shell-ready-startup-command'
 import type { PtySpawnOptions, PtySpawnResult } from './types'
@@ -74,6 +75,7 @@ export function activateLocalPtySession(args: {
   getOptions().onSpawned?.(id, incarnationId)
 
   const emitIngressData = (emission: PtyIngressEmission): void => {
+    noteLocalPtyActivity(id, 'output')
     const sequenceChars = emission.rawEndSeq - emission.rawStartSeq
     if (emission.transformed || sequenceChars !== emission.data.length) {
       getOptions().onData?.(id, emission.data, Date.now(), sequenceChars, true)

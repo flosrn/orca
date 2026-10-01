@@ -30,6 +30,42 @@ afterEach(() => {
 })
 
 describe('createSequencedSetupAgentCommands', () => {
+  it.skipIf(process.platform === 'win32')(
+    'loads the managed OMP extension inside the nested setup gate',
+    async () => {
+      const dir = makeTempDir()
+      const runnerScriptPath = join(dir, 'setup.sh')
+      const capture = join(dir, 'argv')
+      const extension = join(dir, 'managed-status.ts')
+      writeExecutable(runnerScriptPath, 'exit 0\n')
+      writeFileSync(extension, '')
+      const commands = createSequencedSetupAgentCommands({
+        runnerScriptPath,
+        startupCommand: 'omp',
+        platform: 'posix',
+        nonce: 'managed-gate'
+      })
+      writeFileSync(`${runnerScriptPath}.managed-gate.done`, 'managed-gate:0\n')
+      // A shell command captures the actual argv, without relying on a user profile or OMP installation.
+      writeExecutable(join(dir, 'omp'), `#!/bin/bash\nprintf '%s\\n' "$@" > ${quoteSh(capture)}\n`)
+      const child = spawn(
+        'bash',
+        [
+          '--noprofile',
+          '--norc',
+          '-c',
+          `export PATH=${quoteSh(dir)}:$PATH; eval ${quoteSh(commands.startupCommand.replace('bash -lc', 'bash --noprofile --norc -c'))}`
+        ],
+        {
+          env: { ...process.env, ...commands.startupEnv, ORCA_OMP_STATUS_EXTENSION: extension },
+          stdio: 'pipe'
+        }
+      )
+      expect((await waitForExit(child)).code).toBe(0)
+      expect(readFileSync(capture, 'utf8')).toBe(`--extension\n${extension}\n`)
+    }
+  )
+
   it('defaults agent startup to immediate unless the wait policy is explicit', () => {
     expect(DEFAULT_SETUP_AGENT_STARTUP_POLICY).toBe('start-immediately')
     expect(getDefaultRepoHookSettings().setupAgentStartupPolicy).toBe('start-immediately')

@@ -3,6 +3,7 @@ import type {
   WorktreeSetupLaunch
 } from '../../../shared/worktree/launch-types'
 import { agentKindToTuiAgent } from '../../../shared/agent-kind'
+import { preparationSpawnIntake } from '../../../shared/preparation-contracts'
 import { initialAgentTabViewModeProps } from './native-chat-initial-view-mode'
 import { getConnectionId } from '@/lib/connection-context'
 import { isNativeChatTranscriptLocalReadable } from '@/lib/native-chat-transcript-readability'
@@ -97,7 +98,12 @@ export function applyDefaultTerminalTabs(
     if (startupAgent) {
       seedNativeChatAppliedSessionOptions(firstTabId, startupAgent, startup.sessionOptions)
     }
-    store.queueTabStartupCommand(firstTabId, startup)
+    // Why: the first template tab runs the creation's agent, not its template command, so only
+    // this queue carries the agent role; template commands stay unowned.
+    store.queueTabStartupCommand(firstTabId, {
+      ...startup,
+      ...preparationSpawnIntake(setup?.preparation, 'agent')
+    })
   }
   queueSetupAndIssueCommands(
     store,

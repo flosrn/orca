@@ -204,7 +204,8 @@ export class OrcaRuntimeWithCreateManagedWorktree extends OrcaRuntimeWithGetWork
         Boolean(this.ptyController?.spawn),
       warning: includeCopyWarning
     })
-
+    // Why: registered before any terminal spawns so every runner of this setup carries one identity.
+    setup = this.registerWorktreePreparation(worktree, setup)
     this.invalidateResolvedWorktreeCache()
     this.invalidateWorktreeScanCacheForRepo(repo.id)
     // Why: the filesystem-auth layer maintains a separate cache of registered

@@ -17,6 +17,7 @@ import type {
   RuntimeTerminalDriverState,
   RuntimeTerminalPresentation
 } from '../../shared/runtime-types'
+import type { PreparationSpawnIntake } from '../../shared/preparation-contracts'
 
 type DriverState = RuntimeTerminalDriverState
 
@@ -90,6 +91,8 @@ export type RuntimeNotifier = {
       sourceLeafId?: string
       telemetrySource?: TerminalPaneSplitSource
       newLeafId?: string
+      /** The renderer spawns this leaf, so it must carry the preparation role to its pty spawn. */
+      preparation?: PreparationSpawnIntake
     }
   ): void
   renameTerminal(tabId: string, title: string | null): void
@@ -118,6 +121,10 @@ export type RuntimeNotifier = {
     content: string
   ): Promise<RuntimeMarkdownSaveTabResult>
   closeTerminal(tabId: string, paneRuntimeId?: number): void
+  /** Mirrors a canonical leaf removal whose process main already stopped; mounted or hidden, the
+   *  renderer drops only this exact leaf and closes its tab only when no leaf remains. Optional so
+   *  a renderer that cannot consume it keeps the pane rather than closing a whole tab. */
+  retireTerminalSurface?(surface: { tabId: string; leafId: string; ptyId: string }): void
   closeTerminalTab?(
     tabId: string,
     options?: { localPtyTeardownOwnedExternally?: boolean; force?: boolean }

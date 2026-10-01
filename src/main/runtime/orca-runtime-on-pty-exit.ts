@@ -9,6 +9,7 @@ import {
 import { SSH_EXIT_UNCONFIRMED_REASON } from '../../shared/pty-liveness-verdict'
 import type { RetiredTerminalSurface } from './mobile-session-terminal-retirement'
 import { parsePaneKey } from '../../shared/stable-pane-id'
+import { invalidatePreparationLiveness } from './preparation/preparation-observation'
 import { advertisedUrlWatcher } from '../ports/advertised-url-watcher'
 
 export class OrcaRuntimeWithOnPtyExit extends OrcaRuntimeWithOnClientDisconnected {
@@ -130,6 +131,8 @@ export class OrcaRuntimeWithOnPtyExit extends OrcaRuntimeWithOnClientDisconnecte
     this.lastRendererSizes.delete(ptyId)
     this.recentPtyOutputById.delete(ptyId)
     this.setupCompletionTokenByPtyId.delete(ptyId)
+    invalidatePreparationLiveness(ptyId, exitIncarnationId ?? undefined)
+    this.preparationOutput?.forgetPty(ptyId)
     this.clearWaitBlockedCheckState(ptyId)
     this.recentPtyPathCandidatesById.delete(ptyId)
     this.ptyOutputSequenceById.delete(ptyId)

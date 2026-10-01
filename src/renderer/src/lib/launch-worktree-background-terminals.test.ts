@@ -33,6 +33,7 @@ const state = {
     ]
   },
   tabsByWorktree: { 'wt-1': [] as { id: string }[] },
+  terminalLayoutsByTabId: {} as Record<string, unknown>,
   allWorktrees: vi.fn(() => state.worktreesByRepo['repo-1'] ?? []),
   createTab: mockCreateTab,
   setTabCustomTitle: mockSetTabCustomTitle,
@@ -43,9 +44,11 @@ const state = {
   closeTab: mockCloseTab
 }
 
+// Why a fresh object per call: zustand's getState() returns an immutable snapshot, so data read
+// from a captured snapshot after a later set() is stale. A shared mutable object would hide that.
 vi.mock('@/store', () => ({
   useAppStore: {
-    getState: () => state
+    getState: () => ({ ...state })
   }
 }))
 
@@ -81,6 +84,11 @@ describe('launchWorktreeBackgroundTerminals', () => {
       }
     ]
     state.tabsByWorktree = { 'wt-1': [] }
+    state.terminalLayoutsByTabId = {}
+    mockSetTabLayout.mockImplementation((tabId: string, layout: unknown) => {
+      state.terminalLayoutsByTabId = { ...state.terminalLayoutsByTabId, [tabId]: layout }
+    })
+    mockRegisterEagerPtyBuffer.mockImplementation(() => undefined)
     let tabIndex = 0
     mockCreateTab.mockImplementation(() => {
       const tab = { id: `tab-${++tabIndex}` }
@@ -391,5 +399,44 @@ describe('launchWorktreeBackgroundTerminals', () => {
         })
       })
     )
+  })
+
+  it('persists setup exit output into the layout current at exit time', async () => {
+    state.settings = { activeRuntimeEnvironmentId: null, setupScriptLaunchMode: 'split-horizontal' }
+    mockRegisterEagerPtyBuffer.mockImplementation(() => ({ flush: () => 'setup done\n' }))
+    const { launchWorktreeBackgroundTerminals } =
+      await import('./launch-worktree-background-terminals')
+
+    await launchWorktreeBackgroundTerminals({ worktreeId: 'wt-1', setup: setupLaunch })
+
+    const setupRegistration = mockRegisterEagerPtyBuffer.mock.calls.find(
+      ([ptyId]) => ptyId === 'pty-2'
+    )
+    const onSetupExit = setupRegistration?.[1] as (ptyId: string) => void
+    // A user split added after launch must survive the setup pane's exit.
+    const liveLayout = {
+      root: { type: 'split', direction: 'vertical', first: {}, second: {} },
+      activeLeafId: 'user-leaf',
+      expandedLeafId: null,
+      ptyIdsByLeafId: {
+        '00000000-0000-4000-8000-000000000001': 'pty-1',
+        '00000000-0000-4000-8000-000000000002': 'pty-2',
+        'user-leaf': 'pty-user'
+      }
+    }
+    state.setTabLayout('tab-1', liveLayout)
+    onSetupExit('pty-2')
+
+    expect(mockSetTabLayout).toHaveBeenLastCalledWith('tab-1', {
+      root: liveLayout.root,
+      activeLeafId: 'user-leaf',
+      expandedLeafId: null,
+      ptyIdsByLeafId: {
+        '00000000-0000-4000-8000-000000000001': 'pty-1',
+        'user-leaf': 'pty-user'
+      },
+      buffersByLeafId: { '00000000-0000-4000-8000-000000000002': 'setup done\n' }
+    })
+    expect(mockClearTabPtyId).toHaveBeenCalledWith('tab-1', 'pty-2')
   })
 })

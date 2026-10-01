@@ -2,7 +2,7 @@ import { isValidPtySize } from './daemon-pty-size'
 import type { SessionOutputPlane, AttachedClient } from './session-output-plane'
 import { createSessionOutputPipeline } from './session-output-pipeline'
 import { SessionProducerPause } from './session-producer-pause'
-import { SessionShellReadyBarrier } from './session-shell-ready-barrier'
+import type { SessionShellReadyBarrier } from './session-shell-ready-barrier'
 import type { TerminalShellRecoveryBarrier } from './terminal-shell-recovery-barrier'
 import { SessionTerminationController } from './session-termination-controller'
 import type { SubprocessHandle } from './session-subprocess-handle'
@@ -10,7 +10,8 @@ import type { JobTerminationOutcome } from '../windows/windows-pty-job'
 import type { SessionOptions } from './session-options'
 import type { TuiAgent } from '../../shared/tui-agent'
 import { randomUUID } from 'node:crypto'
-import { PtyStartupIngress } from '../../shared/pty-startup-ingress'
+import type { PtyStartupIngress } from '../../shared/pty-startup-ingress'
+import { createSessionStartupInput } from './session-startup-input'
 
 import type {
   SessionState,
@@ -28,6 +29,7 @@ export class Session {
   readonly launchAgent: TuiAgent | null
   readonly wslDistro: string | null
   readonly processNameIsSpawnFile: boolean
+  readonly rootIsLoginWrapper: boolean
   private _state: SessionState = 'running'
   private _exitCode: number | null = null
   private _disposed = false
@@ -47,6 +49,7 @@ export class Session {
     this.wslDistro = opts.wslDistro ?? null
     this.subprocess = opts.subprocess
     this.processNameIsSpawnFile = opts.subprocess.processNameIsSpawnFile === true
+    this.rootIsLoginWrapper = opts.subprocess.rootIsLoginWrapper === true
     this.onSessionExit = opts.onExit
     const pipeline = createSessionOutputPipeline({
       cols: opts.cols,
@@ -68,24 +71,15 @@ export class Session {
       releaseProducerPause: (pauseOpts) => this.producerPause.release(pauseOpts)
     })
 
-    this.shellReady = new SessionShellReadyBarrier({
+    const startup = createSessionStartupInput({
       sessionId: this.sessionId,
       subprocess: this.subprocess,
-      responderParser: this.output.responderParser,
-      shellReadySupported: opts.shellReadySupported,
-      ...(opts.reportReadinessEvent ? { reportReadinessEvent: opts.reportReadinessEvent } : {}),
-      shellReadyTimeoutMs: opts.shellReadyTimeoutMs,
-      installDeviceAttributesFilter: () => this.output.installDeviceAttributesFilter(),
-      releaseDeviceAttributesFilter: () => this.output.releaseDeviceAttributesFilter(),
-      acceptStartupIngress: (data) => this.startupIngress.accept(data)
+      output: this.output,
+      recoveryBarrier: this.recoveryBarrier,
+      opts
     })
-
-    this.startupIngress = new PtyStartupIngress({
-      ...(opts.startupIngress ? { intent: opts.startupIngress } : {}),
-      ...(opts.ownerBackend ? { ownerBackend: opts.ownerBackend } : {}),
-      write: (data) => this.subprocess.write(data),
-      onEmission: (emission) => this.recoveryBarrier.accept(emission)
-    })
+    this.shellReady = startup.shellReady
+    this.startupIngress = startup.startupIngress
     this.shellReady.startPromptReadinessProbe()
     this.subprocess.onData((data) => {
       if (!this._disposed) {

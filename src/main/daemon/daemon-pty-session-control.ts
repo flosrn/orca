@@ -167,10 +167,15 @@ export abstract class DaemonPtySessionControl extends DaemonPtySessionInput {
       { sessionId: id, immediate: opts.immediate ?? false },
       remainingDaemonRequestTimeoutMs(opts.deadlineMs)
     )
+    await this.forgetKilledSession(id, opts.keepHistory === true)
+  }
+
+  /** Client-side bookkeeping once the daemon confirmed the session killed. */
+  protected async forgetKilledSession(id: string, keepHistory: boolean): Promise<void> {
     this.activeSessionIds.delete(id)
     this.clearSessionAwaitingDaemonRecovery(id)
     this.dirtySessionVersions.delete(id)
-    if (!opts.keepHistory) {
+    if (!keepHistory) {
       this.coldRestoreCache.delete(id)
       this.sleepRestoreSessionIds.delete(id)
     }
@@ -186,14 +191,14 @@ export abstract class DaemonPtySessionControl extends DaemonPtySessionInput {
     this.initialCwds.delete(id)
     this.wslDistrosBySessionId.delete(id)
     // Why: only remove history on explicit close; sleep also calls shutdown but wake needs the dir intact for cold restore (opts.keepHistory).
-    if (this.historyManager && !opts.keepHistory) {
+    if (this.historyManager && !keepHistory) {
       await this.historyManager
         .removeSession(id)
         .catch((err) => console.warn('[history] removeSession failed:', id, err))
     }
 
     // Why: the tombstone rejects reattach to a user-killed session; sleep legitimately reattaches on wake, so skip it under keepHistory.
-    if (!opts.keepHistory) {
+    if (!keepHistory) {
       this.killedSessionTombstones.delete(id)
       this.killedSessionTombstones.set(id, Date.now())
       if (this.killedSessionTombstones.size > MAX_TOMBSTONES) {

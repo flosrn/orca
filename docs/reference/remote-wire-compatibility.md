@@ -245,6 +245,34 @@ The cross-version suite derives the old client's list by removing this capabilit
 baseline's own list, per the rule above, so the downgrade stays exercised after a release ships
 it.
 
+## Worked example: exact idle stops and preparation archives
+
+Automatic preparation cleanup asks the execution host, not the client, to stop a pane, and
+only when the host itself proves the stop is safe. That request is new on three wires, and
+each one is negotiated so an older peer retains the pane rather than receiving a stop it
+would treat as unconditional teardown.
+
+- **SSH relay.** `pty.getCapabilities` gains an optional `idleRetirementVersion` (Rule 1).
+  The client sends `pty.retireIdle` only when that value is exactly
+  `PTY_IDLE_RETIREMENT_VERSION`; any other answer, including an absent key from an older
+  relay, is `retained: unsupported`. The relay checks the recorded incarnation, the
+  attested creator (`expectedOwnerClientInstanceId`), the live output characters the client
+  has received (`expectedOutputChars`), and input, output or rebind during its process-table
+  inspection. A lost reply after the request was sent is `unconfirmed`, never retained or
+  exited.
+- **Local daemon.** `retireIdle` is a daemon request introduced at protocol v37
+  (`IDLE_RETIREMENT_DAEMON_PROTOCOL_VERSION`). A session owned by an older, still attachable
+  daemon retains every candidate: an older daemon only knows unconditional stops.
+- **Runtime RPC.** `preparation.output.list` and `preparation.output.read` are new methods on
+  the managing runtime. A paired client talking to an older host gets `method_not_found` and
+  shows the archive as unavailable; nothing falls back to reading a live PTY or an SSH path.
+
+Every host answer is parsed with `parsePtyIdleRetirementResult`: an unknown outcome or retain
+reason is `unconfirmed` (Rule 4), because treating it as `stopped` could hide a live process
+and treating it as `retained` could hide an applied stop. The request never falls back to
+`shutdown`. When adding a retain reason, append it to `PTY_IDLE_RETIREMENT_RETAIN_REASONS` and
+expect older clients to read it as `unconfirmed`, which keeps the pane.
+
 ## Known debt: JSON-RPC errors drop Node's string code
 
 An error raised on an SSH host crosses the relay as JSON-RPC, and
