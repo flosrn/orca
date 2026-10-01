@@ -43,7 +43,7 @@ import {
 import { buildRelayHookPtyEnv, defaultEndpointDir } from './agent-hook-endpoint-coordinates'
 import { buildRelayHookEnvelope, hookBodyEnv, hookBodyVersion } from './agent-hook-envelope-build'
 import { forwardReadinessOnly, readRelayRootReadiness } from './agent-hook-root-readiness'
-import { listenOnLoopback } from './agent-hook-loopback-listen'
+import { admitHookRequest, listenOnLoopback } from './agent-hook-loopback-listen'
 import { AgentHookResultRetryScheduler } from './agent-hook-result-retry-scheduler'
 import { MAX_CACHED_PANES, selectReplayableCachedPanes } from './agent-hook-cached-pane-status'
 
@@ -240,14 +240,7 @@ export class RelayAgentHookServer {
   // ─── Private ──────────────────────────────────────────────────────
 
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    if (req.method !== 'POST') {
-      res.writeHead(404)
-      res.end()
-      return
-    }
-    if (req.headers['x-orca-agent-hook-token'] !== this.token) {
-      res.writeHead(403)
-      res.end()
+    if (!admitHookRequest(req, res, this.token)) {
       return
     }
     // Why: track our own destroy so the slowloris cap can't be misread as outside interference.

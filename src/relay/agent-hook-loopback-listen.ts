@@ -1,4 +1,23 @@
-import type { Server } from 'node:http'
+import type { IncomingMessage, Server, ServerResponse } from 'node:http'
+
+/** Answers non-POST (404) and wrong-token (403) requests; true when the post may proceed. */
+export function admitHookRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  token: string
+): boolean {
+  if (req.method !== 'POST') {
+    res.writeHead(404)
+    res.end()
+    return false
+  }
+  if (req.headers['x-orca-agent-hook-token'] !== token) {
+    res.writeHead(403)
+    res.end()
+    return false
+  }
+  return true
+}
 
 /**
  * Binds the relay hook receiver to loopback and resolves with its bound port (null when the
