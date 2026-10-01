@@ -9,6 +9,7 @@ import { writeTerminalOutput } from '@/lib/pane-manager/pane-terminal-output-sch
 import { createTerminalStructuralReplayCoordinator } from '@/lib/pane-manager/terminal-structural-replay-coordinator'
 import { makePaneKey } from '../../../../../shared/stable-pane-id'
 import type { AgentType } from '../../../../../shared/agent-status-types'
+import type { PreparationSpawnIntake } from '../../../../../shared/preparation-contracts'
 import { resolveCommittedTitleAgentType } from '@/lib/pane-agent-evidence'
 
 import { shouldWritePtyOutputForeground } from './foreground-output-scan'
@@ -157,6 +158,14 @@ export function connectPanePty(
     const ptyId: string | null = session.pendingReplacedPtyId
     session.pendingReplacedPtyId = null
     return ptyId
+  }
+  // Why: the preparation role binds this pane's first spawn only; a restart, retry or remount
+  // of the pane must never carry it again, and nothing infers it from the pane's title.
+  session.pendingPreparation = session.paneStartup?.preparation ?? null
+  session.claimPendingPreparation = (): PreparationSpawnIntake | null => {
+    const preparation: PreparationSpawnIntake | null = session.pendingPreparation
+    session.pendingPreparation = null
+    return preparation
   }
 
   // Why: paneKey crosses PTY env, hook IPC, retained rows, and reload/replay.

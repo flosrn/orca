@@ -10,6 +10,7 @@ import {
 import { ptyOwnership } from '../provider/ownership-state'
 import { tryGetProviderForPty } from '../provider/registry'
 import { interactiveOutputCharsByPty, lastInputAtByPty } from '../delivery/visibility-state'
+import { notePtyInput } from '../delivery/input-revision'
 
 export function isMainWindowPtyIpcEvent(
   event: IpcMainEvent | IpcMainInvokeEvent,
@@ -160,6 +161,7 @@ export function createPtyWriteInput(deps: {
     try {
       const now = performance.now()
       lastInputAtByPty.set(args.id, now)
+      notePtyInput(args.id)
       interactiveOutputCharsByPty.set(args.id, 0)
       return writePtyProviderInput(provider, args.id, args.data)
     } catch {
@@ -182,6 +184,7 @@ export function createPtyWriteInput(deps: {
     try {
       const now = performance.now()
       lastInputAtByPty.set(args.id, now)
+      notePtyInput(args.id)
       interactiveOutputCharsByPty.set(args.id, 0)
       return writePtyProviderInput(provider, args.id, args.data)
     } catch {

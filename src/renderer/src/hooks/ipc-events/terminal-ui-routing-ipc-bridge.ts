@@ -96,7 +96,8 @@ export function routeRuntimeTerminalSplitRequest(request: RuntimeTerminalSplitRe
     command: request.command,
     sourceLeafId: request.sourceLeafId,
     telemetrySource: request.telemetrySource,
-    newLeafId: request.newLeafId
+    newLeafId: request.newLeafId,
+    ...(request.preparation ? { preparation: request.preparation } : {})
   }
   if (hasRegisteredRuntimeTerminalTab(request.tabId, worktreeId)) {
     dispatchTerminalPaneSplitRequest(detail)

@@ -76,7 +76,8 @@ export const TERMINAL_LIFECYCLE_METHODS = [
               presentation,
               tabId: params.tabId,
               leafId: params.leafId,
-              ...(preAllocatedHandle ? { preAllocatedHandle } : {})
+              ...(preAllocatedHandle ? { preAllocatedHandle } : {}),
+              ...(params.preparation ? { preparation: params.preparation } : {})
             })
         )
       }

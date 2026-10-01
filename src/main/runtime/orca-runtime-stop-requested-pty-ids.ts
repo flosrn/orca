@@ -1,4 +1,5 @@
 // @ts-nocheck -- mechanically split from OrcaRuntimeService; behavior is covered by AST equivalence and characterization tests.
+import type { PreparationSpawnIntake } from '../../shared/preparation-contracts'
 import { OrchestrationStructuredMailboxPointerDelivery } from './orchestration/structured-mailbox-pointer-delivery'
 import { createStructuredMailboxPointerHost } from './orchestration/structured-mailbox-pointer-host'
 import { isStructuredWorkerHandle } from './structured-worker-identity'
@@ -18,6 +19,7 @@ import type { AgentBrowserBridge } from '../browser/agent-browser-bridge'
 import type { BrowserBackend } from '../browser/browser-backend'
 import type { EmulatorBridge } from '../emulator/emulator-bridge'
 import { RuntimeResolvedWorktreeCache } from './runtime-resolved-worktree-cache'
+import { PreparationRecordStore } from './preparation/preparation-record-store'
 import { RuntimeWorktreeLineageController } from './runtime-worktree-lineage-controller'
 import { RuntimeAgentOrchestrationProjection } from './runtime-agent-orchestration-projection'
 import { RuntimeTerminalList } from './runtime-terminal-list'
@@ -257,4 +259,18 @@ export class OrcaRuntimeWithStopRequestedPtyIds extends OrcaRuntimeWithRuntimeId
   protected recentPtyOutputById = new Map<string, RecentPtyOutputBuffer>()
 
   protected setupCompletionTokenByPtyId = new Map<string, string>()
+
+  protected readonly preparationRecords = new PreparationRecordStore()
+
+  /** False only for a tombstoned preparation; OrcaRuntimeService answers from durable lifecycle facts. */
+  mayEnqueuePreparationSetup(_preparationId: string): boolean {
+    return true
+  }
+
+  /** Every spawn path refuses a retired preparation's role instead of rerunning its setup. */
+  protected assertPreparationSpawnAllowed(intake: PreparationSpawnIntake | undefined): void {
+    if (intake?.role === 'preparation' && !this.mayEnqueuePreparationSetup(intake.preparationId)) {
+      throw new Error('preparation_retired')
+    }
+  }
 }

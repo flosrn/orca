@@ -158,7 +158,8 @@ export function registerRuntimeWindowLifecycle(
         worktreeId: opts.worktreeId,
         sourceLeafId: opts.sourceLeafId,
         telemetrySource: opts.telemetrySource,
-        newLeafId: opts.newLeafId
+        newLeafId: opts.newLeafId,
+        ...(opts.preparation ? { preparation: opts.preparation } : {})
       })
     },
     renameTerminal: (tabId, title) => send('ui:renameTerminal', { tabId, title }),
@@ -199,6 +200,7 @@ export function registerRuntimeWindowLifecycle(
         content
       }) as Promise<RuntimeMarkdownSaveTabResult>,
     closeTerminal: (tabId, paneRuntimeId) => send('ui:closeTerminal', { tabId, paneRuntimeId }),
+    retireTerminalSurface: (surface) => send('ui:retireTerminalSurface', surface),
     closeTerminalTab: (tabId, options) =>
       requestTerminalTabCloseFromRenderer(mainWindow, tabId, options),
     sleepWorktree: (worktreeId) => send('ui:sleepWorktree', { worktreeId }),

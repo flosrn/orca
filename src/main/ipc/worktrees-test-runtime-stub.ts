@@ -18,6 +18,8 @@ export type WorktreeRuntimeStub = {
   closeFileWatchersForRemoval: ReturnType<typeof vi.fn>
   acquireFileWatcherRemoval: ReturnType<typeof vi.fn>
   hydrateInferredWorktreeLineage: ReturnType<typeof vi.fn>
+  registerWorktreePreparation: ReturnType<typeof vi.fn>
+  provisionManagedWorktreeTerminals: ReturnType<typeof vi.fn>
 }
 
 /** Why: create-flow tests need a minimal runtime; full fetchRemoteWithCache behavior lives in fetch-remote-cache.test.ts. */
@@ -48,7 +50,13 @@ export function createWorktreeRuntimeStub(): WorktreeRuntimeStub {
     notifyWorktreesChangedForRemoteClients: vi.fn(),
     closeFileWatchersForRemoval: vi.fn().mockResolvedValue(undefined),
     acquireFileWatcherRemoval: vi.fn(),
-    hydrateInferredWorktreeLineage: vi.fn().mockResolvedValue(undefined)
+    hydrateInferredWorktreeLineage: vi.fn().mockResolvedValue(undefined),
+    // Why: create-flow tests exercise git/metadata; registration identity is covered by the runtime seam.
+    registerWorktreePreparation: vi.fn((_worktree: unknown, setup: unknown) => setup),
+    provisionManagedWorktreeTerminals: vi.fn().mockResolvedValue({
+      setupSpawned: true,
+      setupTerminalHandle: 'term-setup'
+    })
   }
   runtimeStub.acquireFileWatcherRemoval.mockImplementation(
     async (worktreePath: string, connectionId?: string) => {

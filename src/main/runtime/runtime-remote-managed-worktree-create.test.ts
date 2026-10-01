@@ -45,7 +45,8 @@ function createDeps() {
     activate: vi.fn(),
     invalidateResolvedWorktrees: vi.fn(),
     invalidateWorktreeScan: vi.fn(),
-    notifyWorktreesChanged: vi.fn()
+    notifyWorktreesChanged: vi.fn(),
+    registerPreparation: (_worktree, setup) => setup
   }
   return { createTerminal, deps }
 }

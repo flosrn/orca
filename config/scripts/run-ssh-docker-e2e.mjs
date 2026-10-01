@@ -66,6 +66,7 @@ const result = spawnSync(
     'tests/e2e/ssh-docker-five-pane-input-under-flood.spec.ts',
     'tests/e2e/ssh-docker-bulk-open-freeze-repro.spec.ts',
     'tests/e2e/ssh-docker-half-open-link.spec.ts',
+    'tests/e2e/ssh-docker-preparation-cleanup.spec.ts',
     'tests/e2e/ssh-docker-quick-open-large-listing.spec.ts',
     'tests/e2e/ssh-docker-reconnect-pane-restore.spec.ts',
     'tests/e2e/ssh-docker-relay-stall-credential.spec.ts',

@@ -3,6 +3,7 @@ import { OrcaRuntimeWithSplitTerminal } from './orca-runtime-split-terminal'
 import type { RuntimePtyWorktreeRecord } from './runtime-terminal-state-records'
 import type { TerminalPaneSplitSource } from '../../shared/feature-education-telemetry'
 import type { RuntimeTerminalSplit } from '../../shared/runtime-types'
+import type { PreparationSpawnIntake } from '../../shared/preparation-contracts'
 import { makePaneKey, parsePaneKey } from '../../shared/stable-pane-id'
 import { recordPtySurface, spawnSurfaceClaimSequence } from './pty-recorded-surface-topology'
 import { randomUUID } from 'node:crypto'
@@ -21,6 +22,7 @@ export class OrcaRuntimeWithSplitPtyBackedTerminal extends OrcaRuntimeWithSplitT
       // workspace, for splits the user never asked to see.
       surfaceOwner?: false
       telemetrySource?: TerminalPaneSplitSource
+      preparation?: PreparationSpawnIntake
     } = {}
   ): Promise<RuntimeTerminalSplit> {
     if (!this.ptyController?.spawn) {
@@ -47,42 +49,61 @@ export class OrcaRuntimeWithSplitPtyBackedTerminal extends OrcaRuntimeWithSplitT
     }
     const sourceIncarnationId =
       sourceAuthority.liveIncarnationId ?? sourceAuthority.persistedIncarnationId
+    this.assertPreparationSpawnAllowed(opts.preparation)
     const leafId = randomUUID()
     const preAllocatedHandle = this.createPreAllocatedTerminalHandle()
     const paneKey = makePaneKey(parentTabId, leafId)
-    const result = await this.ptyController.spawn({
-      cols: 120,
-      rows: 40,
-      cwd: workspace.path,
-      command: opts.command,
-      commandDelivery: 'provider',
-      env: this.buildTerminalWorkspaceEnv(workspace, opts.env ?? {}, paneKey, parentTabId),
-      envToDelete: opts.envToDelete,
-      connectionId: workspace.connectionId,
-      worktreeId: workspace.id,
-      preAllocatedHandle,
-      tabId: parentTabId,
-      leafId,
-      persistHostSessionBinding: true,
-      ...(sourceAuthority.persisted
-        ? {
-            expectedSourceBinding: {
-              ...(sourceAuthority.persistedWorktreeId
-                ? { worktreeId: sourceAuthority.persistedWorktreeId }
-                : {}),
-              tabId: parentTabId,
-              leafId: parsedPaneKey.leafId,
-              ptyId: pty.ptyId,
-              // Why: the store can only match its own persisted map, so a live-only id it never
-              // recorded would reject every split from a session restored without incarnations.
-              // The live id is fenced by revalidateSourceAuthority below instead.
-              ...(sourceAuthority.persistedIncarnationId
-                ? { incarnationId: sourceAuthority.persistedIncarnationId }
-                : {})
+    // Why: the pane key is armed before spawn so no provider byte precedes the registration.
+    const preparation =
+      opts.preparation &&
+      this.preparationRecords.reserve(opts.preparation, workspace.id, {
+        handle: preAllocatedHandle,
+        tabId: parentTabId,
+        leafId
+      })
+        ? opts.preparation
+        : undefined
+    const result = await this.ptyController
+      .spawn({
+        cols: 120,
+        rows: 40,
+        cwd: workspace.path,
+        command: opts.command,
+        commandDelivery: 'provider',
+        env: this.buildTerminalWorkspaceEnv(workspace, opts.env ?? {}, paneKey, parentTabId),
+        envToDelete: opts.envToDelete,
+        connectionId: workspace.connectionId,
+        worktreeId: workspace.id,
+        preAllocatedHandle,
+        tabId: parentTabId,
+        leafId,
+        persistHostSessionBinding: true,
+        ...(sourceAuthority.persisted
+          ? {
+              expectedSourceBinding: {
+                ...(sourceAuthority.persistedWorktreeId
+                  ? { worktreeId: sourceAuthority.persistedWorktreeId }
+                  : {}),
+                tabId: parentTabId,
+                leafId: parsedPaneKey.leafId,
+                ptyId: pty.ptyId,
+                // Why: the store can only match its own persisted map, so a live-only id it never
+                // recorded would reject every split from a session restored without incarnations.
+                // The live id is fenced by revalidateSourceAuthority below instead.
+                ...(sourceAuthority.persistedIncarnationId
+                  ? { incarnationId: sourceAuthority.persistedIncarnationId }
+                  : {})
+              }
             }
-          }
-        : {})
-    })
+          : {}),
+        ...(preparation ? { preparation } : {})
+      })
+      .catch((error: unknown) => {
+        if (preparation) {
+          this.preparationRecords.releaseReservation(preparation, preAllocatedHandle)
+        }
+        throw error
+      })
     this.registerPreAllocatedHandleForPty(result.id, preAllocatedHandle)
     if (result.wslDistro) {
       this.preparePtyExecutionContext(result.id, result.wslDistro)
@@ -163,6 +184,9 @@ export class OrcaRuntimeWithSplitPtyBackedTerminal extends OrcaRuntimeWithSplitT
         })
       }
     } catch (error) {
+      if (preparation) {
+        this.preparationRecords.releaseReservation(preparation, preAllocatedHandle)
+      }
       this.setPairedRendererSessionOwnership(result.id, false)
       let stopped = false
       try {
@@ -200,8 +224,26 @@ export class OrcaRuntimeWithSplitPtyBackedTerminal extends OrcaRuntimeWithSplitT
       void revealSplit().catch(() => undefined)
     }
 
+    const handle = this.issuePtyHandle(createdPty ?? pty)
+    // Why: without a live record the handle names the source pane, which must never be adopted.
+    if (
+      preparation &&
+      !(
+        createdPty &&
+        this.preparationRecords.bind(preparation, workspace.id, {
+          handle,
+          ptyId: result.id,
+          incarnationId: result.incarnationId ?? null,
+          tabId: parentTabId,
+          leafId,
+          paneKey
+        })
+      )
+    ) {
+      this.preparationRecords.releaseReservation(preparation, preAllocatedHandle)
+    }
     return {
-      handle: this.issuePtyHandle(createdPty ?? pty),
+      handle,
       tabId: parentTabId,
       paneRuntimeId: -1,
       leafId

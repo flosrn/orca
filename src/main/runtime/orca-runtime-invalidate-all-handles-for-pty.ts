@@ -178,5 +178,7 @@ export class OrcaRuntimeWithInvalidateAllHandlesForPty extends OrcaRuntimeWithRe
       leaf.writable = this.graphStatus === 'ready'
       this.adoptPreAllocatedHandle(leaf)
     }
+    // Why: after a restart only the exact recorded incarnation may resume its preparation capture.
+    this.preparationOutput?.confirmIncarnation(ptyId, incarnationId ?? undefined)
   }
 }

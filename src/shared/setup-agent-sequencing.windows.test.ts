@@ -21,6 +21,42 @@ afterEach(() => {
 })
 
 describe.skipIf(process.platform !== 'win32')('Windows setup-agent sequencing', () => {
+  it(
+    'preserves the managed OMP extension through the native PowerShell gate',
+    async () => {
+      const dir = makeTempDir('managed-omp')
+      const runnerScriptPath = join(dir, 'setup.cmd')
+      const capture = join(dir, 'argv.txt')
+      const extension = join(dir, 'managed-status.ts')
+      writeFileSync(extension, '')
+      writeFileSync(
+        join(dir, 'omp.cmd'),
+        `@echo off\r\necho %~1> "${capture}"\r\necho %~2>> "${capture}"\r\nexit /b 0\r\n`
+      )
+      const commands = createSequencedSetupAgentCommands({
+        runnerScriptPath,
+        startupCommand: 'omp',
+        platform: 'windows',
+        nonce: 'managed-gate',
+        waitTimeoutSeconds: 2
+      })
+      writeFileSync(`${runnerScriptPath}.managed-gate.done`, 'managed-gate:0\r\n')
+      const result = await waitForExit(
+        spawnWindowsCommand(dir, 'launch.cmd', commands.startupCommand, {
+          ...commands.startupEnv,
+          PATH: `${dir};${process.env.PATH ?? ''}`,
+          ORCA_OMP_STATUS_EXTENSION: extension
+        })
+      )
+      expect(result.code).toBe(0)
+      expect(readFileSync(capture, 'utf8').trim().split(/\r?\n/)).toEqual([
+        '--extension',
+        extension
+      ])
+    },
+    WINDOWS_PROCESS_TEST_TIMEOUT_MS
+  )
+
   it.each([
     ['path with spaces', false],
     ['ampersand&parentheses(test)', false],

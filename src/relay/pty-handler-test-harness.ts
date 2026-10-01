@@ -17,6 +17,8 @@ export function createTestPtyHandler(dispatcher: MockDispatcher): PtyHandler {
 }
 
 export type TestRequestContext = {
+  /** The requesting relay client; ownership attestation compares it with the creating client. */
+  clientId?: number
   isStale: () => boolean
   signal?: AbortSignal
 }

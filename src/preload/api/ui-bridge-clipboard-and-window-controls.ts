@@ -59,6 +59,12 @@ export const uiClipboardAndWindowControlsApi = {
     ipcRenderer.on('ui:closeTerminal', listener)
     return () => ipcRenderer.removeListener('ui:closeTerminal', listener)
   },
+  onRetireTerminalSurface: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, data: Parameters<typeof callback>[0]) =>
+      callback(data)
+    ipcRenderer.on('ui:retireTerminalSurface', listener)
+    return () => ipcRenderer.removeListener('ui:retireTerminalSurface', listener)
+  },
   onTerminalTabCloseRequest: (callback) => {
     const listener = (_event: Electron.IpcRendererEvent, request: Parameters<typeof callback>[0]) =>
       callback(request)

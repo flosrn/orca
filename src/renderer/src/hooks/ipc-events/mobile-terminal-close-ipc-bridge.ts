@@ -6,6 +6,10 @@ import { runSleepWorktree } from '@/components/sidebar/sleep-worktree-flow'
 import { buildWorkspaceSessionPayload } from '@/lib/workspace-session'
 import { persistWorkspaceSessionByHost } from '@/lib/workspace-session-host-persistence'
 import { useAppStore } from '../../store'
+import {
+  retireTerminalSurfaceInStore,
+  terminalSurfaceRetirementDetail
+} from '../retire-terminal-surface-in-store'
 
 export function registerMobileAndTerminalCloseIpcBridge(
   unsubs: (() => void)[],
@@ -64,6 +68,17 @@ export function registerMobileAndTerminalCloseIpcBridge(
       }
     })
   )
+
+  // Why both: a mounted pane retires through its lifecycle hook, and the store removal covers
+  // hidden or unmounted tabs so a stale layout can never re-persist the retired leaf.
+  const unsubscribeRetireTerminalSurface = window.api.ui.onRetireTerminalSurface?.((surface) => {
+    const detail = terminalSurfaceRetirementDetail(surface)
+    window.dispatchEvent(new CustomEvent(CLOSE_TERMINAL_PANE_EVENT, { detail }))
+    retireTerminalSurfaceInStore(useAppStore.getState(), detail)
+  })
+  if (unsubscribeRetireTerminalSurface) {
+    unsubs.push(unsubscribeRetireTerminalSurface)
+  }
 
   // Why: during an in-place renderer reload an older preload can linger; keep this listener additive at that seam.
   if (window.api.ui.onTerminalTabCloseRequest) {

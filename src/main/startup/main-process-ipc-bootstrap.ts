@@ -3,6 +3,7 @@ import { recoverLegacyWorkerTerminalsForRendererStartup } from './legacy-worker-
 import { logStartupMilestone } from './startup-diagnostics'
 import { mainProcessState as state } from './main-process-state'
 import { resolveOpenedMarkdownDocuments } from './os-opened-markdown-files'
+import { recoverRuntimePreparationLifecycle } from '../runtime/preparation/preparation-storage-startup'
 
 export function registerMainProcessIpcHandlers(): void {
   ipcMain.handle('app:awaitFirstWindowStartupServices', async () => {
@@ -31,6 +32,12 @@ export function registerMainProcessIpcHandlers(): void {
       managedWslCliStartupBarrierReady: state.managedWslCliStartupBarrierReady,
       localPtyProviderStartupReady: state.localPtyProviderStartupReady,
       reconcile: async () => {
+        // Runs once the local provider settled and PTY handlers exist: recorded preparation panes
+        // nothing re-announced are read back through their providers. Not awaited, so renderer
+        // startup never waits on provider readback; a concurrent re-announcement wins the pane.
+        if (state.runtime) {
+          void recoverRuntimePreparationLifecycle(state.runtime)
+        }
         await state.runtime?.refreshRestoredOrchestrationAuthority()
         return state.runtime?.reconcileLegacyWorkerTerminals({ materializeRenderer: true })
       },

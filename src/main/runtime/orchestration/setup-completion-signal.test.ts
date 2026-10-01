@@ -1,7 +1,40 @@
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createSequencedSetupAgentCommands } from '../../../shared/setup-agent-sequencing'
 import { describe, expect, it, vi } from 'vitest'
 import { buildObservedSetupCommand, createSetupCompletionScanner } from './setup-completion-signal'
 
 describe('orchestration setup completion signal', () => {
+  it('observes the entire sequenced runner before its interactive shell resumes', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'orca-full-runner-'))
+    try {
+      const runnerScriptPath = join(directory, 'runner.sh')
+      writeFileSync(runnerScriptPath, 'printf "first\\nsecond\\nthird\\n"\nexit 0\n')
+      const commands = createSequencedSetupAgentCommands({
+        runnerScriptPath,
+        startupCommand: 'true',
+        platform: 'posix',
+        nonce: 'complete-runner'
+      })
+      const output = execFileSync(
+        'bash',
+        ['-c', `${commands.setupCommand}; printf 'shell-resumed'`],
+        { encoding: 'utf8' }
+      )
+      const outcomes: number[] = []
+      const scanner = createSetupCompletionScanner('complete-runner', (code) => outcomes.push(code))
+      scanner.scan(output.slice(0, output.indexOf('third')))
+      expect(outcomes).toEqual([])
+      scanner.scan(output.slice(output.indexOf('third')))
+      expect(outcomes).toEqual([0])
+      expect(output.endsWith('shell-resumed')).toBe(true)
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
   it('preserves a POSIX setup exit code in a visible completion signal', () => {
     const { command } = buildObservedSetupCommand(
       '/repo/.git/orca/setup-runner.sh',

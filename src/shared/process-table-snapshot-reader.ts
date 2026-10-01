@@ -1,6 +1,7 @@
 import { execFile as execFileCb } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { promisify } from 'node:util'
+import { createProcessTableSnapshotReader } from './process-table-snapshot-cache'
 import {
   PROCESS_TABLE_SNAPSHOT_MAX_STALENESS_MS,
   PS_ARGS,
@@ -12,6 +13,7 @@ import {
   parseStrictProcessTableRows,
   type ProcessTableRow
 } from './process-table-snapshot'
+import { RELAY_PTY_SWEEP_MAX_EVIDENCE_AGE_MS } from './ssh-relay-pty-ownership-proof'
 
 export { PROCESS_TABLE_SNAPSHOT_MAX_STALENESS_MS, PS_ARGS, PS_MAX_BUFFER_BYTES }
 
@@ -23,119 +25,6 @@ const execFile = promisify(execFileCb)
 // whole subsystem answered "unverifiable" about a table it could read. This keeps a wedged
 // `ps` bounded while staying out of reach of a host that is merely busy.
 export const PS_TIMEOUT_MS = 15_000
-const DEFAULT_SNAPSHOT_TTL_MS = PROCESS_TABLE_SNAPSHOT_MAX_STALENESS_MS
-
-type Snapshot<T> = { value: T; capturedAtMs: number; completedAtMs: number }
-
-type ProcessTableSnapshotReaderDeps<T> = {
-  runPs: () => Promise<T>
-  now: () => number
-  ttlMs?: number
-}
-
-/** Build a process-table reader that coalesces concurrent and recent captures. */
-export function createProcessTableSnapshotReader<T = string>(
-  deps: ProcessTableSnapshotReaderDeps<T>
-): {
-  getSnapshot: () => Promise<T>
-  getSnapshotWithAge: () => Promise<{ value: T; capturedAgeMs: number }>
-  getFreshSnapshot: () => Promise<T>
-  reset: () => void
-} {
-  const ttlMs = deps.ttlMs ?? DEFAULT_SNAPSHOT_TTL_MS
-  let cached: Snapshot<T> | null = null
-  let inFlight: Promise<T> | null = null
-  let sequence = 0
-  let freshQueued: { promise: Promise<T>; startSequence: number | null } | null = null
-
-  async function runSnapshot(): Promise<T> {
-    // Two stamps because they answer different questions: `capturedAtMs` is when `ps` read the
-    // kernel table, which is what a destructive consumer bounds staleness against, while the TTL
-    // keys on completion so a capture slower than the TTL still coalesces instead of forking a
-    // whole-machine `ps` per caller on exactly the loaded host that can least afford it.
-    const capturedAtMs = deps.now()
-    const promise = deps.runPs()
-    inFlight = promise
-    try {
-      const value = await promise
-      cached = { value, capturedAtMs, completedAtMs: deps.now() }
-      return value
-    } finally {
-      if (inFlight === promise) {
-        inFlight = null
-      }
-    }
-  }
-
-  async function getSnapshot(): Promise<T> {
-    if (cached && deps.now() - cached.completedAtMs < ttlMs) {
-      return cached.value
-    }
-    if (inFlight) {
-      return inFlight
-    }
-    if (freshQueued) {
-      return freshQueued.promise
-    }
-    return runSnapshot()
-  }
-
-  async function getSnapshotWithAge(): Promise<{ value: T; capturedAgeMs: number }> {
-    const value = await getSnapshot()
-    const capturedAtMs = cached?.value === value ? cached.capturedAtMs : deps.now()
-    return { value, capturedAgeMs: Math.max(0, deps.now() - capturedAtMs) }
-  }
-
-  function getFreshSnapshot(): Promise<T> {
-    const requestSequence = ++sequence
-    if (freshQueued?.startSequence === null) {
-      return freshQueued.promise
-    }
-    const priorFresh = freshQueued?.promise ?? null
-    const priorScan = inFlight
-    const entry: { promise: Promise<T>; startSequence: number | null } = {
-      promise: Promise.resolve(undefined as never),
-      startSequence: null
-    }
-    entry.promise = Promise.resolve().then(async () => {
-      for (const prior of [priorFresh, priorScan]) {
-        if (!prior) {
-          continue
-        }
-        try {
-          await prior
-        } catch {
-          // The post-boundary scan below owns the confirmation result.
-        }
-      }
-      entry.startSequence = ++sequence
-      if (entry.startSequence <= requestSequence) {
-        throw new Error('fresh process snapshot did not start after request')
-      }
-      return runSnapshot()
-    })
-    freshQueued = entry
-    const clearQueued = (): void => {
-      if (freshQueued === entry) {
-        freshQueued = null
-      }
-    }
-    void entry.promise.then(clearQueued, clearQueued)
-    return entry.promise
-  }
-
-  return {
-    getSnapshot,
-    getSnapshotWithAge,
-    getFreshSnapshot,
-    reset: () => {
-      cached = null
-      inFlight = null
-      sequence = 0
-      freshQueued = null
-    }
-  }
-}
 
 type ProcessTableCapture = {
   lenient: () => ProcessTableRow[]
@@ -327,7 +216,10 @@ export const PROCESS_TABLE_EVIDENCE_BUDGET_MS = 1_200
  *  capture some identity probe started under the 15s budget; abandoning the wait leaves that
  *  capture running to fill the cache instead of forking a second whole-machine `ps` on the host
  *  that can least afford one. */
-export async function withEvidenceBudget<T>(pending: Promise<T>): Promise<T> {
+export async function withEvidenceBudget<T>(
+  pending: Promise<T>,
+  budgetMs: number = PROCESS_TABLE_EVIDENCE_BUDGET_MS
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([
@@ -335,7 +227,7 @@ export async function withEvidenceBudget<T>(pending: Promise<T>): Promise<T> {
       new Promise<never>((_resolve, reject) => {
         timer = setTimeout(
           () => reject(new ProcessTableCaptureError('capture_over_budget')),
-          PROCESS_TABLE_EVIDENCE_BUDGET_MS
+          budgetMs
         )
       })
     ])
@@ -350,6 +242,30 @@ export async function getStrictProcessTableSnapshotWithAge(): Promise<{
 }> {
   const snapshot = await withEvidenceBudget(processTableReader.getSnapshotWithAge())
   return { rows: snapshot.value.strict(), capturedAgeMs: snapshot.capturedAgeMs }
+}
+
+/** How long a fence-after-request read waits for its capture: exactly as long as the stop could
+ *  still accept the answer. Its age runs from the request, so the 2,000ms remote-foreground
+ *  ceiling that sized {@link PROCESS_TABLE_EVIDENCE_BUDGET_MS} does not apply, and that budget
+ *  sits below what a full `command=` capture costs on an ordinary laptop (measured 0.21-0.30s
+ *  for 746 processes at load 15, 2.5-9.0s for 2,002 idle) -- it would retain every pane there.
+ *  Waiting past this bound is pointless: the stop rejects the capture as stale anyway. */
+export const PROCESS_TABLE_FENCE_WAIT_BUDGET_MS = RELAY_PTY_SWEEP_MAX_EVIDENCE_AGE_MS
+
+/** Strict capture from a `ps` that STARTED after this call, for a consumer whose proof is "nothing
+ *  ran after my fence" (automatic idle retirement). A TTL-shared or in-flight scan may predate the
+ *  fence and so both hide work begun before it and report work that has since exited. The age runs
+ *  from the request, so the caller's evidence bound also covers the scan's own duration. */
+export async function getStrictProcessTableSnapshotStartedAfterRequest(): Promise<{
+  rows: ProcessTableRow[]
+  capturedAgeMs: number
+}> {
+  const requestedAtMs = Date.now()
+  const snapshot = await withEvidenceBudget(
+    processTableReader.getFreshSnapshot(),
+    PROCESS_TABLE_FENCE_WAIT_BUDGET_MS
+  )
+  return { rows: snapshot.strict(), capturedAgeMs: Math.max(0, Date.now() - requestedAtMs) }
 }
 
 export function resetProcessTableSnapshotForTests(): void {

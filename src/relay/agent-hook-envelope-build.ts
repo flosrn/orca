@@ -3,6 +3,7 @@
 // redelivery of the same envelope.
 import type { AgentHookEventPayload } from '../shared/agent-hook-listener/listener-event'
 import type { AgentHookRelayEnvelope, AgentHookSource } from '../shared/agent-hook-relay'
+import type { PreparationRootReadiness } from '../shared/preparation-root-readiness'
 
 // Why: cap metadata to prevent a misbehaving CLI growing the cache unboundedly.
 const MAX_HOOK_META_LEN = 64
@@ -12,7 +13,7 @@ export function buildRelayHookEnvelope(
   source: AgentHookSource,
   env?: string,
   version?: string,
-  options: { isReplay?: boolean } = {}
+  options: { isReplay?: boolean; rootReadiness?: PreparationRootReadiness | null } = {}
 ): AgentHookRelayEnvelope {
   return {
     source,
@@ -34,6 +35,7 @@ export function buildRelayHookEnvelope(
     claudeRunningNonAgentTask: event.claudeRunningNonAgentTask,
     ...(event.providerSession ? { providerSession: event.providerSession } : {}),
     ...(event.providerSessionOnly ? { providerSessionOnly: true } : {}),
+    ...(options.rootReadiness ? { rootReadiness: options.rootReadiness } : {}),
     isReplay: options.isReplay === true ? true : undefined,
     env,
     version,

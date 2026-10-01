@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '@/store'
 import { useAllWorktrees, useRepoById, useRepoMap, useWorktreeMap } from '@/store/selectors'
 import type { Worktree } from '../../../../shared/worktree/types'
+import type { RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
 import {
   getCyclicProjectedWorktreeLineageIds,
   getLineageRenderInfo
@@ -78,6 +79,15 @@ export function useWorktreeContextMenuModel({
   )
   const [createGroupDialogOpen, setCreateGroupDialogOpen] = useState(false)
   const createGroupDialogActiveRef = useRef(false)
+  const [preparationOutputOpen, setPreparationOutputOpen] = useState(false)
+  // Why the managing runtime: it holds the archive even for SSH-executed workspaces.
+  const preparationOutputTarget = useMemo<RuntimeClientTarget>(
+    () =>
+      worktree.runtimeOwnerEnvironmentId
+        ? { kind: 'environment', environmentId: worktree.runtimeOwnerEnvironmentId }
+        : { kind: 'local' },
+    [worktree.runtimeOwnerEnvironmentId]
+  )
   const [parentPicker, setParentPicker] = useState<{
     childWorktreeId: string
     anchorElement: HTMLElement
@@ -248,6 +258,7 @@ export function useWorktreeContextMenuModel({
       !lifecycleStartedRef.current ||
       menuOpen ||
       createGroupDialogOpen ||
+      preparationOutputOpen ||
       createGroupDialogActiveRef.current ||
       parentPicker !== null ||
       pendingParentPickerRef.current !== null
@@ -262,7 +273,7 @@ export function useWorktreeContextMenuModel({
       onLifecycleComplete?.()
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [createGroupDialogOpen, menuOpen, onLifecycleComplete, parentPicker])
+  }, [createGroupDialogOpen, menuOpen, onLifecycleComplete, parentPicker, preparationOutputOpen])
 
   useEffect(() => {
     const closeMenu = (): void => setMenuOpenState(false)
@@ -375,6 +386,8 @@ export function useWorktreeContextMenuModel({
     onContextMenuSelect,
     parentPicker,
     parentPickerOpen,
+    preparationOutputOpen,
+    preparationOutputTarget,
     projectGroups,
     ptyIdsByTabId,
     removesProject,
@@ -384,6 +397,7 @@ export function useWorktreeContextMenuModel({
     setDeveloperMenuRevealed,
     setMenuOpenState,
     setMenuPoint,
+    setPreparationOutputOpen,
     sleepLabel,
     sleepableWorktrees,
     subtreeSleepableWorktrees,

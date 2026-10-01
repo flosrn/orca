@@ -11,6 +11,7 @@ import type {
   RuntimeTerminalCreateRequestPayload,
   RuntimeTerminalPresentation
 } from '../../shared/runtime-types'
+import type { PreparationSpawnIntake } from '../../shared/preparation-contracts'
 import type { PreloadApi } from '../api-types'
 
 export const uiTerminalAndSessionTabsApi = {
@@ -101,6 +102,7 @@ export const uiTerminalAndSessionTabsApi = {
       sourceLeafId?: string
       telemetrySource?: TerminalPaneSplitSource
       newLeafId?: string
+      preparation?: PreparationSpawnIntake
     }) => void
   ): (() => void) => {
     const listener = (
@@ -114,6 +116,7 @@ export const uiTerminalAndSessionTabsApi = {
         sourceLeafId?: string
         telemetrySource?: TerminalPaneSplitSource
         newLeafId?: string
+        preparation?: PreparationSpawnIntake
       }
     ) => callback(data)
     ipcRenderer.on('ui:splitTerminal', listener)

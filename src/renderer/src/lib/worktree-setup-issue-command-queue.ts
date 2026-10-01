@@ -1,4 +1,5 @@
 import type { WorktreeSetupLaunch } from '../../../shared/worktree/launch-types'
+import { preparationSpawnIntake } from '../../../shared/preparation-contracts'
 import { buildSetupRunnerCommand } from './setup-runner'
 import { useAppStore } from '@/store'
 import type {
@@ -29,7 +30,9 @@ export function queueSetupAndIssueCommands(
         wrappedSetupCommandStr ??
         setup.command ??
         buildSetupRunnerCommand(setup.runnerScriptPath, setup.shell),
-      env: setup.envVars
+      env: setup.envVars,
+      // Why: only the registered setup carries the role; issue and default-tab commands never do.
+      ...preparationSpawnIntake(setup.preparation, 'preparation')
     }
     if (mode === 'new-tab') {
       const setupTab = store.createTab(worktreeId, undefined, undefined, {

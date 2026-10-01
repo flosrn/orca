@@ -1,5 +1,6 @@
 import { ProjectGroupNameDialog } from './ProjectGroupNameDialog'
 import { WorktreeParentPickerPopover } from './WorktreeParentPickerPopover'
+import { PreparationOutputDialog } from '../preparation-output/preparation-output-dialog'
 import { translate } from '@/i18n/i18n'
 import type { WorktreeContextMenuModel } from './use-worktree-context-menu-model'
 
@@ -27,6 +28,14 @@ export function WorktreeContextMenuOverlays({ model }: { model: WorktreeContextM
           childWorktreeId={model.parentPicker.childWorktreeId}
           anchorElement={model.parentPicker.anchorElement}
           onOpenChange={model.handleParentPickerOpenChange}
+        />
+      ) : null}
+      {model.preparationOutputOpen ? (
+        <PreparationOutputDialog
+          open
+          onOpenChange={model.setPreparationOutputOpen}
+          worktreeId={model.worktree.id}
+          target={model.preparationOutputTarget}
         />
       ) : null}
     </>

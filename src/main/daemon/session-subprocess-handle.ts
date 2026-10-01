@@ -6,6 +6,8 @@ import type { JobTerminationOutcome } from '../windows/windows-pty-job'
 export type SubprocessHandle = {
   pid: number
   processNameIsSpawnFile?: boolean
+  /** True when the host spawned `pid` as the macOS `/usr/bin/login` TCC wrapper around the shell. */
+  rootIsLoginWrapper?: boolean
   inspectChildProcesses?(): PtyChildProcessVerdict
   /** Live foreground process name of the PTY (node-pty's `.process`), e.g.
    *  'claude' / 'codex' / 'zsh'. Null once the child has exited. */

@@ -59,6 +59,8 @@ export type PtySpawnIpcArgs = {
     launch_source?: unknown
     request_kind?: unknown
   }
+  // Why: untrusted IPC; validated before the runtime reserves the pane for a preparation role.
+  preparation?: unknown
 }
 
 export type AdoptStablePaneArgs = {

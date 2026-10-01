@@ -4,6 +4,7 @@ import type { SleepingAgentLaunchConfig } from '../agent-session-resume'
 import type { SetupRunnerShell } from '../setup-runner-command'
 import type { OrcaDefaultTabTemplate } from '../orca-yaml-hook-types'
 import type { TuiAgent } from '../tui-agent'
+import type { PreparationRegistration } from '../preparation-contracts'
 
 export type WorktreeSetupLaunch = {
   runnerScriptPath: string
@@ -11,6 +12,8 @@ export type WorktreeSetupLaunch = {
   shell?: SetupRunnerShell
   command?: string
   waitForAgentStartup?: boolean
+  /** Registered before any spawn; whoever runs this setup binds its pane to it. */
+  preparation?: PreparationRegistration
 }
 
 export type WorktreeStartupLaunch = {

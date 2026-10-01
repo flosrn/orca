@@ -350,4 +350,113 @@ describe('ensureWorktreeHasInitialTerminal', () => {
     })
     expect(store.queueTabSetupSplit).not.toHaveBeenCalled()
   })
+
+  describe('preparation identity', () => {
+    const preparedSetup = {
+      runnerScriptPath: '/tmp/repo/.git/orca/setup-runner.sh',
+      envVars: { ORCA_ROOT_PATH: '/tmp/repo' },
+      preparation: { preparationId: 'prep-1' }
+    }
+    const queuedPreparations = (mock: { mock: { calls: unknown[][] } }): unknown[] =>
+      mock.mock.calls.map(([, queued]) =>
+        queued && typeof queued === 'object' && 'preparation' in queued
+          ? queued.preparation
+          : undefined
+      )
+
+    it('binds the Setup tab and the renderer-created agent tab to their own roles', () => {
+      setSetupScriptLaunchMode('new-tab')
+      let createdIndex = 0
+      const createTab = vi.fn(() => ({ id: `tab-${++createdIndex}` }))
+      const store = createMockStore({ createTab })
+
+      ensureWorktreeHasInitialTerminal(store, 'wt-1', { command: 'claude' }, preparedSetup)
+
+      expect(store.queueTabStartupCommand).toHaveBeenCalledWith('tab-1', {
+        command: 'claude',
+        preparation: { preparationId: 'prep-1', role: 'agent' }
+      })
+      expect(store.queueTabStartupCommand).toHaveBeenCalledWith('tab-2', {
+        command: 'bash /tmp/repo/.git/orca/setup-runner.sh',
+        env: { ORCA_ROOT_PATH: '/tmp/repo' },
+        preparation: { preparationId: 'prep-1', role: 'preparation' }
+      })
+    })
+
+    it('keeps both roles on the sequenced agent and wrapped setup split', () => {
+      setSetupScriptLaunchMode('split-vertical')
+      const store = createMockStore()
+
+      ensureWorktreeHasInitialTerminal(
+        store,
+        'wt-1',
+        { command: 'claude' },
+        { ...preparedSetup, waitForAgentStartup: true }
+      )
+
+      expect(store.queueTabStartupCommand).toHaveBeenCalledWith(
+        'tab-1',
+        expect.objectContaining({ preparation: { preparationId: 'prep-1', role: 'agent' } })
+      )
+      expect(store.queueTabSetupSplit).toHaveBeenCalledWith('tab-1', {
+        command: expect.stringContaining('bash /tmp/repo/.git/orca/setup-runner.sh'),
+        env: { ORCA_ROOT_PATH: '/tmp/repo' },
+        direction: 'vertical',
+        preparation: { preparationId: 'prep-1', role: 'preparation' }
+      })
+    })
+
+    it('queues no intake for a setup the runtime never registered', () => {
+      setSetupScriptLaunchMode('new-tab')
+      let createdIndex = 0
+      const createTab = vi.fn(() => ({ id: `tab-${++createdIndex}` }))
+      const store = createMockStore({ createTab })
+
+      ensureWorktreeHasInitialTerminal(
+        store,
+        'wt-1',
+        { command: 'claude' },
+        {
+          runnerScriptPath: preparedSetup.runnerScriptPath,
+          envVars: preparedSetup.envVars
+        }
+      )
+
+      expect(store.setTabCustomTitle).toHaveBeenCalledWith('tab-2', 'Setup', {
+        recordInteraction: false
+      })
+      expect(queuedPreparations(store.queueTabStartupCommand)).toEqual([undefined, undefined])
+    })
+
+    it('never gives configured default tabs the preparation role', () => {
+      setSetupScriptLaunchMode('new-tab')
+      let createdIndex = 0
+      const createTab = vi.fn(() => ({ id: `tab-${++createdIndex}` }))
+      const store = createMockStore({ createTab })
+
+      ensureWorktreeHasInitialTerminal(store, 'wt-1', undefined, preparedSetup, undefined, {
+        runCommands: true,
+        tabs: [
+          { title: 'Setup', command: 'pnpm install' },
+          { title: 'Server', command: 'pnpm dev' }
+        ]
+      })
+
+      expect(store.queueTabStartupCommand).toHaveBeenCalledWith('tab-1', {
+        command: 'pnpm install'
+      })
+      expect(store.queueTabStartupCommand).toHaveBeenCalledWith('tab-2', { command: 'pnpm dev' })
+      expect(store.queueTabStartupCommand).toHaveBeenCalledWith(
+        'tab-3',
+        expect.objectContaining({
+          preparation: { preparationId: 'prep-1', role: 'preparation' }
+        })
+      )
+      expect(queuedPreparations(store.queueTabStartupCommand)).toEqual([
+        undefined,
+        undefined,
+        { preparationId: 'prep-1', role: 'preparation' }
+      ])
+    })
+  })
 })

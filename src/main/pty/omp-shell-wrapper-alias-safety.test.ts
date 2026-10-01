@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { getPosixOmpShellWrapper } from './omp-shell-wrapper'
+import { getPosixOmpShellWrapper } from '../../shared/omp-shell-wrapper'
 
 const roots: string[] = []
 const zshAvailable = existsSync('/bin/zsh')

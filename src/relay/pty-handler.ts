@@ -83,11 +83,20 @@ import {
   type BatchedForegroundProcessResult
 } from '../main/providers/agent-foreground-process'
 import type { ProcessTableRow } from '../shared/process-table-snapshot'
-import { getStrictProcessTableSnapshotWithAge } from '../shared/process-table-snapshot-reader'
+import {
+  getStrictProcessTableSnapshotStartedAfterRequest,
+  getStrictProcessTableSnapshotWithAge
+} from '../shared/process-table-snapshot-reader'
 import type {
   ForegroundProcessEvidence,
   RemoteForegroundEvidence
 } from '../shared/foreground-process-evidence'
+import {
+  PTY_IDLE_RETIREMENT_VERSION,
+  retainPty,
+  type PtyIdleRetirementResult
+} from '../shared/pty-idle-retirement'
+import { refuteIdleShell, type ProcessTableCapture } from '../main/providers/pty-idle-shell-proof'
 import { expandWindowsPathEnvironmentVariables } from '../shared/windows-environment-expansion'
 import { pruneRetiredPtyIncarnations } from '../shared/retired-pty-incarnations'
 import {
@@ -256,6 +265,14 @@ type ManagedPty = {
    *  (no consumer session, or a revive replaying state some other client serialized), and absence
    *  must never be read as "nobody owns it". */
   ownerClientInstanceId?: string
+  /** Host-side activity revisions fencing `pty.retireIdle` against input, raw output and rebinds
+   *  that land while it inspects the process table. */
+  inputRevision: number
+  outputRevision: number
+  bindRevision: number
+  /** Characters emitted to clients as live data (never replay), matched by `expectedOutputChars`. */
+  emittedOutputChars: number
+  idleRetirementPending?: boolean
 }
 
 type RelayAgentSessionCreateResult = {
@@ -308,6 +325,11 @@ function finishPtyCreationOperations(operations: readonly (() => void)[]): void 
   for (let index = operations.length - 1; index >= 0; index--) {
     operations[index]()
   }
+}
+
+/** A close is already under way, so no further stop may be issued against this PTY. */
+function isTerminating(managed: ManagedPty): boolean {
+  return Boolean(managed.immediateClose || managed.gracefulKillSent || managed.forceKillSent)
 }
 
 function disposeManagedPty(managed: ManagedPty): void {
@@ -951,6 +973,7 @@ export class PtyHandler {
     this.notifyPoolListener(this.ptyPoolActiveListener, 'pty-pool-active')
     const emitIngressData = (emission: PtyIngressEmission): void => {
       const rawLength = emission.rawEndSeq - emission.rawStartSeq
+      managed.emittedOutputChars += emission.data.length
       this.appendReplayBuffer(managed, emission.data)
       this.enqueuePtyOutput(
         managed.id,
@@ -984,6 +1007,7 @@ export class PtyHandler {
       })
     }
     managed.pty.onData((data: string) => {
+      managed.outputRevision += 1
       const startup = managed.startupCommand
       if (startup?.waitForShellReady && startup.outputScanState && !startup.delivered) {
         const scanned = scanShellStartupOutput(startup.outputScanState, data)
@@ -1077,6 +1101,7 @@ export class PtyHandler {
     this.dispatcher.onRequest('pty.spawn', (p, context) => this.spawn(p, context))
     this.dispatcher.onRequest('pty.attach', (p, context) => this.attach(p, context))
     this.dispatcher.onRequest('pty.shutdown', (p, context) => this.shutdown(p, context))
+    this.dispatcher.onRequest('pty.retireIdle', (p, context) => this.retireIdle(p, context))
     this.dispatcher.onRequest('pty.sendSignal', (p) => this.sendSignal(p))
     this.dispatcher.onRequest('pty.getCwd', (p) => this.getCwd(p))
     this.dispatcher.onRequest('pty.getInitialCwd', (p) => this.getInitialCwd(p))
@@ -1091,7 +1116,9 @@ export class PtyHandler {
       agentSessionCreateOperationVersion: AGENT_SESSION_CREATE_OPERATION_PROTOCOL_VERSION,
       // Additive capability: clients may request the no-process-table inventory
       // projection and consume fenced inspect evidence on this host.
-      foregroundProcessEvidenceVersion: 1
+      foregroundProcessEvidenceVersion: 1,
+      // A host without this key has no `pty.retireIdle`; clients retain rather than `shutdown`.
+      idleRetirementVersion: PTY_IDLE_RETIREMENT_VERSION
     }))
     this.dispatcher.onRequest('pty.listProcesses', (params) => this.listProcesses(params))
     this.dispatcher.onRequest('pty.getDefaultShell', async () => resolveDefaultShell())
@@ -1984,6 +2011,10 @@ export class PtyHandler {
       pty: term,
       initialCwd: cwd,
       createdAt: Date.now(),
+      inputRevision: 0,
+      outputRevision: 0,
+      bindRevision: 0,
+      emittedOutputChars: 0,
       ...(ownerClientInstanceId ? { ownerClientInstanceId } : {}),
       buffered: new RecentPtyOutputBuffer({
         preserveChunkBoundaries: false,
@@ -2118,6 +2149,7 @@ export class PtyHandler {
       throw new Error(`PTY "${id}" not found`)
     }
     this.assertPtyNotClosing(managed)
+    managed.bindRevision += 1
     const activation = this.sourcePublication?.activate(
       id,
       managed.incarnationId,
@@ -2187,6 +2219,7 @@ export class PtyHandler {
     }
     const managed = this.ptys.get(id)
     if (managed && !managed.disposed) {
+      managed.inputRevision += 1
       this.lastInputAtByPty.set(id, performance.now())
       this.interactiveOutputCharsByPty.set(id, 0)
       // Relay PTYs need the local provider's cooked-echo containment (#13137).
@@ -2355,14 +2388,141 @@ export class PtyHandler {
     expectedOwnerClientInstanceId: string,
     context: RequestContext | undefined
   ): void {
-    const requester =
-      context === undefined ? null : (this.consumerIdentityResolver?.(context.clientId) ?? null)
-    if (requester !== expectedOwnerClientInstanceId) {
+    if (this.resolveRequester(context) !== expectedOwnerClientInstanceId) {
       throw new Error(`PTY "${id}" stop refused: requester is not the attested owner`)
     }
     if (managed.ownerClientInstanceId !== expectedOwnerClientInstanceId) {
       throw new Error(`PTY "${id}" stop refused: this host attested no such owner`)
     }
+  }
+
+  private isAttestedOwner(
+    managed: ManagedPty,
+    expectedOwnerClientInstanceId: string,
+    context: RequestContext | undefined
+  ): boolean {
+    return (
+      this.resolveRequester(context) === expectedOwnerClientInstanceId &&
+      managed.ownerClientInstanceId === expectedOwnerClientInstanceId
+    )
+  }
+
+  /** The consumer identity this connection authenticates as, or null when it has none. */
+  private resolveRequester(context: RequestContext | undefined): string | null {
+    return context === undefined
+      ? null
+      : (this.consumerIdentityResolver?.(context.clientId) ?? null)
+  }
+
+  /** Host half of automatic preparation retirement: stop only the exact, attested, proven-idle
+   *  incarnation, deciding and signalling in one tick after the capture so nothing the fences
+   *  watch can slip between. */
+  private async retireIdle(
+    params: Record<string, unknown>,
+    context?: RequestContext
+  ): Promise<PtyIdleRetirementResult> {
+    const { id, expectedIncarnationId, expectedOwnerClientInstanceId, expectedOutputChars } = params
+    if (
+      typeof id !== 'string' ||
+      typeof expectedIncarnationId !== 'string' ||
+      expectedIncarnationId.length === 0 ||
+      (expectedOutputChars !== undefined &&
+        !(Number.isSafeInteger(expectedOutputChars) && Number(expectedOutputChars) >= 0))
+    ) {
+      throw new Error('Invalid pty.retireIdle request')
+    }
+    pruneRetiredPtyIncarnations(this.retiredIncarnations)
+    const managed = this.ptys.get(id)
+    if (!managed || managed.disposed) {
+      const tombstone = this.retiredIncarnations.get(id)
+      // An id this map never held is not evidence of exit (docs/reference/ssh-execution-boundary.md).
+      return tombstone?.incarnationId === expectedIncarnationId
+        ? { outcome: 'exited' }
+        : retainPty('unverifiable')
+    }
+    if (managed.incarnationId !== expectedIncarnationId) {
+      return retainPty('incarnation_mismatch')
+    }
+    if (
+      typeof expectedOwnerClientInstanceId !== 'string' ||
+      !this.isAttestedOwner(managed, expectedOwnerClientInstanceId, context)
+    ) {
+      return retainPty('owner_unattested')
+    }
+    if (isTerminating(managed)) {
+      return retainPty('terminating')
+    }
+    if (managed.idleRetirementPending) {
+      return retainPty('retirement_in_progress')
+    }
+    if (expectedOutputChars !== undefined && expectedOutputChars !== managed.emittedOutputChars) {
+      return retainPty('output_advanced')
+    }
+    if (process.platform === 'win32') {
+      // No foreground primitive on an SSH-to-Windows host; see inspectProcess.
+      return retainPty('unverifiable')
+    }
+    const fence = {
+      input: managed.inputRevision,
+      output: managed.outputRevision,
+      bind: managed.bindRevision
+    }
+    managed.idleRetirementPending = true
+    let refusal: PtyIdleRetirementResult | null
+    try {
+      let capture: ProcessTableCapture
+      try {
+        capture = await getStrictProcessTableSnapshotStartedAfterRequest()
+      } catch {
+        return retainPty('unverifiable')
+      }
+      refusal = this.refuteIdleRetirement(managed, expectedIncarnationId, fence, capture)
+    } finally {
+      managed.idleRetirementPending = false
+    }
+    if (refusal) {
+      return refusal
+    }
+    if (this.retirePaneSurface(managed)) {
+      this.armShutdownReapSweep(managed, SHUTDOWN_REAP_MAX_SWEEPS)
+    }
+    this.releaseStartupCommand(managed)
+    this.flushPtyOutput(id)
+    try {
+      await this.closeImmediately(managed)
+    } catch {
+      return { outcome: 'unconfirmed' }
+    }
+    return { outcome: 'stopped' }
+  }
+
+  private refuteIdleRetirement(
+    managed: ManagedPty,
+    expectedIncarnationId: string,
+    fence: { input: number; output: number; bind: number },
+    capture: ProcessTableCapture
+  ): PtyIdleRetirementResult | null {
+    if (
+      this.ptys.get(managed.id) !== managed ||
+      managed.disposed ||
+      managed.incarnationId !== expectedIncarnationId
+    ) {
+      return retainPty('incarnation_mismatch')
+    }
+    if (isTerminating(managed)) {
+      return retainPty('terminating')
+    }
+    if (managed.inputRevision !== fence.input) {
+      return retainPty('input_during_inspection')
+    }
+    if (managed.bindRevision !== fence.bind) {
+      return retainPty('rebind_during_inspection')
+    }
+    if (managed.outputRevision !== fence.output) {
+      return retainPty('output_during_inspection')
+    }
+    const reason = refuteIdleShell(managed.pty.pid, capture)
+    return reason ? retainPty(reason) : null
   }
 
   /** Record that this pane's client surface is gone, and tell the hook server so the pane's cached
@@ -3087,6 +3247,10 @@ export class PtyHandler {
       pty: term,
       initialCwd: entry.cwd,
       createdAt: Date.now(),
+      inputRevision: 0,
+      outputRevision: 0,
+      bindRevision: 0,
+      emittedOutputChars: 0,
       // Deliberately no ownerClientInstanceId: revive replays state a client serialized, which is
       // not this host observing who asked for the shell. Unattested means never swept.
 

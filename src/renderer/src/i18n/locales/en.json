@@ -18451,5 +18451,23 @@
   },
   "common": {
     "retry": "Retry"
+  },
+  "preparationOutput": {
+    "archive": {
+      "host": "Host {{host}}",
+      "complete": "Complete",
+      "durabilityUnproven": "Saved, durability unproven",
+      "redacted": "Secrets redacted"
+    },
+    "unavailable": "Preparation output is unavailable ({{code}}).",
+    "loadingArchive": "Loading archived output…",
+    "emptyOutput": "Preparation output is empty: the preparation succeeded without printing anything.",
+    "loadMore": "Load more",
+    "title": "Preparation output",
+    "description": "Read-only archive of the setup that prepared this workspace.",
+    "loadingList": "Loading preparation output…",
+    "noArchive": "No preparation output is archived for this workspace.",
+    "archiveList": "Preparation runs",
+    "menuItem": "Preparation Output"
   }
 }

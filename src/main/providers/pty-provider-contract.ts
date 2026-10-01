@@ -13,6 +13,10 @@ import type { PtyProcessInfo } from './pty-process-info'
 import type { TerminalExitCause } from '../../shared/terminal-exit-cause'
 import type { TerminalOwner } from '../../shared/terminal-owner'
 import type { WriteSettlement } from '../../shared/pty-write-settlement'
+import type {
+  PtyIdleRetirementRequest,
+  PtyIdleRetirementResult
+} from '../../shared/pty-idle-retirement'
 
 export type {
   PtyBackgroundStreamEvent,
@@ -220,6 +224,10 @@ export type IPtyProvider = {
       expectedOwnerClientInstanceId?: string
     }
   ): Promise<void>
+  /** Automatic-cleanup stop enforced where the PTY runs: the provider stops only the exact,
+   *  proven-idle incarnation and otherwise retains it. Absent means no such enforcement; callers
+   *  must retain the pane and never substitute `shutdown`. */
+  retireIdle?(id: string, request: PtyIdleRetirementRequest): Promise<PtyIdleRetirementResult>
   sendSignal(id: string, signal: string): Promise<void>
   getCwd(id: string): Promise<string>
   getInitialCwd(id: string): Promise<string>

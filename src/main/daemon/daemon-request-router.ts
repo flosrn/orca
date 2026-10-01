@@ -11,6 +11,7 @@ import type { DaemonStreamDataBatcher } from './daemon-stream-data-batcher'
 import type { DaemonTerminalAdmission } from './daemon-terminal-admission'
 import type { TerminalHistorySeedTransferRegistry } from './terminal-history-seed-transfer-registry'
 import type { TerminalHost } from './terminal-host'
+import { DaemonIdleRetirement } from './daemon-idle-retirement'
 import { SessionNotFoundError, type DaemonRequest } from './types'
 
 type DaemonRequestRouterOptions = {
@@ -28,6 +29,8 @@ type DaemonRequestRouterOptions = {
 }
 
 export class DaemonRequestRouter {
+  private readonly idleRetirement = new DaemonIdleRetirement()
+
   constructor(private readonly options: DaemonRequestRouterOptions) {}
 
   async route(clientId: string, request: DaemonRequest): Promise<unknown> {
@@ -92,6 +95,11 @@ export class DaemonRequestRouter {
         )
       case 'kill':
         return this.kill(clientId, request.payload.sessionId, request.payload.immediate)
+      case 'retireIdle':
+        return this.idleRetirement.retire(request.payload, {
+          ...this.options,
+          stop: () => this.kill(clientId, request.payload.sessionId, true)
+        })
       case 'signal':
         this.options.host.signal(request.payload.sessionId, request.payload.signal)
         return {}

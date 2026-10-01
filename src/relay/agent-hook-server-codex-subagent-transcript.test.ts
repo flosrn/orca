@@ -3,8 +3,7 @@ import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { RelayAgentHookServer } from './agent-hook-server'
-import type { AgentHookRelayEnvelope } from '../shared/agent-hook-relay'
+import { RelayAgentHookServer, type RelayHookForward } from './agent-hook-server'
 import { makePaneKey } from '../shared/stable-pane-id'
 
 const PANE_KEY = makePaneKey('tab-1', '11111111-1111-4111-8111-111111111111')
@@ -43,7 +42,7 @@ describe('RelayAgentHookServer Codex subagent transcript polling', () => {
       })
     )
     writeFileSync(childPath, line({ type: 'event_msg', payload: { type: 'task_started' } }))
-    const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
+    const forward = vi.fn<RelayHookForward>()
     const server = new RelayAgentHookServer({ endpointDir: dir, forward })
     await server.start()
     try {

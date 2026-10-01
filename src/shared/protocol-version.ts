@@ -157,6 +157,9 @@ export const AGENT_SESSION_HOST_AUTHORITY_RUNTIME_CAPABILITY =
 export const AGENT_SESSION_KEYBOARD_RUNTIME_CAPABILITY = 'agent-session.keyboard.v1' as const
 export const AGENT_SESSION_OMP_RESUME_PATH_RUNTIME_CAPABILITY =
   'agent-session.omp-resume-path.v1' as const
+// Why: the create-agent-session schema is strict, so clients send a preparation intake only to
+// hosts that advertise this; terminal.create strips unknown fields and needs no gate.
+export const AGENT_SESSION_PREPARATION_RUNTIME_CAPABILITY = 'agent-session.preparation.v1' as const
 // Why: structured sessions are journal-backed, not PTY-backed, so an incapable client must not
 // receive their journal or drive their lifecycle. Mobile may receive a metadata-only placeholder;
 // the host still refuses agentSession.* methods and destructive tab mutations without capability.
@@ -370,6 +373,7 @@ export const RUNTIME_CAPABILITIES = [
   AGENT_SESSION_HOST_AUTHORITY_RUNTIME_CAPABILITY,
   AGENT_SESSION_OMP_RESUME_PATH_RUNTIME_CAPABILITY,
   AGENT_SESSION_KEYBOARD_RUNTIME_CAPABILITY,
+  AGENT_SESSION_PREPARATION_RUNTIME_CAPABILITY,
   STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
   AGENT_SESSION_PENDING_SEND_RESULT_RUNTIME_CAPABILITY,
   STRUCTURED_AGENT_SESSION_HOLD_RUNTIME_CAPABILITY,

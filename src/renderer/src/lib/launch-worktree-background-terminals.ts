@@ -1,7 +1,7 @@
 import {
-  registerEagerPtyBuffer,
-  type EagerPtyHandle
-} from '@/components/terminal-pane/pty-dispatcher'
+  registerBackgroundPaneBuffer,
+  type SpawnedPane
+} from './launch-worktree-background-pane-buffer'
 import { createBrowserUuid } from '@/lib/browser-uuid'
 import { getSettingsForWorktreeRuntimeOwner } from '@/lib/worktree-runtime-owner'
 import { getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
@@ -14,6 +14,10 @@ import {
   buildSetupRunnerCommand,
   getSetupRunnerCommandPlatformForPath
 } from '../../../shared/setup-runner-command'
+import {
+  preparationSpawnIntake,
+  type PreparationSpawnIntake
+} from '../../../shared/preparation-contracts'
 import type { TerminalLayoutSnapshot } from '../../../shared/terminal-tab-types'
 import type {
   WorktreeDefaultTabsLaunch,
@@ -36,6 +40,7 @@ type BackgroundTerminalLaunch = {
   env?: Record<string, string>
   title?: string
   color?: string
+  preparation?: PreparationSpawnIntake
 }
 
 function getSetupTabTitle(): string {
@@ -87,43 +92,6 @@ function buildSplitLayout(
   }
 }
 
-function persistExitedPaneOutput(tabId: string, leafId: string, output: string): void {
-  const store = useAppStore.getState()
-  const layout = store.terminalLayoutsByTabId[tabId]
-  if (!layout) {
-    return
-  }
-  const { ptyIdsByLeafId: existingPtyIds, buffersByLeafId: existingBuffers, ...rest } = layout
-  const nextPtyIds = { ...existingPtyIds }
-  delete nextPtyIds[leafId]
-  const trimmedOutput = output.trim() ? output : ''
-  store.setTabLayout(tabId, {
-    ...rest,
-    ...(Object.keys(nextPtyIds).length > 0 ? { ptyIdsByLeafId: nextPtyIds } : {}),
-    ...(trimmedOutput
-      ? {
-          buffersByLeafId: {
-            ...existingBuffers,
-            [leafId]: output
-          }
-        }
-      : existingBuffers
-        ? { buffersByLeafId: existingBuffers }
-        : {})
-  })
-}
-
-// Why the incarnation: a relay-recycled id can hold the previous owner's exit, and draining that
-// into this handler tears the pane down seconds after it launched.
-function registerBackgroundPaneBuffer(tabId: string, leafId: string, pane: SpawnedPane): void {
-  let eagerBuffer: EagerPtyHandle | null = null
-  const onExit = (exitPtyId: string): void => {
-    persistExitedPaneOutput(tabId, leafId, eagerBuffer?.flush() ?? '')
-    useAppStore.getState().clearTabPtyId(tabId, exitPtyId)
-  }
-  eagerBuffer = registerEagerPtyBuffer(pane.ptyId, onExit, pane.incarnationId)
-}
-
 function buildSetupCommand(setup: WorktreeSetupLaunch): string {
   // Why: background setup tabs can launch later, so they must reuse the same shell chosen when the runner was written.
   return buildSetupRunnerCommand(
@@ -133,9 +101,6 @@ function buildSetupCommand(setup: WorktreeSetupLaunch): string {
   )
 }
 
-/** The id a background pane got, plus which lifetime of it this spawn owns. */
-type SpawnedPane = { ptyId: string; incarnationId?: string }
-
 async function spawnPane(args: {
   worktree: Worktree
   connectionId: string | null
@@ -143,6 +108,7 @@ async function spawnPane(args: {
   leafId: string
   command?: string
   env?: Record<string, string>
+  preparation?: PreparationSpawnIntake
 }): Promise<SpawnedPane> {
   const result = await window.api.pty.spawn({
     cols: 120,
@@ -153,7 +119,8 @@ async function spawnPane(args: {
     connectionId: args.connectionId,
     worktreeId: args.worktree.id,
     tabId: args.tabId,
-    leafId: args.leafId
+    leafId: args.leafId,
+    ...(args.preparation ? { preparation: args.preparation } : {})
   })
   return {
     ptyId: result.id,
@@ -188,7 +155,8 @@ async function createBackgroundTab(args: {
       tabId: tab.id,
       leafId,
       command: args.launch.command,
-      env: args.launch.env
+      env: args.launch.env,
+      ...(args.launch.preparation ? { preparation: args.launch.preparation } : {})
     })
   } catch (error) {
     store.closeTab(tab.id, { recordInteraction: false, reason: 'cleanup' })
@@ -224,7 +192,8 @@ async function addSetupSplit(args: {
     tabId: args.tab.tabId,
     leafId: setupLeafId,
     command: buildSetupCommand(args.setup),
-    env: args.setup.envVars
+    env: args.setup.envVars,
+    ...preparationSpawnIntake(args.setup.preparation, 'preparation')
   })
   if (
     await retireUnownedTerminal({
@@ -319,7 +288,8 @@ export async function launchWorktreeBackgroundTerminals(
       launch: {
         title: getSetupTabTitle(),
         command: buildSetupCommand(args.setup),
-        env: args.setup.envVars
+        env: args.setup.envVars,
+        ...preparationSpawnIntake(args.setup.preparation, 'preparation')
       }
     })
   }

@@ -7,6 +7,7 @@ import { shouldAutoCreateInitialTerminal } from '@/components/terminal/initial-t
 import { createSequencedSetupAgentCommands } from '../../../shared/setup-agent-sequencing'
 import { getSetupRunnerCommandPlatformForPath } from '../../../shared/setup-runner-command'
 import { agentKindToTuiAgent } from '../../../shared/agent-kind'
+import { preparationSpawnIntake } from '../../../shared/preparation-contracts'
 import { useAppStore } from '@/store'
 import { queueHookCommandsForFirstWorktreeTab } from '@/lib/hook-command-delayed-delivery'
 import { resolveWorkspaceTerminalHostAuthority } from '@/lib/workspace-terminal-host-authority'
@@ -254,7 +255,11 @@ export function ensureWorktreeHasInitialTerminal(
         sequencedStartup.sessionOptions
       )
     }
-    store.queueTabStartupCommand(terminalTab.id, sequencedStartup)
+    // Why: this renderer-created tab is the creation's agent, so it binds the agent role.
+    store.queueTabStartupCommand(terminalTab.id, {
+      ...sequencedStartup,
+      ...preparationSpawnIntake(setup?.preparation, 'agent')
+    })
   }
   queueSetupAndIssueCommands(
     store,

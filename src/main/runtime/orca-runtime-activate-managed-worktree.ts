@@ -29,8 +29,10 @@ import {
   pasteWorktreeStartupDraftWhenReady,
   sendWorktreeStartupFollowupWhenReady
 } from './runtime-worktree-startup-readiness'
-import type { CreateWorktreeResult } from '../../shared/worktree/create-types'
-import { provisionWorktreeTerminals } from './runtime-worktree-terminal-provisioning'
+import {
+  provisionWorktreeTerminals,
+  type WorktreeTerminalProvisioningArgs
+} from './runtime-worktree-terminal-provisioning'
 
 export class OrcaRuntimeWithActivateManagedWorktree extends OrcaRuntimeWithListManagedWorktrees {
   async activateManagedWorktree(
@@ -207,25 +209,10 @@ export class OrcaRuntimeWithActivateManagedWorktree extends OrcaRuntimeWithListM
     sendWorktreeStartupFollowupWhenReady(this.getWorktreeStartupReadinessHost(), handle, followup)
   }
 
-  protected async provisionManagedWorktreeTerminals(args: {
-    worktreeSelector: string
-    worktreeId: string
-    worktreePath: string
-    setup?: CreateWorktreeResult['setup']
-    defaultTabs?: CreateWorktreeResult['defaultTabs']
-    primaryTerminalHandle?: string | null
-    hasStartupTerminal: boolean
-    setupCommandPlatform: 'windows' | 'posix'
-    observeSetupCompletion?: boolean
-    // Why: when the agent startup is sequenced to wait for setup
-    // (waitForAgentStartup), the startup PTY runs a wrapper that already embeds
-    // the setup command. Pass that wrapped command through so the Setup tab runs
-    // the same script the agent is waiting on instead of a bare runner.
-    wrappedSetupCommand?: string
-    // Why: a workspace provisioned in the background must not pull the sidebar
-    // to itself; the user never asked to look at these tabs.
-    surfaceOwner?: false
-  }): Promise<{ setupSpawned: boolean; setupTerminalHandle: string | null }> {
+  /** Shared by runtime-managed and manual desktop creation so every Setup pane is observed alike. */
+  async provisionManagedWorktreeTerminals(
+    args: WorktreeTerminalProvisioningArgs
+  ): Promise<{ setupSpawned: boolean; setupTerminalHandle: string | null }> {
     return provisionWorktreeTerminals(this.getWorktreeTerminalProvisioningHost(), args)
   }
 }

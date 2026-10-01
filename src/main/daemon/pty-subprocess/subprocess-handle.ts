@@ -70,6 +70,7 @@ export function createDaemonPtySubprocessHandle(args: {
   return {
     pid: proc.pid,
     processNameIsSpawnFile: ptyProcessNameIsSpawnFile(proc),
+    ...(reportsChildExitStatus ? {} : { rootIsLoginWrapper: true }),
     ...(process.platform === 'win32'
       ? { inspectChildProcesses: () => inspectSpawnFileWindowsChildProcesses(proc) }
       : {}),

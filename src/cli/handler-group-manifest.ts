@@ -189,6 +189,11 @@ export const HANDLER_GROUPS: readonly HandlerGroup[] = [
     load: async () => (await import('./handlers/profile-state.js')).PROFILE_STATE_HANDLERS
   },
   {
+    name: 'preparation',
+    keys: ['preparation output list', 'preparation output read'],
+    load: async () => (await import('./handlers/preparation.js')).PREPARATION_HANDLERS
+  },
+  {
     name: 'diagnostics',
     keys: ['diagnostics memory'],
     load: async () => (await import('./handlers/diagnostics.js')).DIAGNOSTICS_HANDLERS

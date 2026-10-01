@@ -410,6 +410,10 @@ import {
   PreflightDetectRemoteWindowsTerminalCapabilities
 } from './preflight-params'
 import {
+  PreparationOutputListParams,
+  PreparationOutputReadParams
+} from './preparation-output-params'
+import {
   ProjectHostSetupClone,
   ProjectHostSetupCreate,
   ProjectHostSetupDelete,
@@ -1032,6 +1036,8 @@ export const RPC_PARAMS_BY_METHOD = {
   'preflight.detectRemoteWindowsTerminalCapabilities':
     PreflightDetectRemoteWindowsTerminalCapabilities,
   'preflight.refreshAgents': null,
+  'preparation.output.list': PreparationOutputListParams,
+  'preparation.output.read': PreparationOutputReadParams,
   'project.list': null,
   'project.update': ProjectUpdate,
   'projectGroup.create': ProjectGroupCreate,

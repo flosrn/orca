@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { RelayAgentHookServer } from '../../relay/agent-hook-server'
+import { RelayAgentHookServer, type RelayHookForward } from '../../relay/agent-hook-server'
 import { seedLegacyAgentStatusForTests } from '../../shared/agent-hook-listener/listener-state'
 import { seedClaudeSubagentRosterFromSnapshots } from '../../shared/agent-hook-listener/providers/claude-roster-state'
 import type { AgentHookEventPayload } from '../../shared/agent-hook-listener/listener-event'
@@ -209,7 +209,7 @@ describe('manual Claude compact hook stream', () => {
 
   it('forwards the completion over the relay and preserves its cached compact identity', async () => {
     const main = new AgentHookServer()
-    const forwarded: AgentHookRelayEnvelope[] = []
+    const forwarded: Parameters<RelayHookForward>[0][] = []
     const emitted: string[] = []
     const endpointDir = mkdtempSync(join(tmpdir(), 'orca-compact-relay-'))
     temporaryPaths.push(endpointDir)
@@ -255,7 +255,7 @@ describe('manual Claude compact hook stream', () => {
 
   it('forwards the completion from a relay whose cache is cold, and the client still guards it', async () => {
     const main = new AgentHookServer()
-    const forwarded: AgentHookRelayEnvelope[] = []
+    const forwarded: Parameters<RelayHookForward>[0][] = []
     const endpointDir = mkdtempSync(join(tmpdir(), 'orca-compact-cold-'))
     temporaryPaths.push(endpointDir)
     // A relay that restarted while the agent session kept running: hooks resolve the endpoint file

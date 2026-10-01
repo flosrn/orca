@@ -37,6 +37,7 @@ import type {
   SessionTabCloseRequest,
   SessionTabCloseResponse
 } from '../../shared/session-tab-close'
+import type { PreparationSpawnIntake } from '../../shared/preparation-contracts'
 
 export type CloseActiveTabPayload = { sourceId: string }
 
@@ -188,6 +189,7 @@ export type UiCommandEventApi = {
       sourceLeafId?: string
       telemetrySource?: TerminalPaneSplitSource
       newLeafId?: string
+      preparation?: PreparationSpawnIntake
     }) => void
   ) => () => void
   onRenameTerminal: (
@@ -238,6 +240,10 @@ export type UiCommandEventApi = {
   respondMobileMarkdownRequest: (response: RuntimeMobileMarkdownResponse) => void
   onCloseTerminal: (
     callback: (data: { tabId: string; paneRuntimeId?: number }) => void
+  ) => () => void
+  /** Optional: an older preload lacks it, and its renderer then keeps the pane. */
+  onRetireTerminalSurface?: (
+    callback: (data: { tabId: string; leafId: string; ptyId: string }) => void
   ) => () => void
   onTerminalTabCloseRequest: (callback: (request: TerminalTabCloseRequest) => void) => () => void
   respondTerminalTabClose: (response: TerminalTabCloseResponse) => void

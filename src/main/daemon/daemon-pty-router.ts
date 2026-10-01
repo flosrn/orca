@@ -13,6 +13,11 @@ import { shouldHandoffDaemonHistory } from './daemon-history-handoff'
 import type { DaemonPtyRouterDataEvent, DaemonPtyRouterExitEvent } from './daemon-pty-router-events'
 import { DaemonSessionOwnerResolver } from './daemon-session-owner-resolution'
 import type { WriteSettlement } from '../../shared/pty-write-settlement'
+import {
+  retainPty,
+  type PtyIdleRetirementRequest,
+  type PtyIdleRetirementResult
+} from '../../shared/pty-idle-retirement'
 
 export class DaemonPtyRouter implements IPtyProvider {
   private current: DaemonPtyAdapter
@@ -183,6 +188,24 @@ export class DaemonPtyRouter implements IPtyProvider {
     options?: { expectedIncarnationId?: string; steadyState?: boolean }
   ): Promise<PtyProcessInspection> {
     return this.adapterForInspection(id).inspectProcess(id, options)
+  }
+
+  async retireIdle(
+    id: string,
+    request: PtyIdleRetirementRequest
+  ): Promise<PtyIdleRetirementResult> {
+    let adapter: DaemonPtyAdapter
+    try {
+      adapter = this.adapterForInspection(id)
+    } catch {
+      // No daemon route holds this session; asking the wrong daemon could never prove anything.
+      return retainPty('unverifiable')
+    }
+    const result = await adapter.retireIdle(id, request)
+    if (result.outcome === 'stopped' && this.sessionAdapters.get(id) === adapter) {
+      this.ownerResolver.forgetRoute(id, adapter)
+    }
+    return result
   }
 
   async confirmForegroundProcess(id: string): Promise<string | null> {

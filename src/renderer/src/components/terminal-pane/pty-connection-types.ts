@@ -18,6 +18,7 @@ import type { PtyTransportRecoveryState } from './pty-transport-types'
 import type { SessionOptionValue } from '../../../../shared/native-chat-session-options'
 import type { DirectSshPaneRetryAttemptId } from '@/store/slices/direct-ssh-terminal-recovery'
 import type { PtyPreconnectInputEntry } from './pty-preconnect-input-buffer'
+import type { PreparationSpawnIntake } from '../../../../shared/preparation-contracts'
 
 export type PtyPaneStartup = {
   command: string
@@ -44,6 +45,8 @@ export type PtyPaneStartup = {
   showSessionRestoredBanner?: boolean
   /** Initial startup may be paired with a setup split that changes its grid. */
   waitForSetupSplitDirection?: SetupSplitDirection
+  /** Preparation role carried only by this pane's first fresh spawn request. */
+  preparation?: PreparationSpawnIntake
 } | null
 
 export type PaneProcessExit = {

@@ -2,6 +2,7 @@
 import { OrcaRuntimeWithStopExplicitlyClosedTabPtys } from './orca-runtime-stop-explicitly-closed-tab-ptys'
 import type { TerminalPaneSplitSource } from '../../shared/feature-education-telemetry'
 import type { RuntimeTerminalSplit } from '../../shared/runtime-types'
+import type { PreparationSpawnIntake } from '../../shared/preparation-contracts'
 import { randomUUID } from 'node:crypto'
 
 export class OrcaRuntimeWithSplitTerminal extends OrcaRuntimeWithStopExplicitlyClosedTabPtys {
@@ -17,6 +18,7 @@ export class OrcaRuntimeWithSplitTerminal extends OrcaRuntimeWithStopExplicitlyC
       // workspace, for splits the user never asked to see.
       surfaceOwner?: false
       telemetrySource?: TerminalPaneSplitSource
+      preparation?: PreparationSpawnIntake
     } = {}
   ): Promise<RuntimeTerminalSplit> {
     const livePty = this.getLivePtyForHandle(handle)
@@ -35,7 +37,8 @@ export class OrcaRuntimeWithSplitTerminal extends OrcaRuntimeWithStopExplicitlyC
       worktreeId: leaf.worktreeId,
       sourceLeafId: leaf.leafId,
       telemetrySource: opts.telemetrySource,
-      newLeafId
+      newLeafId,
+      ...(opts.preparation ? { preparation: opts.preparation } : {})
     })
 
     const newHandle = await this.waitForLeafInTab(leaf.tabId, newLeafId)

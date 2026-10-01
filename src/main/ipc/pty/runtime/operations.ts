@@ -12,6 +12,7 @@ import {
   writeUnverifiable,
   type WriteSettlement
 } from '../../../../shared/pty-write-settlement'
+import { notePtyInput } from '../delivery/input-revision'
 
 export function writePtyFromRuntimeController(ptyId: string, data: string): boolean
 export function writePtyFromRuntimeController(
@@ -30,6 +31,7 @@ export function writePtyFromRuntimeController(
   } catch {
     return options?.waitForSettlement ? writeRefused('provider_unavailable') : false
   }
+  notePtyInput(ptyId)
   if (options?.waitForSettlement) {
     // A provider that cannot settle says so before any effect; synthesizing acceptance
     // from the fire-and-forget write is what cleared durable mailbox reservations.

@@ -235,6 +235,9 @@ export const MOBILE_RPC_METHOD_ALLOWLIST = new Set([
   'nativeChat.readSession',
   'nativeChat.subscribe',
   'nativeChat.unsubscribe',
+  // Read-only: committed preparation archives, never a live PTY.
+  'preparation.output.list',
+  'preparation.output.read',
   'settings.get',
   'settings.getTerminalQuickCommands',
   'settings.mutateNativeChatSessionOptions',

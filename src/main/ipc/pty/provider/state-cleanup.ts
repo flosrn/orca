@@ -26,6 +26,7 @@ import {
   rendererVisibilityKnownPtys,
   visibleRendererPtys
 } from '../delivery/visibility-state'
+import { forgetPtyInputRevision } from '../delivery/input-revision'
 
 /**
  * Tear down per-PTY provider-scoped state.
@@ -54,6 +55,7 @@ export function clearProviderPtyState(
   ptySizes.delete(id)
   ptyIncarnationById.delete(id)
   lastInputAtByPty.delete(id)
+  forgetPtyInputRevision(id)
   interactiveOutputCharsByPty.delete(id)
   const activeChanged = activeRendererPtys.delete(id)
   visibleRendererPtys.delete(id)

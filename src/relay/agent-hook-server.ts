@@ -32,6 +32,7 @@ import {
   isAgentHookSource,
   REMOTE_AGENT_HOOK_ENV,
   type AgentHookRelayEnvelope,
+  type AgentHookRelayReadinessEnvelope,
   type AgentHookSource
 } from '../shared/agent-hook-relay'
 import {
@@ -41,10 +42,14 @@ import {
 } from '../shared/agent-hook-spool'
 import { buildRelayHookPtyEnv, defaultEndpointDir } from './agent-hook-endpoint-coordinates'
 import { buildRelayHookEnvelope, hookBodyEnv, hookBodyVersion } from './agent-hook-envelope-build'
+import { forwardReadinessOnly, readRelayRootReadiness } from './agent-hook-root-readiness'
+import { listenOnLoopback } from './agent-hook-loopback-listen'
 import { AgentHookResultRetryScheduler } from './agent-hook-result-retry-scheduler'
 import { MAX_CACHED_PANES, selectReplayableCachedPanes } from './agent-hook-cached-pane-status'
 
-export type RelayHookForward = (envelope: AgentHookRelayEnvelope) => void
+export type RelayHookForward = (
+  envelope: AgentHookRelayEnvelope | AgentHookRelayReadinessEnvelope
+) => void
 
 export type RelayHookServerOptions = {
   /** Where to put endpoint.env / endpoint.cmd. Defaults to `$HOME/.orca-relay/agent-hooks`. */
@@ -152,30 +157,16 @@ export class RelayAgentHookServer {
     return this.portFallbackApplied
   }
 
-  private listenOn(port: number): Promise<void> {
-    this.server = createServer((req, res) => this.handleRequest(req, res))
-    return new Promise<void>((resolve, reject) => {
-      const onStartupError = (err: Error): void => {
-        this.server?.off('listening', onListening)
-        // Why: clear failed server refs so later start() calls can retry.
-        this.server = null
-        reject(err)
-      }
-      const onListening = (): void => {
-        this.server?.off('error', onStartupError)
-        this.server?.on('error', (err) => {
-          process.stderr.write(`[relay-hook-server] server error: ${err.message}\n`)
-        })
-        const address = this.server!.address()
-        if (address && typeof address === 'object') {
-          this.port = address.port
-        }
-        resolve()
-      }
-      this.server!.once('error', onStartupError)
-      // Why: loopback only — reachable by the in-box agent CLI (127.0.0.1), not from outside the box.
-      this.server!.listen(port, '127.0.0.1', onListening)
-    })
+  private async listenOn(port: number): Promise<void> {
+    const server = createServer((req, res) => this.handleRequest(req, res))
+    this.server = server
+    try {
+      this.port = (await listenOnLoopback(server, port)) ?? this.port
+    } catch (err) {
+      // Why: clear failed server refs so later start() calls can retry.
+      this.server = null
+      throw err
+    }
   }
 
   publishEndpointFile(): boolean {
@@ -278,13 +269,22 @@ export class RelayAgentHookServer {
       const event = normalizeHookPayload(this.state, source, hookBody, this.env, {
         deferCompactOwnershipToClient: true
       })
+      const rootReadiness = readRelayRootReadiness(hookBody)
       if (event) {
         // TODO: once normalizeHookPayload returns validated env/version, drop bodyEnv/bodyVersion and source them from the listener result.
         const env = hookBodyEnv(hookBody)
         const version = hookBodyVersion(hookBody)
-        this.applyEvent(event, source, env, version)
+        this.applyEvent(event, source, env, version, { rootReadiness })
         this.retryScheduler.scheduleAssistantMessageRetry(source, hookBody, event, env, version)
         this.retryScheduler.scheduleTranscriptPoll(source, hookBody, event, env, version)
+      } else if (rootReadiness) {
+        forwardReadinessOnly(
+          hookBody,
+          source,
+          rootReadiness,
+          this.forward,
+          this.isPaneSurfaceRetired
+        )
       }
       res.writeHead(204)
       res.end()
@@ -308,7 +308,7 @@ export class RelayAgentHookServer {
     source: AgentHookSource,
     env?: string,
     version?: string,
-    options: { isReplay?: boolean } = {}
+    options: Parameters<typeof buildRelayHookEnvelope>[4] = {}
   ): void {
     // Why: this post came from a process still running inside a pane whose tab the user closed.
     // Caching or forwarding it makes every connected client advertise a live, resumable agent pane

@@ -10,6 +10,7 @@ import type { StablePaneOwner } from '../pane/stable-owner'
 import type { PaneSpawnReservation } from '../pane/spawn-reservation'
 import { localProvider } from '../provider/registry'
 import type { AdoptStablePaneResult, PtySpawnIpcArgs, PtySpawnIpcDeps } from './spawn-types'
+import type { PreparationSpawnIntake } from '../../../../shared/preparation-contracts'
 
 export type PtyIpcSpawnState = {
   deps: PtySpawnIpcDeps
@@ -83,6 +84,8 @@ export type PtyIpcSpawnState = {
   sessionSizeBeforeAttach: { cols: number; rows: number } | undefined
   initiallyHidden: boolean
   preSpawnHiddenMarkId: string | null
+  /** Runtime reservation this spawn holds for a preparation role until bound or released. */
+  preparationReservation: { intake: PreparationSpawnIntake; handle: string } | null
 }
 
 export function createPtyIpcSpawnState(
@@ -156,6 +159,7 @@ export function createPtyIpcSpawnState(
     hadSessionSizeBeforeAttach: false,
     sessionSizeBeforeAttach: undefined,
     initiallyHidden: false,
-    preSpawnHiddenMarkId: null
+    preSpawnHiddenMarkId: null,
+    preparationReservation: null
   }
 }

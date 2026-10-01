@@ -8,6 +8,7 @@ import { executePtyIpcSpawn } from './spawn-execute'
 import { commitPtyIpcSpawn } from './spawn-commit'
 import { createPtyIpcSpawnState, type PtyIpcSpawnState } from './spawn-state'
 import { triggerPtySpawnPushTargetMaterialization } from './spawn-push-target-materialization'
+import { releasePtyIpcSpawnPreparation, reservePtyIpcSpawnPreparation } from './spawn-preparation'
 import type { PtySpawnIpcArgs, PtySpawnIpcDeps } from './spawn-types'
 
 function releaseAbandonedAgentTeamsLeader(ctx: PtyIpcSpawnState): void {
@@ -65,6 +66,7 @@ export async function runPtyIpcSpawn(deps: PtySpawnIpcDeps, args: PtySpawnIpcArg
       releaseAbandonedAgentTeamsLeader(ctx)
       return earlyReserved
     }
+    reservePtyIpcSpawnPreparation(ctx)
     await executePtyIpcSpawn(ctx)
     return await commitPtyIpcSpawn(ctx)
   } catch (err) {
@@ -88,6 +90,7 @@ export async function runPtyIpcSpawn(deps: PtySpawnIpcDeps, args: PtySpawnIpcArg
     rejectPaneSpawnReservation(ctx.paneSpawnReservationKey, ctx.paneSpawnReservation, err)
     throw err
   } finally {
+    releasePtyIpcSpawnPreparation(ctx)
     ctx.releaseWorktreeSpawn?.()
     ctx.finishTerminalInstall()
   }

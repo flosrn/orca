@@ -14,6 +14,7 @@ import { pruneWorktreePRRefreshAliases } from '../../../github/pr-refresh-coordi
 import { recordWorkspaceCleanupRemovalSnapshotPrune } from '../../../workspace-cleanup-removal-snapshot-prune'
 import { pruneWorkspaceCleanupScanSnapshot } from '../../../workspace-cleanup-scan-snapshot'
 import { pruneWorkspaceSpaceAnalysisSnapshot } from '../../../workspace-space-analysis-snapshot'
+import { purgeDeletedWorktreePreparationGeneration } from '../../../runtime/preparation/preparation-output-runtime'
 
 export async function stopPtysForDestructiveWorktreeRemoval(
   runtime: OrcaRuntimeService,
@@ -73,9 +74,22 @@ export function removeWorktreeMetadataAndTransientState(
   store: Store,
   worktreeId: string,
   hostId?: ExecutionHostId,
-  snapshotPruneBatchId?: string
+  snapshotPruneBatchId?: string,
+  /** Only a successful deletion purges; forgetting a worktree leaves its preparation archives. */
+  options: { purgePreparationArchives?: boolean } = {}
 ): void {
   const persistedHostId = store.getWorktreeMeta(worktreeId)?.hostId
+  const removedHostId = hostId ?? persistedHostId
+  // Why before the meta row goes: host + instance id is the only exact generation key, never the path.
+  const removedMeta = removedHostId
+    ? store.getWorktreeMetaForHost(worktreeId, removedHostId)
+    : undefined
+  if (options.purgePreparationArchives !== false && removedHostId && removedMeta?.instanceId) {
+    purgeDeletedWorktreePreparationGeneration({
+      host: removedHostId,
+      instanceId: removedMeta.instanceId
+    })
+  }
   const repoId = getRepoIdFromWorktreeId(worktreeId)
   const preservesSameIdOwner = Boolean(
     hostId &&

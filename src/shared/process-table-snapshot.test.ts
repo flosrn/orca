@@ -6,11 +6,12 @@ const { execFileMock } = vi.hoisted(() => ({ execFileMock: vi.fn() }))
 
 vi.mock('node:child_process', () => ({ execFile: execFileMock }))
 
+import { createProcessTableSnapshotReader } from './process-table-snapshot-cache'
 import {
-  createProcessTableSnapshotReader,
   getProcessTableSnapshot,
   getStrictProcessTableSnapshot,
   getStrictProcessTableSnapshotWithAge,
+  getStrictProcessTableSnapshotStartedAfterRequest,
   PROCESS_TABLE_EVIDENCE_BUDGET_MS,
   PS_MAX_BUFFER_BYTES,
   PS_TIMEOUT_MS,
@@ -26,6 +27,7 @@ import {
   getProcessTableIndex,
   type ProcessTableIndexStats
 } from './process-table-index'
+import { RELAY_PTY_SWEEP_MAX_EVIDENCE_AGE_MS } from './ssh-relay-pty-ownership-proof'
 
 function deferred<T>(): {
   promise: Promise<T>
@@ -735,5 +737,96 @@ describe('evidence-publishing capture budget', () => {
     // A slow capture must still not read as an absent process; only the consumers that need the
     // observation to describe NOW gave up waiting for it.
     expect(PROCESS_TABLE_EVIDENCE_BUDGET_MS).toBeLessThan(PS_TIMEOUT_MS)
+  })
+})
+
+/**
+ * An automatic retirement authorizes an irreversible stop from "nothing ran after the fence". A
+ * capture shared from before the fence cannot say that: in a real SSH run the setup runner's final
+ * `sleep 1` was still in a TTL-shared table read after the runner had exited, so the idle shell was
+ * judged busy — and the same sharing could equally hide work started just before the fence.
+ */
+describe('capture that authorizes a retirement stop', () => {
+  const RUNNER = '1 0 1 1 S+ ?? Jan 1 00:00:00 2026 bash setup-runner.sh\n'
+  const IDLE = '1 0 1 1 S+ ?? Jan 1 00:00:00 2026 bash\n'
+
+  beforeEach(() => {
+    execFileMock.mockReset()
+    resetProcessTableSnapshotForTests()
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function psAnswering(stdout: () => string, durationMs = 10): void {
+    execFileMock.mockImplementation(
+      (_command: string, _args: string[], _options: unknown, callback: unknown) => {
+        const done = callback as (err: unknown, result: { stdout: string; stderr: string }) => void
+        const answer = stdout()
+        setTimeout(() => done(null, { stdout: answer, stderr: '' }), durationMs)
+      }
+    )
+  }
+
+  /** Whether the capture still shows the setup runner that `RUNNER` described. */
+  const showsRunner = (capture: { rows: { command: string }[] }): boolean =>
+    capture.rows.some((row) => row.command.endsWith('setup-runner.sh'))
+
+  it('never answers from a table another reader captured before the request', async () => {
+    let table = RUNNER
+    psAnswering(() => table)
+    const shared = getStrictProcessTableSnapshotWithAge()
+    await vi.advanceTimersByTimeAsync(10)
+    expect(showsRunner(await shared)).toBe(true)
+
+    table = IDLE
+    const authorizing = getStrictProcessTableSnapshotStartedAfterRequest()
+    await vi.advanceTimersByTimeAsync(10)
+
+    expect(showsRunner(await authorizing)).toBe(false)
+  })
+
+  it('never joins a scan that was already running when it was requested', async () => {
+    let table = RUNNER
+    psAnswering(() => table, 50)
+    const inFlight = getStrictProcessTableSnapshotWithAge()
+    await vi.advanceTimersByTimeAsync(10)
+
+    table = IDLE
+    const authorizing = getStrictProcessTableSnapshotStartedAfterRequest()
+    await vi.advanceTimersByTimeAsync(100)
+
+    expect(showsRunner(await inFlight)).toBe(true)
+    const capture = await authorizing
+    expect(showsRunner(capture)).toBe(false)
+    // Its age counts from the request, so the evidence bound still covers the scan's own duration.
+    expect(capture.capturedAgeMs).toBeGreaterThanOrEqual(50)
+  })
+
+  it('waits for a full capture as long as the stop could still accept its age', async () => {
+    // A whole-machine `ps` with `command=` routinely outlasts the 1,200ms publishing budget on an
+    // ordinary laptop; the fence's age runs from the request, so only the stop's own bound applies.
+    const durationMs = RELAY_PTY_SWEEP_MAX_EVIDENCE_AGE_MS - 1
+    psAnswering(() => IDLE, durationMs)
+    const authorizing = getStrictProcessTableSnapshotStartedAfterRequest()
+
+    await vi.advanceTimersByTimeAsync(durationMs)
+
+    expect(PROCESS_TABLE_EVIDENCE_BUDGET_MS).toBeLessThan(durationMs)
+    expect((await authorizing).capturedAgeMs).toBe(durationMs)
+  })
+
+  it('gives up once the capture could no longer authorize the stop', async () => {
+    psAnswering(() => IDLE, RELAY_PTY_SWEEP_MAX_EVIDENCE_AGE_MS + 1)
+    const settled = getStrictProcessTableSnapshotStartedAfterRequest().then(
+      () => 'resolved',
+      (error: Error) => error.message
+    )
+
+    await vi.advanceTimersByTimeAsync(RELAY_PTY_SWEEP_MAX_EVIDENCE_AGE_MS)
+
+    expect(await settled).toBe('process table unreadable: capture_over_budget')
   })
 })

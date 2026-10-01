@@ -1,11 +1,46 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { createAgentStatusExtensionHarness } from './agent-status-extension-test-harness'
+import {
+  createAgentStatusExtensionHarness,
+  resolveStatusModule
+} from './agent-status-extension-test-harness'
+import { getPiAgentStatusExtensionSource } from './agent-status-extension-source'
 
 function postedHookNames(fetchMock: ReturnType<typeof vi.fn>): string[] {
   return fetchMock.mock.calls.map(
     (call) => JSON.parse(String(call[1]?.body)).payload.hook_event_name as string
   )
+}
+
+type AuthenticatedStatusPost = {
+  url: unknown
+  token: unknown
+  launchToken: unknown
+  payload: Record<string, unknown>
+}
+
+function authenticatedPosts(calls: readonly (readonly unknown[])[]): AuthenticatedStatusPost[] {
+  return calls.map((call) => {
+    const init = call[1]
+    const headers = init && typeof init === 'object' && 'headers' in init ? init.headers : undefined
+    const rawBody = init && typeof init === 'object' && 'body' in init ? init.body : undefined
+    const parsed: unknown = JSON.parse(String(rawBody))
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: these calls are the extension's JSON.stringify hook posts.
+    const body = (parsed && typeof parsed === 'object' ? parsed : {}) as {
+      launchToken?: unknown
+      payload?: Record<string, unknown>
+    }
+    const token =
+      headers && typeof headers === 'object' && 'X-Orca-Agent-Hook-Token' in headers
+        ? headers['X-Orca-Agent-Hook-Token']
+        : undefined
+    return {
+      url: call[0],
+      token,
+      launchToken: body.launchToken,
+      payload: body.payload ?? {}
+    }
+  })
 }
 
 const OMP_RUNTIME_CASES = [
@@ -151,4 +186,135 @@ describe('OMP agent_end contract', () => {
       vi.useRealTimers()
     }
   })
+})
+
+describe('OMP root session readiness', () => {
+  it('posts readiness for an idle main session without a transcript or prompt', async () => {
+    const harness = createAgentStatusExtensionHarness({ kind: 'omp' })
+    const root = {
+      agent: { kind: 'main' as const },
+      sessionManager: {
+        getSessionId: () => 'root-session-1',
+        getSessionFile: () => undefined
+      }
+    }
+
+    await harness.callHook('session_start', {}, root)
+
+    await vi.waitFor(() => {
+      expect(authenticatedPosts(harness.fetchMock.mock.calls)).toContainEqual(
+        expect.objectContaining({
+          url: 'http://127.0.0.1:4321/hook/omp',
+          token: 'token-1',
+          launchToken: 'launch-1',
+          payload: expect.objectContaining({
+            hook_event_name: 'session_start',
+            root_session_ready: true,
+            root_session_id: 'root-session-1',
+            status_owner_module: harness.statusOwnerModule
+          })
+        })
+      )
+    })
+  })
+
+  it('does not emit readiness from a depth-zero sub session', async () => {
+    const harness = createAgentStatusExtensionHarness({ kind: 'omp' })
+    const child = {
+      agent: { kind: 'sub' as const },
+      sessionManager: {
+        getSessionId: () => 'child-session-1',
+        getSessionFile: () => undefined
+      }
+    }
+
+    await harness.callHook('session_start', {}, child)
+    for (let i = 0; i < 10; i++) {
+      await Promise.resolve()
+    }
+
+    expect(
+      authenticatedPosts(harness.fetchMock.mock.calls).some(
+        (post) =>
+          post.payload.root_session_ready === true ||
+          'root_session_id' in post.payload ||
+          'status_owner_module' in post.payload
+      )
+    ).toBe(false)
+  })
+
+  it('keeps readiness on the snapshot that replaces an undelivered startup post', async () => {
+    const first = Promise.withResolvers<{ ok: boolean }>()
+    let calls = 0
+    const harness = createAgentStatusExtensionHarness({
+      kind: 'omp',
+      fetchImpl: () => {
+        calls += 1
+        return calls === 1 ? first.promise : Promise.resolve({ ok: true })
+      }
+    })
+    const root = {
+      agent: { kind: 'main' as const },
+      sessionManager: {
+        getSessionId: () => 'root-session-1',
+        getSessionFile: () => undefined
+      }
+    }
+    await harness.callHook('session_start', {}, root)
+    await harness.callHook('agent_start', {}, root)
+    first.resolve({ ok: true })
+    await vi.waitFor(() => {
+      const posts = authenticatedPosts(harness.fetchMock.mock.calls)
+      expect(posts.length).toBeGreaterThan(1)
+      expect(posts.at(-1)?.payload).toEqual(
+        expect.objectContaining({
+          hook_event_name: 'agent_start',
+          root_session_ready: true,
+          root_session_id: 'root-session-1',
+          status_owner_module: harness.statusOwnerModule
+        })
+      )
+    })
+  })
+
+  it.each(['first', 'second'] as const)(
+    'keeps one readiness receipt when the %s copy binds',
+    async (winner) => {
+      const harness = createAgentStatusExtensionHarness({
+        kind: 'omp',
+        deferRegistration: winner === 'second'
+      })
+      const peerFilename = '/tmp/orca-status-other/orca-agent-status.ts'
+      const peer =
+        winner === 'first'
+          ? null
+          : harness.bindPeer(getPiAgentStatusExtensionSource('omp'), peerFilename)
+      if (winner === 'second') {
+        harness.activate()
+      }
+      const later =
+        winner === 'first'
+          ? harness.bindPeer(getPiAgentStatusExtensionSource('omp'), peerFilename)
+          : harness
+      const root = {
+        agent: { kind: 'main' as const },
+        sessionManager: {
+          getSessionId: () => 'root-session-1',
+          getSessionFile: () => undefined
+        }
+      }
+      await (peer ?? harness).callHook('session_start', {}, root)
+      await later.callHook('session_start', {}, root)
+      await vi.waitFor(() => expect(harness.fetchMock).toHaveBeenCalledTimes(1))
+      expect(authenticatedPosts(harness.fetchMock.mock.calls)[0]?.payload).toEqual(
+        expect.objectContaining({
+          root_session_ready: true,
+          root_session_id: 'root-session-1',
+          status_owner_module:
+            winner === 'first' ? harness.statusOwnerModule : resolveStatusModule(peerFilename)
+        })
+      )
+      expect(later.handlers.session_start).toBeUndefined()
+    }
+  )
 })

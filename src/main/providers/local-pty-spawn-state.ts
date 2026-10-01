@@ -6,6 +6,7 @@ import {
   ptyWslDistroById,
   type PendingLocalPtySpawn
 } from './local-pty-provider-state'
+import { noteLocalPtyActivity } from './local-pty-activity'
 
 const spawnReservations = new Map<string, Promise<unknown>>()
 
@@ -64,6 +65,7 @@ export function reattachLocalPty(id: string, cols: number, rows: number): PtySpa
   if (!existing) {
     return null
   }
+  noteLocalPtyActivity(id, 'bind')
   let resized = false
   try {
     existing.resize(cols, rows)

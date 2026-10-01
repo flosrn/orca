@@ -2,7 +2,13 @@ import { paneIdentity } from './runtime-terminal-pane-identity'
 import type { CreateWorktreeResult } from '../../shared/worktree/create-types'
 import type { Repo } from '../../shared/repo-types'
 import { getSetupRunnerCommandPlatformForPath } from '../../shared/setup-runner-command'
-import { createSequencedSetupAgentCommands } from '../../shared/setup-agent-sequencing'
+import {
+  createSequencedSetupAgentCommands,
+  createSetupAgentSequenceNonce
+} from '../../shared/setup-agent-sequencing'
+import { getRepoExecutionHostId } from '../../shared/execution-host'
+import { preparationSpawnIntake } from '../../shared/preparation-contracts'
+import type { Worktree } from '../../shared/worktree/types'
 import type { RuntimeStore } from './runtime-store-contract'
 import type { TerminalCreateOptions } from './runtime-terminal-contracts'
 import type { WorktreeTerminalProvisioningArgs } from './runtime-worktree-terminal-provisioning'
@@ -48,6 +54,10 @@ type Dependencies = {
   invalidateResolvedWorktrees(): void
   invalidateWorktreeScan(repoId: string): void
   notifyWorktreesChanged(repoId: string): void
+  registerPreparation(
+    worktree: Pick<Worktree, 'id' | 'hostId' | 'instanceId'>,
+    setup: CreateWorktreeResult['setup']
+  ): CreateWorktreeResult['setup']
 }
 
 function setupPlatform(setup: CreateWorktreeResult['setup']): 'windows' | 'posix' {
@@ -67,7 +77,16 @@ export async function createRuntimeRemoteManagedWorktree(
     throw new Error('runtime_unavailable')
   }
 
-  const result = await requestRuntimeRemoteWorktree(repo, args, deps.store)
+  const requested = await requestRuntimeRemoteWorktree(repo, args, deps.store)
+  // Why: registered before any terminal spawns so every runner of this setup carries one identity.
+  const registeredSetup = deps.registerPreparation(
+    {
+      ...requested.worktree,
+      hostId: requested.worktree.hostId ?? getRepoExecutionHostId(repo)
+    },
+    requested.setup
+  )
+  const result = registeredSetup ? { ...requested, setup: registeredSetup } : requested
 
   deps.invalidateResolvedWorktrees()
   deps.invalidateWorktreeScan(repo.id)
@@ -87,13 +106,16 @@ export async function createRuntimeRemoteManagedWorktree(
 
   let sequencedStartup = args.startup
   let wrappedSetupCommandStr: string | undefined
+  let wrappedSetupCompletionToken: string | undefined
   if (args.startup && result.setup?.waitForAgentStartup === true) {
     const platform = setupPlatform(result.setup)
+    const nonce = createSetupAgentSequenceNonce()
     const sequenced = createSequencedSetupAgentCommands({
       runnerScriptPath: result.setup.runnerScriptPath,
       startupCommand: args.startup.command,
       platform,
-      shell: result.setup.shell
+      shell: result.setup.shell,
+      nonce
     })
     sequencedStartup = {
       ...args.startup,
@@ -101,6 +123,7 @@ export async function createRuntimeRemoteManagedWorktree(
       ...(sequenced.startupEnv ? { env: { ...args.startup.env, ...sequenced.startupEnv } } : {})
     }
     wrappedSetupCommandStr = sequenced.setupCommand
+    wrappedSetupCompletionToken = nonce
   }
 
   if (sequencedStartup && deps.canSpawn()) {
@@ -122,7 +145,8 @@ export async function createRuntimeRemoteManagedWorktree(
         ...(sequencedStartup.viewMode ? { viewMode: sequencedStartup.viewMode } : {}),
         startupCommandDelivery: sequencedStartup.startupCommandDelivery,
         telemetry: sequencedStartup.telemetry,
-        ...ownerSurfacing(shouldActivate)
+        ...ownerSurfacing(shouldActivate),
+        ...preparationSpawnIntake(result.setup?.preparation, 'agent')
       })
       if (args.startupDraftPaste) {
         deps.pasteDraft(terminal.handle, args.startupDraftPaste)
@@ -162,7 +186,9 @@ export async function createRuntimeRemoteManagedWorktree(
         observeSetupCompletion: args.observeSetupCompletion,
         // Why: carry the wait-for-agent wrapped setup command (#6298) so the
         // remote Setup tab runs the same script the sequenced agent waits on.
-        ...(wrappedSetupCommandStr ? { wrappedSetupCommand: wrappedSetupCommandStr } : {})
+        ...(wrappedSetupCommandStr
+          ? { wrappedSetupCommand: wrappedSetupCommandStr, wrappedSetupCompletionToken }
+          : {})
       })
       didSpawnSetup = provisioned.setupSpawned
       setupTerminalHandle = provisioned.setupTerminalHandle
@@ -210,7 +236,9 @@ export async function createRuntimeRemoteManagedWorktree(
       hasStartupTerminal: didSpawnStartup,
       setupCommandPlatform: setupPlatform(result.setup),
       observeSetupCompletion: args.observeSetupCompletion,
-      ...(wrappedSetupCommandStr ? { wrappedSetupCommand: wrappedSetupCommandStr } : {}),
+      ...(wrappedSetupCommandStr
+        ? { wrappedSetupCommand: wrappedSetupCommandStr, wrappedSetupCompletionToken }
+        : {}),
       surfaceOwner: false
     })
     // Why: runtime owns setup spawning here, so omit setup from the RPC result

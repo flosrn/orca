@@ -92,7 +92,8 @@ describe('OrcaRuntimeService', () => {
         envVars: {
           ORCA_ROOT_PATH: '/tmp/repo',
           ORCA_WORKTREE_PATH: '/tmp/workspaces/runtime-hook-test'
-        }
+        },
+        preparation: { preparationId: expect.any(String) }
       }
     })
     expect(activateWorktree).toHaveBeenCalledWith(
@@ -333,7 +334,9 @@ describe('OrcaRuntimeService', () => {
       2,
       expect.objectContaining({
         cwd: '/tmp/workspaces/runtime-hook-skip',
-        command: 'bash /tmp/repo/.git/orca/setup-runner.sh',
+        command: expect.stringMatching(
+          /^bash -lc '\( bash \/tmp\/repo\/\.git\/orca\/setup-runner\.sh \); status=\$\?; printf '\\''\\n__ORCA_SETUP_COMPLETE__:[0-9a-f-]+:%s\\n'\\'' "\$status"; exit "\$status"'$/
+        ),
         // Why: createTerminal stamps ORCA_PANE_KEY/TAB_ID/WORKTREE_ID so hook-based agent status can attribute events to a stable pane.
         env: expect.objectContaining({
           ORCA_ROOT_PATH: '/tmp/repo',
@@ -427,7 +430,9 @@ describe('OrcaRuntimeService', () => {
     expect(spawn).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        command: 'bash /mnt/c/repo/.git/orca/setup-runner.sh',
+        command: expect.stringMatching(
+          /^bash -lc '\( bash \/mnt\/c\/repo\/\.git\/orca\/setup-runner\.sh \); status=\$\?; printf '\\''\\n__ORCA_SETUP_COMPLETE__:[0-9a-f-]+:%s\\n'\\'' "\$status"; exit "\$status"'$/
+        ),
         env: expect.objectContaining({
           ORCA_ROOT_PATH: 'C:\\repo',
           ORCA_WORKTREE_PATH: 'C:\\workspaces\\runtime-hook-wsl',
@@ -520,7 +525,9 @@ describe('OrcaRuntimeService', () => {
     expect(spawn).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        command: 'bash /c/repo/.git/orca/setup-runner.sh',
+        command: expect.stringMatching(
+          /^bash -lc '\( bash \/c\/repo\/\.git\/orca\/setup-runner\.sh \); status=\$\?; printf '\\''\\n__ORCA_SETUP_COMPLETE__:[0-9a-f-]+:%s\\n'\\'' "\$status"; exit "\$status"'$/
+        ),
         worktreeId: result.worktree.id
       })
     )

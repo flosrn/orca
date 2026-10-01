@@ -168,6 +168,7 @@ describe('registerWorktreeHandlers – Windows path handling', () => {
     getProjectHostSetups: vi.fn(),
     getSettings: vi.fn(),
     getWorktreeMeta: vi.fn(),
+    getWorktreeMetaForHost: vi.fn(),
     getAllWorktreeMeta: vi.fn(),
     captureNativeLocalWorktreeMetadataScanExpectation: vi.fn(),
     setWorktreeMeta: vi.fn(),
@@ -311,7 +312,8 @@ describe('registerWorktreeHandlers – Windows path handling', () => {
       closeFileWatchersForRemoval: vi.fn().mockResolvedValue(undefined),
       acquireFileWatcherRemoval: vi.fn().mockResolvedValue({
         finish: vi.fn().mockResolvedValue(undefined)
-      })
+      }),
+      registerWorktreePreparation: vi.fn((_worktree: unknown, setup: unknown) => setup)
     }
     registerWorktreeHandlers(mainWindow as never, store as never, runtimeStub as never)
   })

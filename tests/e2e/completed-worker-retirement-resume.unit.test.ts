@@ -11,10 +11,8 @@ import { OrcaRuntimeService } from '../../src/main/runtime/orca-runtime'
 import type { RpcContext } from '../../src/main/runtime/rpc/core'
 import { ORCHESTRATION_METHODS } from '../../src/main/runtime/rpc/methods/orchestration'
 import { closeTerminalTab } from '@/components/terminal/terminal-tab-actions'
-import {
-  resolveLegacyWorkerTerminalRecoveryAction,
-  rollbackLegacyWorkerTerminalSurfaceInStore
-} from '@/hooks/legacy-worker-terminal-recovery-event'
+import { resolveLegacyWorkerTerminalRecoveryAction } from '@/hooks/legacy-worker-terminal-recovery-event'
+import { retireTerminalSurfaceInStore } from '@/hooks/retire-terminal-surface-in-store'
 import { useAppStore, type AppState } from '@/store'
 import { buildWorkspaceSessionPayload } from '@/lib/workspace-session'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
@@ -456,9 +454,9 @@ describe('completed background-worker retirement resume matrix', () => {
     })
     expect(legacyAction.kind).toBe('rollback-surface')
     if (legacyAction.kind === 'rollback-surface') {
-      expect(
-        rollbackLegacyWorkerTerminalSurfaceInStore(useAppStore.getState(), legacyAction.detail)
-      ).toBe('removed')
+      expect(retireTerminalSurfaceInStore(useAppStore.getState(), legacyAction.detail)).toBe(
+        'removed'
+      )
     }
     expect(useAppStore.getState().sleepingAgentSessionsByPaneKey[ORIGINAL_PANE_KEY]).toMatchObject({
       state: 'done'

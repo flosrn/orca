@@ -17,6 +17,7 @@ import type { TerminalViewAttributes } from '../../shared/terminal-view-attribut
 import type { TuiAgent } from '../../shared/tui-agent'
 import type { PtyManagementApi } from './pty-management-api'
 import type { TerminalProcessInspection } from '../../shared/terminal-process-inspection'
+import type { PreparationSpawnIntake } from '../../shared/preparation-contracts'
 
 export type PtyApi = {
   spawn: (opts: {
@@ -50,6 +51,8 @@ export type PtyApi = {
     replacesPtyId?: string
     // Why: main fires `agent_started` only on spawn success, so launch metadata rides this field (telemetry-plan.md §Agent launch semantics).
     telemetry?: { agent_kind: AgentKind; launch_source: LaunchSource; request_kind: RequestKind }
+    // Why: the first spawn of a preparation pane binds that exact incarnation to its registration.
+    preparation?: PreparationSpawnIntake
   }) => Promise<{
     id: string
     /** Which lifetime of `id` this reply named; absent when the execution host predates the field. */

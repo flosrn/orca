@@ -16,6 +16,11 @@ import { agentHookServer, _internals as agentHookInternals } from '../agent-hook
 import { getSshPtyProvider } from '../ipc/pty'
 import { toAppSshPtyId } from '../providers/ssh-pty-id'
 import { DEFAULT_PTY_SOURCE_WINDOW_SU } from '../../shared/pty-source-credit-contract'
+import {
+  preparationFacts,
+  registerPreparationAgent,
+  resetPreparationObservationsForTests
+} from '../runtime/preparation/preparation-observation'
 
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
@@ -575,6 +580,48 @@ describe('SshRelaySession agent hooks over a fake relay transport', () => {
         lastAssistantMessage: 'partial answer'
       })
     )
+  })
+
+  it('carries the OMP root readiness receipt from the relay into preparation takeover', async () => {
+    relay = createFakeRelay()
+    vi.mocked(deployAndLaunchRelay).mockResolvedValue({
+      transport: relay.transport,
+      serverBuildId: 'test-relay-build',
+      platform: 'linux-x64'
+    })
+    resetPreparationObservationsForTests()
+    const paneKey = `tab-ssh:${SSH_LEAF_ID}`
+    registerPreparationAgent({
+      preparationId: 'prep-ssh',
+      paneKey,
+      launchToken: 'launch-ssh',
+      incarnationId: 'inc-ssh',
+      ptyId: 'pty-ssh'
+    })
+    session = createSession('conn-readiness')
+    await session.establish({} as SshConnection)
+
+    relay.notifyAgentHook(
+      makeEnvelope({
+        source: 'omp',
+        launchToken: 'launch-ssh',
+        hookEventName: 'session_start',
+        rootReadiness: {
+          root_session_ready: true,
+          root_session_id: 'root-ssh',
+          status_owner_module: '/remote/managed/orca-agent-status.ts'
+        }
+      })
+    )
+
+    await vi.waitFor(() =>
+      expect(preparationFacts('prep-ssh').takeover).toMatchObject({
+        rootSessionId: 'root-ssh',
+        statusOwnerModule: '/remote/managed/orca-agent-status.ts',
+        incarnationId: 'inc-ssh'
+      })
+    )
+    resetPreparationObservationsForTests()
   })
 
   it('forwards remote hook transition metadata into main ingest', async () => {

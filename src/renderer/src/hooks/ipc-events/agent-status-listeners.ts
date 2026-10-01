@@ -3,10 +3,8 @@ import type {
   AgentStatusClearIpcPayload,
   AgentStatusIpcPayload
 } from '../../../../shared/agent-status-types'
-import {
-  resolveLegacyWorkerTerminalRecoveryAction,
-  rollbackLegacyWorkerTerminalSurfaceInStore
-} from '../legacy-worker-terminal-recovery-event'
+import { resolveLegacyWorkerTerminalRecoveryAction } from '../legacy-worker-terminal-recovery-event'
+import { retireTerminalSurfaceInStore } from '../retire-terminal-surface-in-store'
 import { useAppStore } from '../../store'
 import { resolvePaneKey } from './agent-status-routing'
 import type { PendingAgentStatusEvent } from './agent-status-bridge-types'
@@ -118,7 +116,7 @@ export function registerAgentStatusListeners(args: {
       const action = resolveLegacyWorkerTerminalRecoveryAction(event)
       if (action.kind === 'rollback-surface') {
         window.dispatchEvent(new CustomEvent(CLOSE_TERMINAL_PANE_EVENT, { detail: action.detail }))
-        rollbackLegacyWorkerTerminalSurfaceInStore(useAppStore.getState(), action.detail)
+        retireTerminalSurfaceInStore(useAppStore.getState(), action.detail)
       } else if (action.kind === 'clear-sleeping') {
         useAppStore.getState().clearSleepingAgentSession(action.paneKey)
       }

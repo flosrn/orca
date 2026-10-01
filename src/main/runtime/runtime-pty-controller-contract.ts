@@ -12,6 +12,11 @@ import type { ExecutionHostId } from '../../shared/execution-host'
 import type { PtyProviderBufferSnapshot, PtyProcessInfo, PtySpawnResult } from '../providers/types'
 import type { PtyProcessInspection } from '../providers/pty-process-inspection'
 import type { WriteSettlement } from '../../shared/pty-write-settlement'
+import type { PreparationSpawnIntake } from '../../shared/preparation-contracts'
+import type {
+  PtyIdleRetirementRequest,
+  PtyIdleRetirementResult
+} from '../../shared/pty-idle-retirement'
 
 export type RuntimePtyController = {
   claimStablePaneCreate?(args: {
@@ -74,6 +79,8 @@ export type RuntimePtyController = {
     agentSessionCreateOperationId?: string
     signal?: AbortSignal
     onPtySpawnCommitted?: () => void
+    /** Reserved preparation role, known before the provider can emit its first byte. */
+    preparation?: PreparationSpawnIntake
     adoptedStablePane?: {
       result: PtySpawnResult
       owner: {
@@ -106,6 +113,11 @@ export type RuntimePtyController = {
     ptyId: string,
     opts?: { keepHistory?: boolean; deadlineMs?: number }
   ): Promise<boolean>
+  /** Automatic-cleanup stop enforced by the owning provider/host. Only `stopped` and `exited`
+   *  settle the PTY as gone; `retained` leaves it untouched, and `unconfirmed` must keep the pane. */
+  retireIdle?(ptyId: string, request: PtyIdleRetirementRequest): Promise<PtyIdleRetirementResult>
+  /** Monotonic count of input written to this PTY through every main-process route. */
+  inputRevision?(ptyId: string): number
   markReversibleStops?(ptyIds: readonly string[]): () => void
   getCwd?(ptyId: string): Promise<string | null>
   getForegroundProcess(ptyId: string): Promise<string | null>

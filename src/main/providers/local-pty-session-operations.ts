@@ -22,6 +22,7 @@ import {
   type ExitCallback
 } from './local-pty-provider-state'
 import type { LocalPtyProviderOptions } from './local-pty-provider-types'
+import { noteLocalPtyActivity } from './local-pty-activity'
 import type { PtyProcessInfo } from './types'
 
 export function writeLocalPty(id: string, data: string): boolean {
@@ -34,6 +35,7 @@ export function writeLocalPty(id: string, data: string): boolean {
   if (!proc) {
     return false
   }
+  noteLocalPtyActivity(id, 'input')
   proc.write(data)
   return true
 }
